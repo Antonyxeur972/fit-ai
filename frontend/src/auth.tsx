@@ -15,6 +15,7 @@ export type AppUser = {
 type AuthCtx = {
   user: AppUser | null;
   loading: boolean;
+  authError: string | null;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -26,6 +27,7 @@ const AuthContext = createContext<AuthCtx | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const refreshUser = useCallback(async () => {
     try {
@@ -42,25 +44,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Process session_id from redirect URL
+  // Process session_id from redirect URL: hand it straight to backend (one-shot).
   const processSessionId = useCallback(async (sessionId: string) => {
     try {
-      const r = await fetch("https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data", {
-        headers: { "X-Session-ID": sessionId },
-      });
-      if (!r.ok) throw new Error("Session lookup failed");
-      const data = await r.json();
-      const sessionToken = data.session_token;
-      // Hand off to backend
+      setAuthError(null);
       const resp = await api<{ session_token: string; user: AppUser }>("/auth/session", {
         method: "POST",
-        body: { session_token: sessionToken },
+        body: { session_id: sessionId },
         auth: false,
       });
       await setToken(resp.session_token);
       setUser(resp.user);
-    } catch (e) {
+    } catch (e: any) {
       console.warn("processSessionId failed", e);
+      setAuthError(e?.message || "Connexion échouée. Réessaie.");
     }
   }, []);
 
@@ -133,7 +130,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, signInWithGoogle, signOut, refreshUser, setUser }}>
+    <AuthContext.Provider value={{ user, loading, authError, signInWithGoogle, signOut, refreshUser, setUser }}>
       {children}
     </AuthContext.Provider>
   );

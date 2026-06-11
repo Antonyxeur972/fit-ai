@@ -80,7 +80,7 @@ async def get_current_user(authorization: Optional[str]) -> dict:
 
 # --- Models ---
 class SessionLoginRequest(BaseModel):
-    session_token: str
+    session_id: str
 
 
 class AuthMeResponse(BaseModel):
@@ -370,8 +370,8 @@ async def analyze_transformation_with_claude(image_base64: str, prev_image_base6
 # --- AUTH ---
 @api.post("/auth/session")
 async def auth_session(body: SessionLoginRequest):
-    """Process session_token from Emergent Auth -> persist session locally"""
-    headers = {"X-Session-ID": body.session_token}
+    """Exchange session_id from Emergent Auth for an app session (one-shot call)."""
+    headers = {"X-Session-ID": body.session_id}
     async with httpx.AsyncClient(timeout=15.0) as cli:
         try:
             r = await cli.get(
@@ -379,8 +379,10 @@ async def auth_session(body: SessionLoginRequest):
                 headers=headers,
             )
         except httpx.HTTPError as e:
+            log.exception("Auth provider error")
             raise HTTPException(status_code=502, detail=f"Auth provider error: {e}")
     if r.status_code != 200:
+        log.warning("Emergent auth lookup failed: %s %s", r.status_code, r.text[:200])
         raise HTTPException(status_code=401, detail="Invalid session_id")
     data = r.json()
     email = data["email"]

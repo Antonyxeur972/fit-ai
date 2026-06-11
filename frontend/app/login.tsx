@@ -1,20 +1,36 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { View, Text, StyleSheet, Image } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { useAuth } from "@/src/auth";
 import { Button } from "@/src/components/UI";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 export default function Login() {
-  const { signInWithGoogle } = useAuth();
+  const router = useRouter();
+  const { signInWithGoogle, user, loading: authLoading, authError } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const displayError = error || authError;
+
+  // If sign-in succeeded (user set by deep-link processing), route to next screen.
+  useEffect(() => {
+    if (authLoading) return;
+    if (user) {
+      router.replace(user.onboarded ? "/(tabs)/dashboard" : "/onboarding");
+    }
+  }, [user, authLoading, router]);
 
   const onSignIn = async () => {
     setLoading(true);
+    setError(null);
     try {
       await signInWithGoogle();
+    } catch (e: any) {
+      setError(e?.message || "Échec de la connexion");
     } finally {
       setLoading(false);
     }
@@ -51,10 +67,17 @@ export default function Login() {
 
         <View style={{ flex: 1 }} />
 
+        {displayError && (
+          <View style={styles.errorBox} testID="login-error">
+            <Ionicons name="alert-circle-outline" size={16} color={colors.alert} />
+            <Text style={[typography.small, { color: colors.alert, flex: 1 }]}>{displayError}</Text>
+          </View>
+        )}
+
         <Button
           title="Continuer avec Google"
           onPress={onSignIn}
-          loading={loading}
+          loading={loading || authLoading}
           testID="login-google-button"
           icon={<Ionicons name="logo-google" size={18} color="#fff" />}
         />
@@ -93,5 +116,10 @@ const styles = StyleSheet.create({
   previewLabel: { ...typography.caption },
   previewValue: { fontSize: 24, fontWeight: "700", color: colors.textMain, marginTop: 4 },
   previewUnit: { fontSize: 14, color: colors.textSecondary, fontWeight: "500" },
+  errorBox: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    backgroundColor: "#FEF2F2", padding: spacing.md, borderRadius: radius.md,
+    marginBottom: spacing.sm,
+  },
   terms: { ...typography.small, color: colors.textMuted, textAlign: "center", marginTop: spacing.md, paddingHorizontal: spacing.md },
 });
