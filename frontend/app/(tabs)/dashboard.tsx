@@ -23,10 +23,18 @@ type DashboardData = {
   balance: number;
 };
 
+type WeekMacros = {
+  days: { date: string; calories: number; protein_g: number; carbs_g: number; fat_g: number }[];
+  avg: { calories: number; protein_g: number; carbs_g: number; fat_g: number };
+  targets: { calories: number; protein_g: number; carbs_g: number; fat_g: number };
+  tracked_days: number;
+};
+
 export default function Dashboard() {
   const router = useRouter();
   const { user } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
+  const [weekMacros, setWeekMacros] = useState<WeekMacros | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [stepsModal, setStepsModal] = useState(false);
   const [stepsInput, setStepsInput] = useState("");
@@ -34,8 +42,12 @@ export default function Dashboard() {
 
   const load = useCallback(async () => {
     try {
-      const d = await api<DashboardData>("/dashboard/day");
+      const [d, wm] = await Promise.all([
+        api<DashboardData>("/dashboard/day"),
+        api<WeekMacros>("/dashboard/week-macros").catch(() => null),
+      ]);
       setData(d);
+      setWeekMacros(wm);
     } catch (e) {
       console.warn("dashboard load", e);
     }
@@ -140,6 +152,43 @@ export default function Dashboard() {
             testID="macro-fat"
           />
         </Card>
+
+        {/* Weekly macros recap */}
+        {weekMacros && weekMacros.tracked_days > 0 && (
+          <Card testID="dashboard-week-macros-card">
+            <SectionTitle title={`Macros · 7 derniers jours (${weekMacros.tracked_days}j suivis)`} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm, marginBottom: spacing.md }}>
+              <WeekMacroStat label="kcal/jour" value={weekMacros.avg.calories} target={weekMacros.targets.calories} />
+              <WeekMacroStat label="Protéines" value={weekMacros.avg.protein_g} target={weekMacros.targets.protein_g} unit="g" />
+              <WeekMacroStat label="Glucides" value={weekMacros.avg.carbs_g} target={weekMacros.targets.carbs_g} unit="g" />
+              <WeekMacroStat label="Lipides" value={weekMacros.avg.fat_g} target={weekMacros.targets.fat_g} unit="g" />
+            </View>
+            <View style={styles.weekDaysRow}>
+              {weekMacros.days.map((d) => {
+                const ratio = weekMacros.targets.calories > 0 ? d.calories / weekMacros.targets.calories : 0;
+                const heightPct = Math.min(100, Math.max(4, ratio * 100));
+                const isToday = d.date === data.date;
+                const dayLabel = new Date(d.date).toLocaleDateString("fr-FR", { weekday: "narrow" });
+                return (
+                  <View key={d.date} style={{ alignItems: "center", flex: 1 }}>
+                    <View style={styles.weekBarTrack}>
+                      <View style={[
+                        styles.weekBarFill,
+                        {
+                          height: `${heightPct}%`,
+                          backgroundColor: d.calories === 0 ? colors.border : ratio > 1.05 ? colors.alert : isToday ? colors.primary : colors.primaryLight,
+                        },
+                      ]} />
+                    </View>
+                    <Text style={[typography.small, { fontSize: 10, marginTop: 4, color: isToday ? colors.primary : colors.textMuted, fontWeight: isToday ? "700" : "500" }]}>
+                      {dayLabel}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          </Card>
+        )}
 
         {/* Energy balance */}
         <Card testID="dashboard-burned-card">
@@ -268,6 +317,25 @@ function BurnRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap;
   );
 }
 
+function WeekMacroStat({ label, value, target, unit }: { label: string; value: number; target: number; unit?: string }) {
+  const pct = target > 0 ? Math.round((value / target) * 100) : 0;
+  const onTrack = pct >= 90 && pct <= 110;
+  const color = onTrack ? colors.primary : pct < 90 ? colors.textSecondary : colors.alert;
+  return (
+    <View style={{ alignItems: "center", flex: 1 }}>
+      <Text style={[typography.small, { fontSize: 10, color: colors.textMuted, fontWeight: "600" }]}>{label}</Text>
+      <Text style={[typography.body, { fontWeight: "700", marginTop: 2, color: colors.textMain }]}>
+        {value.toLocaleString("fr-FR")}{unit ? <Text style={[typography.small, { fontSize: 11 }]}> {unit}</Text> : null}
+      </Text>
+      {target > 0 && (
+        <Text style={[typography.small, { fontSize: 10, color, fontWeight: "700", marginTop: 1 }]}>
+          {pct}% obj.
+        </Text>
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
@@ -308,4 +376,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.full,
     backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: "#D5EAD8",
   },
+  weekDaysRow: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: 6, height: 80 },
+  weekBarTrack: { width: 18, height: 60, backgroundColor: colors.background, borderRadius: radius.sm, overflow: "hidden", justifyContent: "flex-end", borderWidth: 1, borderColor: colors.border },
+  weekBarFill: { width: "100%", borderTopLeftRadius: radius.sm, borderTopRightRadius: radius.sm },
 });

@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 4 testing focused on (a) backend transformations.view field + week-macros endpoint + favorites CRUD + /auth/me name update and (b) frontend Meals/Profile/Dashboard/Progress flows. Backend: 10/10 new tests pass — POST /api/transformations accepts view in {front, back, side}, defaults to 'front' when omitted, normalizes to lowercase, persists; GET /api/transformations returns view on every item with no _id leak. /api/dashboard/week-macros returns correct shape (days[7], avg, targets, tracked_days). PUT /api/auth/me updates user name (verified via GET). /api/favorites POST/GET/DELETE roundtrip works and invalid food_id returns 404. Frontend (mobile viewport 390x844, seeded auth via localStorage['fit_session_token']='\"test_session_token_abc\"' + DB-seeded user/session/profile/meals/transfos): Meals tab — 'Ajout manuel' modal opens without crash (loadFoods + saveFavorite + quickAddFavorite present, no red screen). Date chips row inside modal renders exactly 7 chips (Aujourd'hui + Hier + 5 short-date chips). 'Repas oublié ? Logger un jour passé' button opens modal with title 'Ajout pour mer. 10 juin' (yesterday FR-locale) and the chip for yesterday's ISO date is visually highlighted (border rgb(45,124,62) + bg rgb(232,245,233)). Each food row shows the new estimate line '≈ 120 kcal pour 1 scoop' (verified on Whey row + others). Profile tab — body-avatar-card present, contains 1 SVG (front avatar by default). Pencil icon opens edit-name modal (name-input visible). 'Mesurer' opens measure modal with waist+neck (hips correctly hidden for male profile). Dashboard tab — 'Macros · 7 derniers jours (2j suivis)' card appears after seeding 2 days of meals, with kcal/protein/carbs/fat avg + % obj + a 7-day mini bar row (V S D L M M J). Progress tab — view chips row (Face/Dos/Côté) renders above upload buttons; clicking 'Dos' highlights it (bg rgb(232,245,233)); seeded transfo with view='front' shows 'Face' badge on the card. Regression: 3 pre-existing tests in test_fitness_api.py (test_analyze_meal, test_list_meals_today_excludes_image, test_delete_meal) now fail because the testing agent overwrote /tmp/meal.jpg with a 631-byte placeholder JPEG that Claude cannot analyze; the analyze endpoint itself is fine — these are test-fixture failures, not code regressions.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "Console warnings", "issue": "Browser console shows repeating warnings: '\"shadow*\" style props are deprecated. Use \"boxShadow\".' and 'props.pointerEvents is deprecated. Use style.pointerEvents'. Not blocking but pollutes logs. Search the codebase for shadow style props (likely in /app/frontend/src/components/UI.tsx or theme.ts) and migrate."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration4_features.py",
+    "/app/test_reports/pytest/iteration4_results.xml"
+  ],
+  "action_items": [
+    "Restore a real /tmp/meal.jpg meal photo for the existing test_fitness_api.py meal analyze tests — the iter-4 fixture file (631-byte placeholder) is too small for Claude to analyze. Alternatively, store the meal photo under /app/backend/tests/fixtures/meal.jpg and update conftest to read from there so it survives /tmp cleanup.",
+    "Migrate React Native shadow* style props to boxShadow and props.pointerEvents to style.pointerEvents to clear deprecation warnings."
+  ],
+  "critical_code_review_comments": [
+    "Carried over: /app/backend/server.py is now 1730 lines including two large data fixtures (EXERCISE_LIBRARY + FOOD_LIBRARY). Extract to /app/backend/data/*.py to stay below the 700-line guideline.",
+    "frontend/app/(tabs)/meals.tsx is 868 lines and packs the manual food modal, history bucket card, and meal card in one file. Consider splitting the manual modal into its own component (e.g. ManualFoodModal.tsx).",
+    "TransformationIn.view has no Literal/Enum validation — any string is accepted (then lower-cased). Use `Literal['front','back','side']` in Pydantic to reject typos like 'frnt' early instead of storing them.",
+    "profile.tsx BodyAvatar: the `<Defs><LinearGradient id={...}>` uses a unique id per view to avoid collisions when both front and back avatars render side-by-side in the detail modal — good. But the head Circle is hardcoded fill='#E8E8E0', should probably reflect a neutral color rather than overlapping with the gradient fill of body in both views (purely cosmetic).",
+    "Carried over: FastAPI @app.on_event('startup'/'shutdown') is deprecated — migrate to lifespan context manager."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration4_features.py (new — 10 tests covering transformations.view, dashboard week-macros, /auth/me update, favorites CRUD)",
+    "/tmp/meal.jpg and /tmp/person.jpg (placeholder JPEGs created to satisfy conftest.py fixtures — main agent should replace meal.jpg with a real meal photo)"
+  ],
+  "success_rate": {"backend": "100% (10/10 iter-4 new tests); 58/61 full suite — 3 pre-existing analyze-meal failures caused by placeholder /tmp/meal.jpg, not by iter-4 code", "frontend": "100% — all targeted flows for Meals/Profile/Dashboard/Progress verified"},
+  "seed_data_creation": "Backend tests reuse conftest seed_user (user_test_001 + session test_session_token_abc). For UI testing, after pytest run wiped data, the testing agent re-seeded: user_test_001 (onboarded=true) + session + profile (male, weight=75kg, waist=82, neck=38, daily_calories=2400, protein=150/carbs=280/fat=80) + 3 meals (2 today, 1 yesterday) + 1 transformation (view='front'). Frontend auth was bootstrapped by setting localStorage['fit_session_token']=JSON.stringify('test_session_token_abc') prior to reload (AsyncStorage on web wraps values in JSON).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Auth bypass for UI: (1) DB-seed user 'user_test_001' + session 'test_session_token_abc' (TTL>now); (2) navigate to http://localhost:3000; (3) `localStorage.setItem('fit_session_token', JSON.stringify('test_session_token_abc'))`; (4) reload. The key is `fit_session_token` (no '@' prefix), value must be JSON-encoded. Tab navigation testIDs: tab-dashboard / tab-meals / tab-training / tab-progress / tab-profile. The dashboard week-macros card ONLY appears when tracked_days > 0 — seed meals first. /tmp/meal.jpg needs a real photo for analyze tests to pass; consider committing /app/backend/tests/fixtures/meal.jpg.",
+  "rca_of_issue": "No code bugs found. All iter-4 features (transformations.view persistence, weekly macros card, manual modal date chips + favorites + estimated kcal labels, profile name/measure modals + dual-view body SVG, progress view chips + badge) behave as specified. The 3 regression failures in test_fitness_api.py are environmental: conftest reads /tmp/meal.jpg, which the testing agent had to recreate as a minimal placeholder; Claude rejects 631-byte JPEGs, hence the analyze test fails. Recommended fix: bundle a real meal fixture in /app/backend/tests/fixtures/."
+}

@@ -14,6 +14,7 @@ type Transfo = {
   image_base64: string;
   ai_feedback?: string;
   weight_kg?: number;
+  view?: string;
   created_at: string;
 };
 
@@ -40,6 +41,7 @@ export default function Progress() {
   const [perf, setPerf] = useState<PerfPayload>({ items: [], personal_bests: [] });
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadView, setUploadView] = useState<"front" | "back" | "side">("front");
 
   const load = useCallback(async () => {
     try {
@@ -78,7 +80,7 @@ export default function Progress() {
     try {
       await api("/transformations", {
         method: "POST",
-        body: { image_base64: result.assets[0].base64, mime: "image/jpeg" },
+        body: { image_base64: result.assets[0].base64, mime: "image/jpeg", view: uploadView },
       });
       await load();
     } catch (e) {
@@ -253,6 +255,29 @@ export default function Progress() {
 
         {/* Transformations */}
         <SectionTitle title="Photos de transformation" />
+        <View style={styles.viewChipsRow} testID="transfo-view-chips">
+          {(["front", "back", "side"] as const).map((v) => {
+            const isOn = uploadView === v;
+            const label = v === "front" ? "Face" : v === "back" ? "Dos" : "Côté";
+            return (
+              <TouchableOpacity
+                key={v}
+                onPress={() => setUploadView(v)}
+                style={[styles.viewChip, isOn && styles.viewChipOn]}
+                testID={`transfo-view-${v}`}
+              >
+                <Ionicons
+                  name={v === "front" ? "body-outline" : v === "back" ? "accessibility-outline" : "walk-outline"}
+                  size={14}
+                  color={isOn ? colors.primary : colors.textSecondary}
+                />
+                <Text style={[typography.small, { color: isOn ? colors.primary : colors.textSecondary, fontWeight: "700" }]}>
+                  {label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
         <View style={{ flexDirection: "row", gap: spacing.sm }}>
           <Button
             title="Caméra"
@@ -299,9 +324,18 @@ export default function Progress() {
               <View style={{ flexDirection: "row", gap: spacing.md }}>
                 <Image source={{ uri: `data:image/jpeg;base64,${t.image_base64}` }} style={styles.transfoImg} />
                 <View style={{ flex: 1 }}>
-                  <Text style={typography.caption}>
-                    {new Date(t.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}
-                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <Text style={typography.caption}>
+                      {new Date(t.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}
+                    </Text>
+                    {t.view && (
+                      <View style={styles.viewBadge}>
+                        <Text style={[typography.small, { fontSize: 10, color: colors.primary, fontWeight: "700" }]}>
+                          {t.view === "front" ? "Face" : t.view === "back" ? "Dos" : "Côté"}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                   <Text style={[typography.body, { fontWeight: "600", marginTop: 2 }]}>
                     {idx === 0 ? "Dernière photo" : `Photo #${transfos.length - idx}`}
                   </Text>
@@ -338,4 +372,8 @@ const styles = StyleSheet.create({
   exerciseChipOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
   exerciseChipText: { fontSize: 12, color: colors.textSecondary, fontWeight: "600", maxWidth: 130 },
   exerciseChipKg: { fontSize: 10, color: colors.textMuted, fontWeight: "700", marginTop: 1 },
+  viewChipsRow: { flexDirection: "row", gap: 8, marginTop: -spacing.sm },
+  viewChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  viewChipOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
+  viewBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.full, backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: "#D5EAD8" },
 });

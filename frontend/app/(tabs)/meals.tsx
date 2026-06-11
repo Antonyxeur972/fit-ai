@@ -39,6 +39,15 @@ type Food = {
   fat_g: number;
 };
 
+type Favorite = {
+  id: string;
+  food_id: string;
+  quantity: number;
+  label?: string;
+  food: Food;
+  macros_preview: { name: string; calories: number; protein_g: number; carbs_g: number; fat_g: number };
+};
+
 type ComplianceSnap = { date: string; target: number; consumed: number; compliance_pct: number; meals_count: number };
 type HistoryDay = { date: string; compliance: ComplianceSnap; meals: Meal[]; purged?: boolean };
 
@@ -81,6 +90,8 @@ export default function Meals() {
   const [manualQty, setManualQty] = useState("");
   const [manualMealType, setManualMealType] = useState<string>("snack");
   const [savingManual, setSavingManual] = useState(false);
+  const [manualDate, setManualDate] = useState<string>(""); // empty = today
+  const [favorites, setFavorites] = useState<Favorite[]>([]);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -98,6 +109,75 @@ export default function Meals() {
   }, [today]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  const loadFoods = useCallback(async () => {
+    try {
+      const [resp, favs] = await Promise.all([
+        api<{ foods: Food[] }>("/foods/library"),
+        api<Favorite[]>("/favorites").catch(() => [] as Favorite[]),
+      ]);
+      setFoods(resp.foods || []);
+      setFavorites(favs || []);
+    } catch (e) {
+      console.warn("loadFoods", e);
+    }
+  }, []);
+
+  const saveFavorite = async () => {
+    if (!selectedFood) return;
+    const qty = parseFloat(manualQty || "0");
+    if (!qty || qty <= 0) return;
+    try {
+      await api("/favorites", {
+        method: "POST",
+        body: { food_id: selectedFood.id, quantity: qty },
+      });
+      const favs = await api<Favorite[]>("/favorites").catch(() => [] as Favorite[]);
+      setFavorites(favs);
+    } catch (e) {
+      console.warn("saveFavorite", e);
+    }
+  };
+
+  const removeFavorite = async (favId: string) => {
+    try {
+      await api(`/favorites/${favId}`, { method: "DELETE" });
+      setFavorites((prev) => prev.filter((f) => f.id !== favId));
+    } catch {}
+  };
+
+  const quickAddFavorite = async (fav: Favorite) => {
+    setSavingManual(true);
+    try {
+      await api("/meals/manual", {
+        method: "POST",
+        body: {
+          food_id: fav.food_id,
+          quantity: fav.quantity,
+          meal_type: autoMealTypeFromHour(),
+          date: manualDate || undefined,
+        },
+      });
+      setManualOpen(false);
+      await load();
+    } finally {
+      setSavingManual(false);
+    }
+  };
+
+  const dateChips = useMemo(() => {
+    const out: { value: string; label: string }[] = [{ value: "", label: "Aujourd'hui" }];
+    for (let i = 1; i <= 6; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const iso = d.toISOString().slice(0, 10);
+      const label = i === 1
+        ? "Hier"
+        : d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric" });
+      out.push({ value: iso, label });
+    }
+    return out;
+  }, []);
 
   const pickImage = async (fromCamera: boolean) => {
     setError(null);
@@ -150,12 +230,13 @@ export default function Meals() {
     }
   };
 
-  const openManual = async () => {
+  const openManual = async (forDate?: string) => {
     setSelectedFood(null);
     setManualQty("");
     setManualSearch("");
     setManualCategory("Tout");
     setManualMealType(autoMealTypeFromHour());
+    setManualDate(forDate || "");
     setManualOpen(true);
     await loadFoods();
   };
@@ -168,7 +249,12 @@ export default function Meals() {
     try {
       await api("/meals/manual", {
         method: "POST",
-        body: { food_id: selectedFood.id, quantity: qty, meal_type: manualMealType },
+        body: {
+          food_id: selectedFood.id,
+          quantity: qty,
+          meal_type: manualMealType,
+          date: manualDate || undefined,
+        },
       });
       setManualOpen(false);
       await load();
@@ -270,11 +356,25 @@ export default function Meals() {
             </View>
             <Button
               title="Ajout manuel (aliment)"
-              onPress={openManual}
+              onPress={() => openManual()}
               variant="ghost"
               icon={<Ionicons name="add-circle-outline" size={18} color={colors.primary} />}
               testID="meals-manual-button"
             />
+            <TouchableOpacity
+              onPress={() => {
+                const y = new Date();
+                y.setDate(y.getDate() - 1);
+                openManual(y.toISOString().slice(0, 10));
+              }}
+              style={styles.pastBtn}
+              testID="meals-past-button"
+            >
+              <Ionicons name="calendar-outline" size={16} color={colors.textSecondary} />
+              <Text style={[typography.small, { color: colors.textSecondary, fontWeight: "600" }]}>
+                Repas oublié ? Logger un jour passé
+              </Text>
+            </TouchableOpacity>
 
             {error && (
               <View style={styles.errorBox} testID="meals-error">
@@ -386,7 +486,9 @@ export default function Meals() {
           <View style={[styles.modalCard, { maxHeight: "92%", paddingBottom: 0 }]}>
             <View style={styles.modalHandle} />
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <Text style={styles.modalTitle}>Ajouter un aliment</Text>
+              <Text style={styles.modalTitle}>
+                {manualDate && manualDate !== today ? `Ajout pour ${new Date(manualDate).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "short" })}` : "Ajouter un aliment"}
+              </Text>
               <TouchableOpacity onPress={() => setManualOpen(false)} testID="manual-close">
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
               </TouchableOpacity>
@@ -394,6 +496,60 @@ export default function Meals() {
 
             {!selectedFood ? (
               <>
+                {/* Date chips: today + last 6 days */}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={{ marginHorizontal: -spacing.lg, marginTop: spacing.sm }}
+                  contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: 6 }}
+                  testID="manual-date-chips"
+                >
+                  {dateChips.map((d) => {
+                    const isOn = (manualDate || "") === d.value;
+                    return (
+                      <TouchableOpacity
+                        key={d.value || "today"}
+                        onPress={() => setManualDate(d.value)}
+                        style={[styles.catChip, isOn && styles.catChipOn]}
+                        testID={`manual-date-${d.value || "today"}`}
+                      >
+                        <Text style={[styles.catChipText, isOn && { color: colors.primary, fontWeight: "700" }]}>
+                          {d.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+
+                {/* Favorites row */}
+                {favorites.length > 0 && (
+                  <View style={{ marginTop: spacing.sm }}>
+                    <Text style={[typography.caption, { marginBottom: 6 }]}>Mes favoris</Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={{ marginHorizontal: -spacing.lg }}
+                      contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: 8 }}
+                    >
+                      {favorites.map((fav) => (
+                        <View key={fav.id} style={styles.favChip} testID={`fav-${fav.id}`}>
+                          <TouchableOpacity onPress={() => quickAddFavorite(fav)} style={{ paddingRight: 6 }}>
+                            <Text style={[typography.small, { fontWeight: "700", color: colors.primary }]} numberOfLines={1}>
+                              {fav.label || fav.food.name}
+                            </Text>
+                            <Text style={[typography.small, { color: colors.textMuted, fontSize: 10 }]}>
+                              {fav.quantity} {fav.food.unit} · {fav.macros_preview.calories} kcal
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => removeFavorite(fav.id)}>
+                            <Ionicons name="close" size={14} color={colors.textMuted} />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
+
                 {/* Search */}
                 <View style={styles.searchBox}>
                   <Ionicons name="search" size={16} color={colors.textSecondary} />
@@ -435,25 +591,33 @@ export default function Meals() {
                   {filteredFoods.length === 0 ? (
                     <Text style={[typography.small, { textAlign: "center", marginTop: spacing.lg }]}>Aucun aliment trouvé.</Text>
                   ) : (
-                    filteredFoods.map((f) => (
-                      <TouchableOpacity
-                        key={f.id}
-                        onPress={() => { setSelectedFood(f); setManualQty(String(f.default_qty)); }}
-                        style={styles.foodRow}
-                        testID={`food-${f.id}`}
-                      >
-                        <View style={{ flex: 1 }}>
-                          <Text style={[typography.body, { fontWeight: "600" }]}>{f.name}</Text>
-                          <Text style={typography.small}>
-                            {f.kcal} kcal · P {f.protein_g}g · G {f.carbs_g}g · L {f.fat_g}g
-                            <Text style={{ color: colors.textMuted }}>
-                              {f.unit === "g" || f.unit === "ml" ? ` (pour 100 ${f.unit})` : ` (par ${f.unit})`}
+                    filteredFoods.map((f) => {
+                      const isUnitWeight = f.unit === "g" || f.unit === "ml";
+                      const ratio = isUnitWeight ? f.default_qty / 100 : f.default_qty;
+                      const estKcal = Math.round(f.kcal * ratio);
+                      return (
+                        <TouchableOpacity
+                          key={f.id}
+                          onPress={() => { setSelectedFood(f); setManualQty(String(f.default_qty)); }}
+                          style={styles.foodRow}
+                          testID={`food-${f.id}`}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={[typography.body, { fontWeight: "600" }]}>{f.name}</Text>
+                            <Text style={[typography.small, { color: colors.primary, fontWeight: "700", marginTop: 2 }]}>
+                              ≈ {estKcal} kcal{" "}
+                              <Text style={{ color: colors.textMuted, fontWeight: "500" }}>
+                                pour {f.default_qty} {f.unit}
+                              </Text>
                             </Text>
-                          </Text>
-                        </View>
-                        <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-                      </TouchableOpacity>
-                    ))
+                            <Text style={[typography.small, { marginTop: 2, color: colors.textMuted, fontSize: 11 }]}>
+                              {isUnitWeight ? `${f.kcal} kcal/100${f.unit}` : `${f.kcal} kcal/${f.unit}`} · P {f.protein_g}g · G {f.carbs_g}g · L {f.fat_g}g
+                            </Text>
+                          </View>
+                          <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                        </TouchableOpacity>
+                      );
+                    })
                   )}
                 </ScrollView>
               </>
@@ -492,6 +656,24 @@ export default function Meals() {
                       testID={`qty-quick-${q}`}
                     >
                       <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>{q} {selectedFood.unit}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Multiplier */}
+                <Text style={[typography.caption, { marginTop: spacing.md }]}>Multiplicateur</Text>
+                <View style={styles.quickQtyRow}>
+                  {[0.5, 1.5, 2, 3].map((m) => (
+                    <TouchableOpacity
+                      key={m}
+                      onPress={() => {
+                        const base = parseFloat(manualQty || String(selectedFood.default_qty));
+                        setManualQty(String(Math.round(base * m * 10) / 10));
+                      }}
+                      style={[styles.quickQtyChip, { backgroundColor: "#FEF3C7", borderColor: "#FDE68A" }]}
+                      testID={`mult-${m}`}
+                    >
+                      <Text style={[typography.small, { color: "#92400E", fontWeight: "700" }]}>×{m}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -537,6 +719,12 @@ export default function Meals() {
                   style={{ marginTop: spacing.md }}
                   testID="manual-save"
                 />
+                <TouchableOpacity onPress={saveFavorite} disabled={!previewMacros} style={styles.favSaveBtn} testID="manual-save-favorite">
+                  <Ionicons name="star-outline" size={16} color={colors.primary} />
+                  <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>
+                    Sauvegarder en favori
+                  </Text>
+                </TouchableOpacity>
                 <View style={{ height: spacing.lg }} />
               </KeyboardAwareScrollView>
             )}
@@ -659,4 +847,21 @@ const styles = StyleSheet.create({
   modalStat: { flexBasis: "47%", backgroundColor: colors.primaryPale, padding: spacing.md, borderRadius: radius.md },
   analyzingOverlay: { position: "absolute", inset: 0, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.6)" },
   analyzingCard: { backgroundColor: colors.surface, padding: spacing.lg, borderRadius: radius.lg, alignItems: "center", borderWidth: 1, borderColor: colors.border },
+  pastBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: spacing.sm },
+  searchBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: colors.background, borderRadius: radius.md, paddingHorizontal: spacing.md, paddingVertical: 10, borderWidth: 1, borderColor: colors.border, marginTop: spacing.sm },
+  catChip: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: radius.full, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
+  catChipOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
+  catChipText: { fontSize: 12, color: colors.textSecondary, fontWeight: "600" },
+  foodRow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
+  favChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: colors.primary, maxWidth: 200 },
+  qtyRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: 6 },
+  qtyInput: { flex: 1, padding: spacing.md, fontSize: 22, fontWeight: "700", borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, color: colors.textMain, backgroundColor: colors.background },
+  qtyUnit: { fontSize: 16, color: colors.textSecondary, fontWeight: "600", paddingHorizontal: 8 },
+  quickQtyRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 8 },
+  quickQtyChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.full, backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: "#D5EAD8" },
+  mealTypeRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
+  mealTypeChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
+  mealTypeChipOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
+  previewBox: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md, backgroundColor: colors.primaryPale, borderRadius: radius.md, marginTop: spacing.lg, borderWidth: 1, borderColor: "#D5EAD8" },
+  favSaveBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: spacing.sm, paddingVertical: 10, borderRadius: radius.full, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.surface },
 });

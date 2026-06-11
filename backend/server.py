@@ -98,6 +98,19 @@ class ProfileIn(BaseModel):
     gender: str  # "male" | "female"
     goal: str  # "lose" | "gain" | "maintain"
     activity_level: str = "moderate"  # sedentary | light | moderate | active | very_active
+    waist_cm: Optional[float] = None
+    neck_cm: Optional[float] = None
+    hips_cm: Optional[float] = None
+
+
+class UserUpdate(BaseModel):
+    name: Optional[str] = None
+
+
+class FavoriteIn(BaseModel):
+    food_id: str
+    quantity: float
+    label: Optional[str] = None  # custom name, e.g. "Porridge du matin"
 
 
 class Profile(ProfileIn):
@@ -128,6 +141,7 @@ class MealAnalyzeRequest(BaseModel):
     image_base64: str  # raw base64, no data prefix
     mime: str = "image/jpeg"
     meal_type: Optional[str] = None  # breakfast | lunch | dinner | snack
+    date: Optional[str] = None  # YYYY-MM-DD, defaults to today
 
 
 class ManualMealRequest(BaseModel):
@@ -135,6 +149,7 @@ class ManualMealRequest(BaseModel):
     quantity: float
     meal_type: Optional[str] = None
     name_override: Optional[str] = None
+    date: Optional[str] = None  # YYYY-MM-DD, defaults to today
 
 
 class ActivityIn(BaseModel):
@@ -179,6 +194,7 @@ class TransformationIn(BaseModel):
     image_base64: str
     mime: str = "image/jpeg"
     weight_kg: Optional[float] = None
+    view: Optional[str] = "front"  # "front" | "back" | "side"
 
 
 class WorkoutSession(BaseModel):
@@ -922,10 +938,11 @@ async def analyze_and_save_meal(
     user = await get_current_user(authorization)
     analysis = await analyze_meal_with_claude(body.image_base64)
     created = now_utc()
+    target_date = body.date or today_str()
     meal = {
         "id": new_id("meal"),
         "user_id": user["user_id"],
-        "date": today_str(),
+        "date": target_date,
         "created_at": created,
         "image_base64": body.image_base64[:200000],  # cap to avoid bloat
         "meal_type": body.meal_type or auto_meal_type(created),
@@ -1192,6 +1209,252 @@ async def exercises_library(authorization: Optional[str] = Header(default=None))
     return {"exercises": EXERCISE_LIBRARY, "session_types": SESSION_TYPES}
 
 
+@api.put("/auth/me")
+async def update_me(body: UserUpdate, authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    update: Dict[str, Any] = {}
+    if body.name is not None:
+        name = body.name.strip()
+        if not name:
+            raise HTTPException(400, "Name cannot be empty")
+        update["name"] = name[:80]
+    if not update:
+        raise HTTPException(400, "Nothing to update")
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": update})
+    u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    return {
+        "user_id": u["user_id"],
+        "email": u["email"],
+        "name": u["name"],
+        "picture": u.get("picture"),
+        "onboarded": bool(u.get("onboarded", False)),
+    }
+
+
+# --- FAVORITES ---
+@api.get("/favorites")
+async def list_favorites(authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    items = await db.favorites.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).to_list(50)
+    # Enrich with current food data
+    out = []
+    for f in items:
+        food = next((x for x in FOOD_LIBRARY if x["id"] == f["food_id"]), None)
+        if not food:
+            continue
+        macros = compute_food_macros(food, float(f["quantity"]))
+        out.append({**f, "food": food, "macros_preview": macros})
+    return out
+
+
+@api.post("/favorites")
+async def add_favorite(body: FavoriteIn, authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    food = next((f for f in FOOD_LIBRARY if f["id"] == body.food_id), None)
+    if not food:
+        raise HTTPException(404, "Food not found")
+    if body.quantity <= 0:
+        raise HTTPException(400, "Quantity must be > 0")
+    doc = {
+        "id": new_id("fav"),
+        "user_id": user["user_id"],
+        "food_id": body.food_id,
+        "quantity": float(body.quantity),
+        "label": body.label,
+        "created_at": now_utc(),
+    }
+    await db.favorites.insert_one(doc)
+    return strip_id(doc)
+
+
+@api.delete("/favorites/{fav_id}")
+async def delete_favorite(fav_id: str, authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    res = await db.favorites.delete_one({"id": fav_id, "user_id": user["user_id"]})
+    return {"deleted": res.deleted_count}
+
+
+# --- BODY COMPOSITION ---
+def navy_body_fat(gender: str, height_cm: float, waist_cm: float,
+                  neck_cm: float, hips_cm: Optional[float] = None) -> Optional[float]:
+    """US Navy body-fat formula. Returns % or None if inputs missing/invalid."""
+    import math
+    try:
+        if not all([height_cm, waist_cm, neck_cm]):
+            return None
+        if gender.lower().startswith("m"):
+            v = 86.010 * math.log10(waist_cm - neck_cm) - 70.041 * math.log10(height_cm) + 36.76
+        else:
+            if not hips_cm:
+                return None
+            v = 163.205 * math.log10(waist_cm + hips_cm - neck_cm) - 97.684 * math.log10(height_cm) - 78.387
+        return max(2.0, min(60.0, round(v, 1)))
+    except (ValueError, ZeroDivisionError):
+        return None
+
+
+def deurenberg_body_fat(gender: str, age: int, weight_kg: float, height_cm: float) -> float:
+    """Fallback: Deurenberg formula from BMI. Less precise."""
+    bmi = weight_kg / ((height_cm / 100) ** 2)
+    sex = 1 if gender.lower().startswith("m") else 0
+    bf = 1.20 * bmi + 0.23 * age - 10.8 * sex - 5.4
+    return max(2.0, min(60.0, round(bf, 1)))
+
+
+def strength_tier(ratio: float) -> str:
+    """1RM / body-weight ratio → strength tier."""
+    if ratio >= 2.5:
+        return "Élite"
+    if ratio >= 1.75:
+        return "Avancé"
+    if ratio >= 1.25:
+        return "Intermédiaire"
+    if ratio >= 0.75:
+        return "Novice"
+    return "Débutant"
+
+
+# benchmarks for males (×bodyweight) — squat/bench/deadlift/ohp
+STRENGTH_BENCHMARKS = {
+    "Squat barre (back squat)": 1.5,
+    "Développé couché barre": 1.0,
+    "Soulevé de terre barre": 2.0,
+    "Développé militaire barre": 0.65,
+    "Tractions pronation": 0.5,  # extra weight ratio
+}
+
+
+@api.get("/body/composition")
+async def body_composition(authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    profile = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+    if not profile:
+        return {"available": False, "reason": "Profil incomplet"}
+
+    weight = float(profile.get("weight_kg", 0))
+    height = float(profile.get("height_cm", 0))
+    age = int(profile.get("age", 0))
+    gender = profile.get("gender", "male")
+    waist = profile.get("waist_cm")
+    neck = profile.get("neck_cm")
+    hips = profile.get("hips_cm")
+
+    # Body fat
+    bf_navy = navy_body_fat(gender, height, waist or 0, neck or 0, hips) if waist and neck else None
+    bf_method = "US Navy" if bf_navy is not None else "Deurenberg (estimation)"
+    bf_pct = bf_navy if bf_navy is not None else deurenberg_body_fat(gender, age, weight, height)
+
+    fat_kg = round(weight * bf_pct / 100, 1)
+    lean_kg = round(weight - fat_kg, 1)
+    # Janssen-ish skeletal muscle mass estimate (~ 47% of lean mass typically)
+    muscle_kg = round(lean_kg * 0.47, 1)
+
+    # Strength scoring per benchmark
+    perf_cursor = db.exercise_perf.find({"user_id": user["user_id"]}, {"_id": 0})
+    perfs = await perf_cursor.to_list(500)
+    bests: Dict[str, float] = {}
+    for p in perfs:
+        ex = p["exercise_name"]
+        bests[ex] = max(bests.get(ex, 0), float(p.get("est_1rm", 0)))
+
+    strength_scores = []
+    overall_total = 0.0
+    overall_count = 0
+    for ex_name, target in STRENGTH_BENCHMARKS.items():
+        best = bests.get(ex_name, 0)
+        ratio = best / weight if weight > 0 else 0
+        target_kg = round(target * weight, 1)
+        score_pct = round((ratio / target) * 100, 0) if target > 0 else 0
+        strength_scores.append({
+            "exercise": ex_name,
+            "best_1rm": best,
+            "target_for_intermediate": target_kg,
+            "ratio_bw": round(ratio, 2),
+            "score_pct": score_pct,
+            "tier": strength_tier(ratio),
+        })
+        if best > 0:
+            overall_total += ratio / target
+            overall_count += 1
+    overall_score = round((overall_total / overall_count) * 100, 0) if overall_count > 0 else 0
+
+    # Muscle group "level" heatmap from recorded exercises
+    group_map = {
+        "Pectoraux": ["Développé couché barre", "Développé couché haltères", "Pompes"],
+        "Dos": ["Soulevé de terre barre", "Tractions pronation", "Rowing barre (Yates / Pendlay)"],
+        "Jambes": ["Squat barre (back squat)", "Leg press", "Hip thrust barre"],
+        "Épaules": ["Développé militaire barre", "Développé militaire haltères"],
+        "Bras": ["Curl barre droite", "Skull crushers (extension barre EZ)"],
+        "Core": ["Planche", "Ab wheel (roue abdominale)"],
+    }
+    group_levels = []
+    for group, exs in group_map.items():
+        max_score = 0
+        for e in exs:
+            if e in bests and bests[e] > 0 and e in STRENGTH_BENCHMARKS:
+                ratio = bests[e] / weight
+                pct = (ratio / STRENGTH_BENCHMARKS[e]) * 100
+                max_score = max(max_score, pct)
+        group_levels.append({
+            "group": group,
+            "score_pct": round(max_score, 0),
+            "status": "fort" if max_score >= 100 else "à développer" if max_score < 50 else "moyen",
+        })
+
+    return {
+        "available": True,
+        "body_fat": {
+            "percent": bf_pct,
+            "method": bf_method,
+            "fat_kg": fat_kg,
+            "lean_kg": lean_kg,
+            "muscle_kg_est": muscle_kg,
+            "has_measurements": bool(waist and neck),
+        },
+        "strength": {
+            "overall_score_pct": overall_score,
+            "overall_tier": strength_tier((overall_total / overall_count) if overall_count > 0 else 0),
+            "scores": strength_scores,
+        },
+        "muscle_groups": group_levels,
+    }
+
+
+@api.get("/dashboard/week-macros")
+async def week_macros(authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    profile = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+    today = now_utc().date()
+    days = []
+    for i in range(6, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        meals = await db.meals.find(
+            {"user_id": user["user_id"], "date": d}, {"_id": 0, "image_base64": 0}
+        ).to_list(500)
+        days.append({
+            "date": d,
+            "calories": sum(m.get("calories", 0) for m in meals),
+            "protein_g": sum(m.get("protein_g", 0) for m in meals),
+            "carbs_g": sum(m.get("carbs_g", 0) for m in meals),
+            "fat_g": sum(m.get("fat_g", 0) for m in meals),
+        })
+    nonzero = [d for d in days if d["calories"] > 0]
+    n = len(nonzero) or 1
+    avg = {
+        "calories": int(sum(d["calories"] for d in nonzero) / n),
+        "protein_g": int(sum(d["protein_g"] for d in nonzero) / n),
+        "carbs_g": int(sum(d["carbs_g"] for d in nonzero) / n),
+        "fat_g": int(sum(d["fat_g"] for d in nonzero) / n),
+    } if nonzero else {"calories": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0}
+    targets = {
+        "calories": int(profile.get("daily_calories", 0)),
+        "protein_g": int(profile.get("protein_g", 0)),
+        "carbs_g": int(profile.get("carbs_g", 0)),
+        "fat_g": int(profile.get("fat_g", 0)),
+    }
+    return {"days": days, "avg": avg, "targets": targets, "tracked_days": len(nonzero)}
+
+
 @api.get("/foods/library")
 async def foods_library(authorization: Optional[str] = Header(default=None)):
     _ = await get_current_user(authorization)
@@ -1210,10 +1473,11 @@ async def add_manual_meal(
         raise HTTPException(400, "Quantity must be > 0")
     macros = compute_food_macros(food, float(body.quantity))
     created = now_utc()
+    target_date = body.date or today_str()
     meal = {
         "id": new_id("meal"),
         "user_id": user["user_id"],
-        "date": today_str(),
+        "date": target_date,
         "created_at": created,
         "meal_type": body.meal_type or auto_meal_type(created),
         "source": "manual",
@@ -1300,6 +1564,7 @@ async def add_transformation(body: TransformationIn, authorization: Optional[str
         "created_at": now_utc(),
         "image_base64": body.image_base64[:300000],
         "weight_kg": body.weight_kg,
+        "view": (body.view or "front").lower(),
         "ai_feedback": feedback,
     }
     await db.transformations.insert_one(doc)
@@ -1444,6 +1709,7 @@ async def startup_event():
     await db.exercise_perf.create_index([("user_id", 1), ("created_at", -1)])
     await db.exercise_perf.create_index([("user_id", 1), ("exercise_name", 1)])
     await db.daily_compliance.create_index([("user_id", 1), ("date", 1)], unique=True)
+    await db.favorites.create_index([("user_id", 1), ("created_at", -1)])
     log.info("Indexes ready")
 
 
