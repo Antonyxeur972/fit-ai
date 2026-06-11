@@ -130,6 +130,13 @@ class MealAnalyzeRequest(BaseModel):
     meal_type: Optional[str] = None  # breakfast | lunch | dinner | snack
 
 
+class ManualMealRequest(BaseModel):
+    food_id: str
+    quantity: float
+    meal_type: Optional[str] = None
+    name_override: Optional[str] = None
+
+
 class ActivityIn(BaseModel):
     date: str
     steps: int = 0
@@ -218,49 +225,121 @@ def compute_targets(p: ProfileIn) -> Dict[str, int]:
 
 # --- Exercise library ---
 EXERCISE_LIBRARY: List[Dict[str, Any]] = [
-    # Pectoraux
+    # Pectoraux — poids du corps
     {"id": "pompes", "name": "Pompes", "category": "Pectoraux", "equipment": "Poids du corps"},
     {"id": "pompes_inclinees", "name": "Pompes inclinées", "category": "Pectoraux", "equipment": "Poids du corps"},
     {"id": "pompes_diamant", "name": "Pompes diamant", "category": "Pectoraux", "equipment": "Poids du corps"},
-    {"id": "dips", "name": "Dips sur chaise", "category": "Pectoraux", "equipment": "Chaise"},
-    {"id": "develop_couche_halt", "name": "Développé couché haltères", "category": "Pectoraux", "equipment": "Haltères"},
-    {"id": "ecarte_halt", "name": "Écarté haltères", "category": "Pectoraux", "equipment": "Haltères"},
-    # Dos
-    {"id": "tractions", "name": "Tractions", "category": "Dos", "equipment": "Barre"},
-    {"id": "rowing_halt", "name": "Rowing haltère", "category": "Dos", "equipment": "Haltère"},
-    {"id": "rowing_renverse", "name": "Rowing renversé", "category": "Dos", "equipment": "Barre / table"},
-    {"id": "souleve_de_terre", "name": "Soulevé de terre", "category": "Dos", "equipment": "Haltères / barre"},
+    {"id": "pompes_declinees", "name": "Pompes déclinées (pieds surélevés)", "category": "Pectoraux", "equipment": "Poids du corps"},
+    # Pectoraux — salle
+    {"id": "develop_couche_barre", "name": "Développé couché barre", "category": "Pectoraux", "equipment": "Barre + banc"},
+    {"id": "develop_couche_halt", "name": "Développé couché haltères", "category": "Pectoraux", "equipment": "Haltères + banc"},
+    {"id": "develop_incline_barre", "name": "Développé incliné barre", "category": "Pectoraux", "equipment": "Barre + banc incliné"},
+    {"id": "develop_incline_halt", "name": "Développé incliné haltères", "category": "Pectoraux", "equipment": "Haltères + banc incliné"},
+    {"id": "develop_decline", "name": "Développé décliné", "category": "Pectoraux", "equipment": "Banc décliné"},
+    {"id": "ecarte_couche", "name": "Écarté couché haltères", "category": "Pectoraux", "equipment": "Haltères"},
+    {"id": "ecarte_incline", "name": "Écarté incliné haltères", "category": "Pectoraux", "equipment": "Haltères"},
+    {"id": "ecarte_poulie", "name": "Écarté poulie (cross-over)", "category": "Pectoraux", "equipment": "Poulie vis-à-vis"},
+    {"id": "pec_deck", "name": "Pec-deck (butterfly)", "category": "Pectoraux", "equipment": "Machine pec-deck"},
+    {"id": "dips_pectoraux", "name": "Dips lestés (penché avant)", "category": "Pectoraux", "equipment": "Barres parallèles"},
+    {"id": "pullover_halt", "name": "Pull-over haltère", "category": "Pectoraux", "equipment": "Haltère + banc"},
+
+    # Dos — poids du corps
+    {"id": "tractions", "name": "Tractions pronation", "category": "Dos", "equipment": "Barre fixe"},
+    {"id": "tractions_supi", "name": "Tractions supination (chin-up)", "category": "Dos", "equipment": "Barre fixe"},
+    {"id": "tractions_lestees", "name": "Tractions lestées", "category": "Dos", "equipment": "Barre + ceinture lest"},
+    {"id": "rowing_renverse", "name": "Rowing renversé (inverted row)", "category": "Dos", "equipment": "Barre basse / TRX"},
     {"id": "superman", "name": "Superman", "category": "Dos", "equipment": "Poids du corps"},
-    # Jambes
-    {"id": "squat", "name": "Squat", "category": "Jambes", "equipment": "Poids du corps / haltères"},
-    {"id": "squat_bulgare", "name": "Squat bulgare", "category": "Jambes", "equipment": "Chaise"},
-    {"id": "fentes", "name": "Fentes alternées", "category": "Jambes", "equipment": "Poids du corps"},
-    {"id": "hip_thrust", "name": "Hip thrust", "category": "Jambes", "equipment": "Canapé / box"},
-    {"id": "mollets", "name": "Mollets debout", "category": "Jambes", "equipment": "Poids du corps"},
-    {"id": "squat_saute", "name": "Squat sauté", "category": "Jambes", "equipment": "Poids du corps"},
+    # Dos — salle
+    {"id": "souleve_de_terre", "name": "Soulevé de terre barre", "category": "Dos", "equipment": "Barre olympique"},
+    {"id": "souleve_de_terre_roumain", "name": "Soulevé de terre roumain", "category": "Dos", "equipment": "Barre / haltères"},
+    {"id": "rowing_barre", "name": "Rowing barre (Yates / Pendlay)", "category": "Dos", "equipment": "Barre"},
+    {"id": "rowing_halt", "name": "Rowing haltère unilatéral", "category": "Dos", "equipment": "Haltère + banc"},
+    {"id": "rowing_t_bar", "name": "Rowing T-bar", "category": "Dos", "equipment": "T-bar"},
+    {"id": "tirage_horiz", "name": "Tirage horizontal poulie", "category": "Dos", "equipment": "Poulie basse"},
+    {"id": "tirage_vert", "name": "Tirage vertical poulie", "category": "Dos", "equipment": "Poulie haute (lat pulldown)"},
+    {"id": "tirage_nuque", "name": "Tirage nuque poulie", "category": "Dos", "equipment": "Poulie haute"},
+    {"id": "shrugs_barre", "name": "Shrugs (trapèzes)", "category": "Dos", "equipment": "Barre / haltères"},
+    {"id": "good_morning", "name": "Good morning barre", "category": "Dos", "equipment": "Barre"},
+    {"id": "hyper_ext", "name": "Hyperextensions lombaires", "category": "Dos", "equipment": "Banc hyperextension"},
+
+    # Jambes — poids du corps
+    {"id": "squat_pdc", "name": "Squat poids du corps", "category": "Jambes", "equipment": "Poids du corps"},
+    {"id": "squat_bulgare", "name": "Squat bulgare (split squat)", "category": "Jambes", "equipment": "Banc / chaise"},
     {"id": "pistol_squat", "name": "Pistol squat", "category": "Jambes", "equipment": "Poids du corps"},
-    # Épaules
-    {"id": "elev_lat", "name": "Élévations latérales", "category": "Épaules", "equipment": "Haltères"},
-    {"id": "develop_militaire", "name": "Développé militaire", "category": "Épaules", "equipment": "Haltères"},
-    {"id": "face_pull", "name": "Face pull élastique", "category": "Épaules", "equipment": "Élastique"},
+    {"id": "fentes", "name": "Fentes alternées", "category": "Jambes", "equipment": "Poids du corps / haltères"},
+    {"id": "hip_thrust_pdc", "name": "Hip thrust (canapé)", "category": "Jambes", "equipment": "Canapé / box"},
+    {"id": "mollets_pdc", "name": "Mollets debout", "category": "Jambes", "equipment": "Poids du corps"},
+    {"id": "squat_saute", "name": "Squat sauté", "category": "Jambes", "equipment": "Poids du corps"},
+    # Jambes — salle
+    {"id": "squat_barre", "name": "Squat barre (back squat)", "category": "Jambes", "equipment": "Barre + rack"},
+    {"id": "front_squat", "name": "Front squat", "category": "Jambes", "equipment": "Barre + rack"},
+    {"id": "hack_squat", "name": "Hack squat machine", "category": "Jambes", "equipment": "Machine hack squat"},
+    {"id": "leg_press", "name": "Presse à cuisses (leg press)", "category": "Jambes", "equipment": "Machine leg press"},
+    {"id": "leg_extension", "name": "Leg extension (quadriceps)", "category": "Jambes", "equipment": "Machine"},
+    {"id": "leg_curl", "name": "Leg curl (ischios)", "category": "Jambes", "equipment": "Machine"},
+    {"id": "hip_thrust_barre", "name": "Hip thrust barre", "category": "Jambes", "equipment": "Barre + banc"},
+    {"id": "fentes_marchees", "name": "Fentes marchées haltères", "category": "Jambes", "equipment": "Haltères"},
+    {"id": "step_up_box", "name": "Step-up sur box", "category": "Jambes", "equipment": "Box + haltères"},
+    {"id": "mollets_machine", "name": "Mollets assis machine", "category": "Jambes", "equipment": "Machine mollets"},
+    {"id": "mollets_debout_barre", "name": "Mollets debout barre", "category": "Jambes", "equipment": "Barre / smith"},
+    {"id": "adducteurs", "name": "Adducteurs machine", "category": "Jambes", "equipment": "Machine"},
+    {"id": "abducteurs", "name": "Abducteurs machine", "category": "Jambes", "equipment": "Machine"},
+
+    # Épaules — poids du corps
     {"id": "pike_pushup", "name": "Pike push-up", "category": "Épaules", "equipment": "Poids du corps"},
-    # Bras
-    {"id": "curl_biceps", "name": "Curl biceps", "category": "Bras", "equipment": "Haltères"},
-    {"id": "ext_triceps", "name": "Extension triceps", "category": "Bras", "equipment": "Haltère"},
-    {"id": "dips_triceps", "name": "Dips triceps", "category": "Bras", "equipment": "Chaise"},
-    # Core
+    {"id": "handstand_pushup", "name": "Handstand push-up", "category": "Épaules", "equipment": "Mur"},
+    # Épaules — salle
+    {"id": "develop_militaire_barre", "name": "Développé militaire barre", "category": "Épaules", "equipment": "Barre"},
+    {"id": "develop_militaire_halt", "name": "Développé militaire haltères", "category": "Épaules", "equipment": "Haltères"},
+    {"id": "develop_arnold", "name": "Développé Arnold", "category": "Épaules", "equipment": "Haltères"},
+    {"id": "elev_lat_halt", "name": "Élévations latérales haltères", "category": "Épaules", "equipment": "Haltères"},
+    {"id": "elev_lat_poulie", "name": "Élévations latérales poulie", "category": "Épaules", "equipment": "Poulie basse"},
+    {"id": "elev_front", "name": "Élévations frontales", "category": "Épaules", "equipment": "Haltères / disque"},
+    {"id": "oiseau_halt", "name": "Oiseau haltères (rear delts)", "category": "Épaules", "equipment": "Haltères"},
+    {"id": "oiseau_poulie", "name": "Oiseau poulie", "category": "Épaules", "equipment": "Poulie"},
+    {"id": "face_pull", "name": "Face pull poulie/élastique", "category": "Épaules", "equipment": "Poulie haute / élastique"},
+    {"id": "upright_row", "name": "Rowing menton (upright row)", "category": "Épaules", "equipment": "Barre / haltères"},
+
+    # Bras — biceps & triceps salle
+    {"id": "curl_barre", "name": "Curl barre droite", "category": "Bras", "equipment": "Barre"},
+    {"id": "curl_ez", "name": "Curl barre EZ", "category": "Bras", "equipment": "Barre EZ"},
+    {"id": "curl_halt", "name": "Curl haltères (alterné)", "category": "Bras", "equipment": "Haltères"},
+    {"id": "curl_marteau", "name": "Curl marteau", "category": "Bras", "equipment": "Haltères"},
+    {"id": "curl_pupitre", "name": "Curl pupitre (Larry Scott)", "category": "Bras", "equipment": "Banc Scott"},
+    {"id": "curl_concentre", "name": "Curl concentré", "category": "Bras", "equipment": "Haltère"},
+    {"id": "curl_poulie", "name": "Curl poulie basse", "category": "Bras", "equipment": "Poulie"},
+    {"id": "curl_inverse", "name": "Curl inversé (pronation)", "category": "Bras", "equipment": "Barre"},
+    {"id": "dips_triceps", "name": "Dips triceps lestés", "category": "Bras", "equipment": "Barres parallèles"},
+    {"id": "skull_crushers", "name": "Skull crushers (extension barre EZ)", "category": "Bras", "equipment": "Barre EZ + banc"},
+    {"id": "ext_triceps_halt", "name": "Extension triceps haltère (vertical)", "category": "Bras", "equipment": "Haltère"},
+    {"id": "ext_triceps_poulie", "name": "Extension triceps poulie haute", "category": "Bras", "equipment": "Poulie haute"},
+    {"id": "ext_triceps_corde", "name": "Triceps corde poulie", "category": "Bras", "equipment": "Poulie + corde"},
+    {"id": "kickback", "name": "Kick-back haltère", "category": "Bras", "equipment": "Haltère"},
+
+    # Core — gainage + machines
     {"id": "planche", "name": "Planche", "category": "Core", "equipment": "Poids du corps"},
     {"id": "planche_lat", "name": "Planche latérale", "category": "Core", "equipment": "Poids du corps"},
-    {"id": "crunchs", "name": "Crunchs", "category": "Core", "equipment": "Poids du corps"},
-    {"id": "russian_twist", "name": "Russian twist", "category": "Core", "equipment": "Poids du corps"},
-    {"id": "leg_raises", "name": "Leg raises", "category": "Core", "equipment": "Poids du corps"},
+    {"id": "crunchs", "name": "Crunchs au sol", "category": "Core", "equipment": "Poids du corps"},
+    {"id": "russian_twist", "name": "Russian twist (lesté)", "category": "Core", "equipment": "Disque / kettlebell"},
+    {"id": "leg_raises", "name": "Leg raises suspendu", "category": "Core", "equipment": "Barre fixe"},
+    {"id": "knee_raises", "name": "Relevés de genoux", "category": "Core", "equipment": "Chaise romaine"},
     {"id": "mountain_climbers", "name": "Mountain climbers", "category": "Core", "equipment": "Poids du corps"},
     {"id": "hollow_hold", "name": "Hollow hold", "category": "Core", "equipment": "Poids du corps"},
+    {"id": "ab_wheel", "name": "Ab wheel (roue abdominale)", "category": "Core", "equipment": "Roue abdo"},
+    {"id": "cable_crunch", "name": "Crunch poulie haute (à genoux)", "category": "Core", "equipment": "Poulie haute + corde"},
+    {"id": "dragon_flag", "name": "Dragon flag", "category": "Core", "equipment": "Banc"},
+
     # Cardio
     {"id": "burpees", "name": "Burpees", "category": "Cardio", "equipment": "Poids du corps"},
     {"id": "jumping_jacks", "name": "Jumping jacks", "category": "Cardio", "equipment": "Poids du corps"},
     {"id": "high_knees", "name": "High knees", "category": "Cardio", "equipment": "Poids du corps"},
     {"id": "skater_jumps", "name": "Skater jumps", "category": "Cardio", "equipment": "Poids du corps"},
+    {"id": "corde_a_sauter", "name": "Corde à sauter", "category": "Cardio", "equipment": "Corde"},
+    {"id": "rameur", "name": "Rameur", "category": "Cardio", "equipment": "Machine rameur"},
+    {"id": "velo_assault", "name": "Vélo assault / spinning", "category": "Cardio", "equipment": "Vélo"},
+    {"id": "elliptique", "name": "Vélo elliptique", "category": "Cardio", "equipment": "Elliptique"},
+    {"id": "tapis_course", "name": "Tapis de course", "category": "Cardio", "equipment": "Tapis"},
+    {"id": "stairmaster", "name": "Stairmaster (escalier)", "category": "Cardio", "equipment": "Machine escalier"},
 ]
 
 SESSION_TYPES: Dict[str, Dict[str, Any]] = {
@@ -268,6 +347,212 @@ SESSION_TYPES: Dict[str, Dict[str, Any]] = {
     "puissance": {"label": "Puissance", "reps": "6-8", "sets": 4, "rest_s": 90, "desc": "Force-vitesse, explosivité"},
     "force": {"label": "Force", "reps": "3-6", "sets": 5, "rest_s": 150, "desc": "Force maximale, charges lourdes"},
 }
+
+
+# --- Food library (manual meal entry, when no photo) ---
+# unit = "g" → macros are per 100 g, default_qty 100. User adjusts qty in grams.
+# unit = "ml" → macros per 100 ml.
+# unit = "unit" / "scoop" / "tranche" / "sachet" → macros per 1 piece, default_qty 1.
+FOOD_LIBRARY: List[Dict[str, Any]] = [
+    # --- Compléments ---
+    {"id": "whey_scoop", "name": "Whey (1 scoop ~30g)", "category": "Compléments", "unit": "scoop", "default_qty": 1,
+     "kcal": 120, "protein_g": 24, "carbs_g": 3, "fat_g": 1.5},
+    {"id": "caseine_scoop", "name": "Caséine (1 scoop ~30g)", "category": "Compléments", "unit": "scoop", "default_qty": 1,
+     "kcal": 110, "protein_g": 24, "carbs_g": 2, "fat_g": 1},
+    {"id": "isolate_scoop", "name": "Whey Isolate (1 scoop ~30g)", "category": "Compléments", "unit": "scoop", "default_qty": 1,
+     "kcal": 110, "protein_g": 27, "carbs_g": 1, "fat_g": 0.5},
+    {"id": "gainer_scoop", "name": "Mass gainer (1 scoop ~70g)", "category": "Compléments", "unit": "scoop", "default_qty": 1,
+     "kcal": 280, "protein_g": 20, "carbs_g": 45, "fat_g": 2.5},
+    {"id": "creatine_g", "name": "Créatine monohydrate", "category": "Compléments", "unit": "g", "default_qty": 5,
+     "kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0},
+    {"id": "bcaa_g", "name": "BCAA (poudre)", "category": "Compléments", "unit": "g", "default_qty": 10,
+     "kcal": 40, "protein_g": 10, "carbs_g": 0, "fat_g": 0},
+    {"id": "omega3_caps", "name": "Oméga 3 (1 capsule 1g)", "category": "Compléments", "unit": "capsule", "default_qty": 1,
+     "kcal": 9, "protein_g": 0, "carbs_g": 0, "fat_g": 1},
+    {"id": "barre_proteinee", "name": "Barre protéinée (~60g)", "category": "Compléments", "unit": "unit", "default_qty": 1,
+     "kcal": 220, "protein_g": 20, "carbs_g": 18, "fat_g": 7},
+
+    # --- Protéines animales ---
+    {"id": "blanc_oeuf", "name": "Blanc d'œuf (1 blanc ~33g)", "category": "Protéines", "unit": "unit", "default_qty": 1,
+     "kcal": 17, "protein_g": 3.6, "carbs_g": 0.2, "fat_g": 0.1},
+    {"id": "oeuf_entier", "name": "Œuf entier (1 ~55g)", "category": "Protéines", "unit": "unit", "default_qty": 1,
+     "kcal": 78, "protein_g": 6, "carbs_g": 0.6, "fat_g": 5},
+    {"id": "poulet_blanc_cru", "name": "Blanc de poulet (cru)", "category": "Protéines", "unit": "g", "default_qty": 100,
+     "kcal": 110, "protein_g": 23, "carbs_g": 0, "fat_g": 1.5},
+    {"id": "poulet_blanc_cuit", "name": "Blanc de poulet (cuit)", "category": "Protéines", "unit": "g", "default_qty": 100,
+     "kcal": 165, "protein_g": 31, "carbs_g": 0, "fat_g": 3.6},
+    {"id": "boeuf_5", "name": "Bœuf haché 5% (cru)", "category": "Protéines", "unit": "g", "default_qty": 100,
+     "kcal": 137, "protein_g": 21, "carbs_g": 0, "fat_g": 5},
+    {"id": "boeuf_15", "name": "Bœuf haché 15% (cru)", "category": "Protéines", "unit": "g", "default_qty": 100,
+     "kcal": 220, "protein_g": 19, "carbs_g": 0, "fat_g": 15},
+    {"id": "thon_naturel", "name": "Thon au naturel (boîte)", "category": "Protéines", "unit": "g", "default_qty": 100,
+     "kcal": 116, "protein_g": 26, "carbs_g": 0, "fat_g": 1},
+    {"id": "saumon_cru", "name": "Saumon (cru)", "category": "Protéines", "unit": "g", "default_qty": 100,
+     "kcal": 208, "protein_g": 20, "carbs_g": 0, "fat_g": 13},
+    {"id": "dinde_cru", "name": "Escalope de dinde (crue)", "category": "Protéines", "unit": "g", "default_qty": 100,
+     "kcal": 105, "protein_g": 22, "carbs_g": 0, "fat_g": 1.5},
+    {"id": "jambon_blanc", "name": "Jambon blanc (1 tranche ~40g)", "category": "Protéines", "unit": "tranche", "default_qty": 1,
+     "kcal": 45, "protein_g": 7, "carbs_g": 0.5, "fat_g": 1.6},
+    {"id": "tofu", "name": "Tofu nature", "category": "Protéines", "unit": "g", "default_qty": 100,
+     "kcal": 76, "protein_g": 8, "carbs_g": 2, "fat_g": 4.8},
+
+    # --- Glucides bruts ---
+    {"id": "riz_blanc_cru", "name": "Riz blanc (cru)", "category": "Glucides", "unit": "g", "default_qty": 100,
+     "kcal": 360, "protein_g": 7, "carbs_g": 79, "fat_g": 0.6},
+    {"id": "riz_complet_cru", "name": "Riz complet (cru)", "category": "Glucides", "unit": "g", "default_qty": 100,
+     "kcal": 350, "protein_g": 7.5, "carbs_g": 76, "fat_g": 2.7},
+    {"id": "riz_blanc_cuit", "name": "Riz blanc (cuit)", "category": "Glucides", "unit": "g", "default_qty": 100,
+     "kcal": 130, "protein_g": 2.7, "carbs_g": 28, "fat_g": 0.3},
+    {"id": "pates_crues", "name": "Pâtes (crues)", "category": "Glucides", "unit": "g", "default_qty": 100,
+     "kcal": 370, "protein_g": 13, "carbs_g": 74, "fat_g": 1.5},
+    {"id": "pates_cuites", "name": "Pâtes (cuites)", "category": "Glucides", "unit": "g", "default_qty": 100,
+     "kcal": 158, "protein_g": 5.8, "carbs_g": 31, "fat_g": 0.9},
+    {"id": "flocons_avoine", "name": "Flocons d'avoine (cru)", "category": "Glucides", "unit": "g", "default_qty": 50,
+     "kcal": 370, "protein_g": 13, "carbs_g": 60, "fat_g": 7},
+    {"id": "quinoa_cru", "name": "Quinoa (cru)", "category": "Glucides", "unit": "g", "default_qty": 100,
+     "kcal": 368, "protein_g": 14, "carbs_g": 64, "fat_g": 6},
+    {"id": "patate_douce", "name": "Patate douce (crue)", "category": "Glucides", "unit": "g", "default_qty": 100,
+     "kcal": 86, "protein_g": 1.6, "carbs_g": 20, "fat_g": 0.1},
+    {"id": "pomme_terre", "name": "Pomme de terre (crue)", "category": "Glucides", "unit": "g", "default_qty": 100,
+     "kcal": 77, "protein_g": 2, "carbs_g": 17, "fat_g": 0.1},
+    {"id": "pain_complet", "name": "Pain complet (1 tranche ~40g)", "category": "Glucides", "unit": "tranche", "default_qty": 1,
+     "kcal": 100, "protein_g": 4, "carbs_g": 18, "fat_g": 1.2},
+    {"id": "pain_blanc", "name": "Pain blanc / baguette (1 tranche ~40g)", "category": "Glucides", "unit": "tranche", "default_qty": 1,
+     "kcal": 110, "protein_g": 3.5, "carbs_g": 22, "fat_g": 0.8},
+    {"id": "couscous_cru", "name": "Semoule de couscous (cru)", "category": "Glucides", "unit": "g", "default_qty": 100,
+     "kcal": 376, "protein_g": 13, "carbs_g": 77, "fat_g": 0.6},
+    {"id": "lentilles_crues", "name": "Lentilles (crues)", "category": "Glucides", "unit": "g", "default_qty": 100,
+     "kcal": 353, "protein_g": 25, "carbs_g": 60, "fat_g": 1},
+
+    # --- Fruits ---
+    {"id": "banane", "name": "Banane (1 ~120g)", "category": "Fruits", "unit": "unit", "default_qty": 1,
+     "kcal": 105, "protein_g": 1.3, "carbs_g": 27, "fat_g": 0.4},
+    {"id": "pomme", "name": "Pomme (1 ~180g)", "category": "Fruits", "unit": "unit", "default_qty": 1,
+     "kcal": 95, "protein_g": 0.5, "carbs_g": 25, "fat_g": 0.3},
+    {"id": "orange", "name": "Orange (1 ~150g)", "category": "Fruits", "unit": "unit", "default_qty": 1,
+     "kcal": 70, "protein_g": 1.4, "carbs_g": 17, "fat_g": 0.2},
+    {"id": "kiwi", "name": "Kiwi (1 ~70g)", "category": "Fruits", "unit": "unit", "default_qty": 1,
+     "kcal": 42, "protein_g": 0.8, "carbs_g": 10, "fat_g": 0.4},
+    {"id": "fraises", "name": "Fraises", "category": "Fruits", "unit": "g", "default_qty": 100,
+     "kcal": 32, "protein_g": 0.7, "carbs_g": 7.7, "fat_g": 0.3},
+    {"id": "myrtilles", "name": "Myrtilles", "category": "Fruits", "unit": "g", "default_qty": 100,
+     "kcal": 57, "protein_g": 0.7, "carbs_g": 14, "fat_g": 0.3},
+    {"id": "raisin", "name": "Raisin", "category": "Fruits", "unit": "g", "default_qty": 100,
+     "kcal": 69, "protein_g": 0.7, "carbs_g": 18, "fat_g": 0.2},
+    {"id": "mangue", "name": "Mangue", "category": "Fruits", "unit": "g", "default_qty": 100,
+     "kcal": 60, "protein_g": 0.8, "carbs_g": 15, "fat_g": 0.4},
+    {"id": "ananas", "name": "Ananas", "category": "Fruits", "unit": "g", "default_qty": 100,
+     "kcal": 50, "protein_g": 0.5, "carbs_g": 13, "fat_g": 0.1},
+    {"id": "avocat", "name": "Avocat (1/2 ~100g)", "category": "Fruits", "unit": "g", "default_qty": 100,
+     "kcal": 160, "protein_g": 2, "carbs_g": 9, "fat_g": 15},
+    {"id": "date_medjool", "name": "Datte Medjool (1 ~20g)", "category": "Fruits", "unit": "unit", "default_qty": 1,
+     "kcal": 65, "protein_g": 0.5, "carbs_g": 17, "fat_g": 0.1},
+
+    # --- Légumes ---
+    {"id": "brocoli", "name": "Brocoli", "category": "Légumes", "unit": "g", "default_qty": 100,
+     "kcal": 34, "protein_g": 2.8, "carbs_g": 7, "fat_g": 0.4},
+    {"id": "epinards", "name": "Épinards", "category": "Légumes", "unit": "g", "default_qty": 100,
+     "kcal": 23, "protein_g": 2.9, "carbs_g": 3.6, "fat_g": 0.4},
+    {"id": "courgette", "name": "Courgette", "category": "Légumes", "unit": "g", "default_qty": 100,
+     "kcal": 17, "protein_g": 1.2, "carbs_g": 3.1, "fat_g": 0.3},
+    {"id": "carotte", "name": "Carotte", "category": "Légumes", "unit": "g", "default_qty": 100,
+     "kcal": 41, "protein_g": 0.9, "carbs_g": 10, "fat_g": 0.2},
+    {"id": "tomate", "name": "Tomate", "category": "Légumes", "unit": "g", "default_qty": 100,
+     "kcal": 18, "protein_g": 0.9, "carbs_g": 3.9, "fat_g": 0.2},
+    {"id": "poivron", "name": "Poivron", "category": "Légumes", "unit": "g", "default_qty": 100,
+     "kcal": 31, "protein_g": 1, "carbs_g": 6, "fat_g": 0.3},
+    {"id": "haricots_verts", "name": "Haricots verts", "category": "Légumes", "unit": "g", "default_qty": 100,
+     "kcal": 31, "protein_g": 1.8, "carbs_g": 7, "fat_g": 0.2},
+
+    # --- Lipides ---
+    {"id": "amandes", "name": "Amandes", "category": "Lipides", "unit": "g", "default_qty": 30,
+     "kcal": 579, "protein_g": 21, "carbs_g": 22, "fat_g": 50},
+    {"id": "noix", "name": "Noix", "category": "Lipides", "unit": "g", "default_qty": 30,
+     "kcal": 654, "protein_g": 15, "carbs_g": 14, "fat_g": 65},
+    {"id": "noisettes", "name": "Noisettes", "category": "Lipides", "unit": "g", "default_qty": 30,
+     "kcal": 628, "protein_g": 15, "carbs_g": 17, "fat_g": 61},
+    {"id": "beurre_cacahuete", "name": "Beurre de cacahuète", "category": "Lipides", "unit": "g", "default_qty": 20,
+     "kcal": 588, "protein_g": 25, "carbs_g": 20, "fat_g": 50},
+    {"id": "huile_olive", "name": "Huile d'olive", "category": "Lipides", "unit": "ml", "default_qty": 10,
+     "kcal": 884, "protein_g": 0, "carbs_g": 0, "fat_g": 100},
+    {"id": "huile_colza", "name": "Huile de colza", "category": "Lipides", "unit": "ml", "default_qty": 10,
+     "kcal": 884, "protein_g": 0, "carbs_g": 0, "fat_g": 100},
+    {"id": "beurre", "name": "Beurre doux", "category": "Lipides", "unit": "g", "default_qty": 10,
+     "kcal": 717, "protein_g": 0.9, "carbs_g": 0.1, "fat_g": 81},
+
+    # --- Produits laitiers ---
+    {"id": "lait_entier", "name": "Lait entier", "category": "Laitiers", "unit": "ml", "default_qty": 200,
+     "kcal": 61, "protein_g": 3.2, "carbs_g": 4.7, "fat_g": 3.3},
+    {"id": "lait_demi", "name": "Lait demi-écrémé", "category": "Laitiers", "unit": "ml", "default_qty": 200,
+     "kcal": 47, "protein_g": 3.4, "carbs_g": 4.8, "fat_g": 1.6},
+    {"id": "yaourt_nature", "name": "Yaourt nature (1 pot ~125g)", "category": "Laitiers", "unit": "unit", "default_qty": 1,
+     "kcal": 75, "protein_g": 4.4, "carbs_g": 6, "fat_g": 4},
+    {"id": "yaourt_grec_0", "name": "Yaourt grec 0% (1 pot ~150g)", "category": "Laitiers", "unit": "unit", "default_qty": 1,
+     "kcal": 90, "protein_g": 15, "carbs_g": 6, "fat_g": 0.5},
+    {"id": "fromage_blanc_0", "name": "Fromage blanc 0%", "category": "Laitiers", "unit": "g", "default_qty": 100,
+     "kcal": 47, "protein_g": 8, "carbs_g": 3.5, "fat_g": 0.2},
+    {"id": "fromage_blanc_3", "name": "Fromage blanc 3%", "category": "Laitiers", "unit": "g", "default_qty": 100,
+     "kcal": 75, "protein_g": 7.5, "carbs_g": 4, "fat_g": 3},
+    {"id": "cottage_cheese", "name": "Cottage cheese", "category": "Laitiers", "unit": "g", "default_qty": 100,
+     "kcal": 98, "protein_g": 11, "carbs_g": 3.4, "fat_g": 4.3},
+    {"id": "mozzarella", "name": "Mozzarella", "category": "Laitiers", "unit": "g", "default_qty": 100,
+     "kcal": 280, "protein_g": 22, "carbs_g": 2.2, "fat_g": 22},
+    {"id": "cheddar", "name": "Cheddar", "category": "Laitiers", "unit": "g", "default_qty": 30,
+     "kcal": 403, "protein_g": 25, "carbs_g": 1.3, "fat_g": 33},
+    {"id": "parmesan", "name": "Parmesan", "category": "Laitiers", "unit": "g", "default_qty": 20,
+     "kcal": 431, "protein_g": 38, "carbs_g": 4, "fat_g": 29},
+
+    # --- Sucreries / pâtisseries ---
+    {"id": "chocolat_noir_70", "name": "Chocolat noir 70%", "category": "Sucreries", "unit": "g", "default_qty": 20,
+     "kcal": 598, "protein_g": 7.8, "carbs_g": 46, "fat_g": 43},
+    {"id": "chocolat_lait", "name": "Chocolat au lait", "category": "Sucreries", "unit": "g", "default_qty": 20,
+     "kcal": 540, "protein_g": 7.5, "carbs_g": 59, "fat_g": 30},
+    {"id": "cookie", "name": "Cookie (1 ~40g)", "category": "Sucreries", "unit": "unit", "default_qty": 1,
+     "kcal": 200, "protein_g": 2.5, "carbs_g": 26, "fat_g": 9.5},
+    {"id": "brownie", "name": "Brownie (1 part ~60g)", "category": "Sucreries", "unit": "unit", "default_qty": 1,
+     "kcal": 270, "protein_g": 3.5, "carbs_g": 32, "fat_g": 14},
+    {"id": "croissant", "name": "Croissant", "category": "Sucreries", "unit": "unit", "default_qty": 1,
+     "kcal": 280, "protein_g": 5.5, "carbs_g": 31, "fat_g": 15},
+    {"id": "pain_chocolat", "name": "Pain au chocolat", "category": "Sucreries", "unit": "unit", "default_qty": 1,
+     "kcal": 310, "protein_g": 5, "carbs_g": 33, "fat_g": 17},
+    {"id": "donut", "name": "Donut glacé", "category": "Sucreries", "unit": "unit", "default_qty": 1,
+     "kcal": 250, "protein_g": 3, "carbs_g": 30, "fat_g": 13},
+    {"id": "glace_boule", "name": "Glace (1 boule ~50g)", "category": "Sucreries", "unit": "unit", "default_qty": 1,
+     "kcal": 100, "protein_g": 1.5, "carbs_g": 13, "fat_g": 5},
+    {"id": "miel", "name": "Miel", "category": "Sucreries", "unit": "g", "default_qty": 15,
+     "kcal": 304, "protein_g": 0.3, "carbs_g": 82, "fat_g": 0},
+    {"id": "sucre", "name": "Sucre blanc", "category": "Sucreries", "unit": "g", "default_qty": 5,
+     "kcal": 400, "protein_g": 0, "carbs_g": 100, "fat_g": 0},
+
+    # --- Boissons ---
+    {"id": "jus_orange", "name": "Jus d'orange", "category": "Boissons", "unit": "ml", "default_qty": 250,
+     "kcal": 45, "protein_g": 0.7, "carbs_g": 10, "fat_g": 0.2},
+    {"id": "soda_cola", "name": "Soda cola", "category": "Boissons", "unit": "ml", "default_qty": 330,
+     "kcal": 42, "protein_g": 0, "carbs_g": 10.6, "fat_g": 0},
+    {"id": "biere_blonde", "name": "Bière blonde", "category": "Boissons", "unit": "ml", "default_qty": 250,
+     "kcal": 43, "protein_g": 0.5, "carbs_g": 3.6, "fat_g": 0},
+    {"id": "vin_rouge", "name": "Vin rouge", "category": "Boissons", "unit": "ml", "default_qty": 125,
+     "kcal": 85, "protein_g": 0.1, "carbs_g": 2.6, "fat_g": 0},
+    {"id": "cafe_noir", "name": "Café noir", "category": "Boissons", "unit": "ml", "default_qty": 100,
+     "kcal": 2, "protein_g": 0.1, "carbs_g": 0, "fat_g": 0},
+]
+
+
+def compute_food_macros(food: Dict[str, Any], qty: float) -> Dict[str, Any]:
+    """Compute calories & macros from FOOD_LIBRARY entry × user-given quantity."""
+    if food.get("unit") in ("g", "ml"):
+        # macros are PER 100; scale by qty/100
+        ratio = qty / 100.0
+    else:
+        # macros are PER 1 piece; scale by qty
+        ratio = qty
+    return {
+        "name": food["name"],
+        "calories": round(float(food.get("kcal", 0)) * ratio),
+        "protein_g": round(float(food.get("protein_g", 0)) * ratio, 1),
+        "carbs_g": round(float(food.get("carbs_g", 0)) * ratio, 1),
+        "fat_g": round(float(food.get("fat_g", 0)) * ratio, 1),
+    }
 
 
 def reps_for(session_type: str) -> str:
@@ -905,6 +1190,45 @@ async def perf_recent(
 async def exercises_library(authorization: Optional[str] = Header(default=None)):
     _ = await get_current_user(authorization)
     return {"exercises": EXERCISE_LIBRARY, "session_types": SESSION_TYPES}
+
+
+@api.get("/foods/library")
+async def foods_library(authorization: Optional[str] = Header(default=None)):
+    _ = await get_current_user(authorization)
+    return {"foods": FOOD_LIBRARY}
+
+
+@api.post("/meals/manual")
+async def add_manual_meal(
+    body: ManualMealRequest, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    food = next((f for f in FOOD_LIBRARY if f["id"] == body.food_id), None)
+    if not food:
+        raise HTTPException(404, "Food not found")
+    if body.quantity <= 0:
+        raise HTTPException(400, "Quantity must be > 0")
+    macros = compute_food_macros(food, float(body.quantity))
+    created = now_utc()
+    meal = {
+        "id": new_id("meal"),
+        "user_id": user["user_id"],
+        "date": today_str(),
+        "created_at": created,
+        "meal_type": body.meal_type or auto_meal_type(created),
+        "source": "manual",
+        "food_id": body.food_id,
+        "quantity": body.quantity,
+        "unit": food.get("unit"),
+        "name": body.name_override or macros["name"],
+        "calories": macros["calories"],
+        "protein_g": macros["protein_g"],
+        "carbs_g": macros["carbs_g"],
+        "fat_g": macros["fat_g"],
+        "notes": f"Saisie manuelle · {body.quantity} {food.get('unit', '')}",
+    }
+    await db.meals.insert_one(meal)
+    return strip_id(meal)
 
 
 @api.post("/activity/steps")

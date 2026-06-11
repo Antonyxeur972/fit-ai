@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 3 backend-only testing for FIT AI (expanded exercise library + new food library + manual meal entry). All 16 new tests pass + 35 regression tests pass (51/51 = 100%). Verified: (1) GET /api/exercises/library returns 95 exercises (>=80) including all gym classics required (Développé couché barre, Squat barre back squat, Soulevé de terre barre, Presse à cuisses leg press, Tirage horizontal poulie, Curl pupitre Larry Scott, Pec-deck butterfly, Hack squat machine) across all 7 categories (Pectoraux/Dos/Jambes/Épaules/Bras/Core/Cardio); session_types dict still returns volume/puissance/force with reps. (2) GET /api/foods/library returns 70 foods spanning all 9 expected categories (Compléments/Protéines/Glucides/Fruits/Légumes/Lipides/Laitiers/Sucreries/Boissons); every item has required keys (id,name,category,unit,default_qty,kcal,protein_g,carbs_g,fat_g); units restricted to g/ml/unit/scoop/capsule/tranche; no duplicate ids. (3) POST /api/meals/manual whey_scoop qty=2 → calories=240, protein=48, source='manual', name contains 'Whey', meal_type auto-set, no image_base64. (4) riz_blanc_cru qty=150g → 540 kcal, 10.5 g protein, 118.5 g carbs. (5) banane qty=1 → 105 kcal, 1.3 g protein. (6) meal_type='breakfast' override honored. (7) invalid_xyz → 404, quantity=0 → 400, quantity=-1 → 400. (8) After POST /meals/manual, GET /api/meals?date=today lists it (source='manual', no image_base64 leak). (9) Regression POST /api/workouts/generate?session_type=volume still produces 7 workouts with session_type='volume'. (10) POST /api/meals/analyze route still mounted (not 404, Claude path unchanged from iter 1/2 tests). (11) No MongoDB _id leaks anywhere (recursive checks on library, manual meal, list endpoints).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration3_features.py",
+    "/app/backend/tests/test_iteration2_features.py",
+    "/app/backend/tests/test_fitness_api.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/iteration3_results.xml",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now ~1400 lines including two large inline data fixtures (EXERCISE_LIBRARY 95 items + FOOD_LIBRARY 70 items). Consider extracting these into /app/backend/data/exercises.py and /app/backend/data/foods.py to keep server.py under ~700 lines and ease future curation by non-engineers.",
+    "compute_food_macros rounds protein/carbs/fat to 1 decimal but kcal to int. For very small quantities (e.g. créatine 5g = 0 kcal) this is fine, but accumulating many manual meals will compound rounding error; consider rounding only at the daily total in /dashboard/day.",
+    "POST /meals/manual stores 'quantity' (float) + 'unit' on the meal doc — but list_meals projection excludes only image_base64; clients now get quantity/unit/food_id/source fields. Documenting these in the OpenAPI schema (extend Meal model) would be cleaner than ad-hoc dict insertion.",
+    "Food category 'Compléments' uses accent; ensure frontend Picker/groupBy compares with normalized strings to avoid encoding mismatches.",
+    "Carried over from iteration 2: FastAPI @app.on_event('startup'/'shutdown') is deprecated — migrate to lifespan context manager."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration3_features.py (new — 16 tests covering exercise library expansion, food library, manual meal POST, regressions and _id leak checks)"
+  ],
+  "success_rate": {"backend": "100% (51/51 — 16 new + 35 regression)", "frontend": "N/A (not requested)"},
+  "seed_data_creation": "Reuses session fixture from conftest.py (user_test_001 + session token test_session_token_abc). Per-test cleanup_meals fixture removes manual meals after each TestManualMeal test; profile_seeded fixture seeds + tears down a profile for the workouts/generate regression test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Test file: /app/backend/tests/test_iteration3_features.py. Run full suite: pytest /app/backend/tests/ -v. Both EXERCISE_LIBRARY (95 items) and FOOD_LIBRARY (70 items) live inline in /app/backend/server.py — if future iterations move them, update the test_specific_items_present and test_library_includes_new_gym_classics name lists accordingly. The food id 'creatine_g' (no accent) was used in tests; backend uses same spelling. Test names check exact exercise names like 'Squat barre (back squat)' / 'Curl pupitre (Larry Scott)' — adjust if main agent renames.",
+  "rca_of_issue": "No bugs found in iteration 3. compute_food_macros correctly distinguishes per-100 units (g/ml, scaled by qty/100) from per-piece units (scoop/unit/tranche/capsule, scaled by qty directly). Validation order in /meals/manual is: food lookup first (404 if missing), then quantity>0 (400 if not) — matches spec. auto_meal_type used when meal_type missing; explicit value honored when provided. GET /meals projection excludes image_base64 so manual meals (which never had one) are returned cleanly with their new fields source/food_id/quantity/unit. No mongo _id leaks anywhere (recursive assertion confirmed)."
+}

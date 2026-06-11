@@ -1,12 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
-  Modal, RefreshControl,
+  Modal, RefreshControl, TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { api } from "@/src/api";
 import { Card, Button, SectionTitle } from "@/src/components/UI";
 import { colors, spacing, typography, radius } from "@/src/theme";
@@ -23,6 +24,19 @@ type Meal = {
   created_at: string;
   meal_type?: string;
   archived?: boolean;
+  source?: string;
+};
+
+type Food = {
+  id: string;
+  name: string;
+  category: string;
+  unit: string;
+  default_qty: number;
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
 };
 
 type ComplianceSnap = { date: string; target: number; consumed: number; compliance_pct: number; meals_count: number };
@@ -37,6 +51,14 @@ const MEAL_TYPE_LABEL: Record<string, string> = {
 
 const MEAL_TYPE_ORDER = ["breakfast", "lunch", "snack", "dinner"];
 
+function autoMealTypeFromHour(): string {
+  const h = new Date().getHours();
+  if (h >= 5 && h < 11) return "breakfast";
+  if (h >= 11 && h < 15) return "lunch";
+  if (h >= 15 && h < 19) return "snack";
+  return "dinner";
+}
+
 type Tab = "today" | "history";
 
 export default function Meals() {
@@ -49,6 +71,16 @@ export default function Meals() {
   const [lastResult, setLastResult] = useState<Meal | null>(null);
   const [showResult, setShowResult] = useState(false);
   const [cleanupBusy, setCleanupBusy] = useState(false);
+
+  // Manual food entry state
+  const [foods, setFoods] = useState<Food[]>([]);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualSearch, setManualSearch] = useState("");
+  const [manualCategory, setManualCategory] = useState<string>("Tout");
+  const [selectedFood, setSelectedFood] = useState<Food | null>(null);
+  const [manualQty, setManualQty] = useState("");
+  const [manualMealType, setManualMealType] = useState<string>("snack");
+  const [savingManual, setSavingManual] = useState(false);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -118,6 +150,60 @@ export default function Meals() {
     }
   };
 
+  const openManual = async () => {
+    setSelectedFood(null);
+    setManualQty("");
+    setManualSearch("");
+    setManualCategory("Tout");
+    setManualMealType(autoMealTypeFromHour());
+    setManualOpen(true);
+    await loadFoods();
+  };
+
+  const saveManual = async () => {
+    if (!selectedFood) return;
+    const qty = parseFloat(manualQty || "0");
+    if (!qty || qty <= 0) return;
+    setSavingManual(true);
+    try {
+      await api("/meals/manual", {
+        method: "POST",
+        body: { food_id: selectedFood.id, quantity: qty, meal_type: manualMealType },
+      });
+      setManualOpen(false);
+      await load();
+    } finally {
+      setSavingManual(false);
+    }
+  };
+
+  const previewMacros = useMemo(() => {
+    if (!selectedFood) return null;
+    const qty = parseFloat(manualQty || "0");
+    if (!qty || qty <= 0) return null;
+    const ratio = selectedFood.unit === "g" || selectedFood.unit === "ml" ? qty / 100 : qty;
+    return {
+      kcal: Math.round(selectedFood.kcal * ratio),
+      p: Math.round(selectedFood.protein_g * ratio * 10) / 10,
+      c: Math.round(selectedFood.carbs_g * ratio * 10) / 10,
+      f: Math.round(selectedFood.fat_g * ratio * 10) / 10,
+    };
+  }, [selectedFood, manualQty]);
+
+  const foodCategories = useMemo(() => {
+    const set = new Set(foods.map((f) => f.category));
+    return ["Tout", ...Array.from(set)];
+  }, [foods]);
+
+  const filteredFoods = useMemo(() => {
+    const q = manualSearch.trim().toLowerCase();
+    return foods.filter((f) => {
+      if (manualCategory !== "Tout" && f.category !== manualCategory) return false;
+      if (q && !f.name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [foods, manualSearch, manualCategory]);
+
   const total = todayMeals.reduce((s, m) => s + m.calories, 0);
 
   // Group today by meal_type
@@ -182,6 +268,13 @@ export default function Meals() {
               <Button title={analyzing ? "Analyse..." : "Photo"} onPress={() => pickImage(true)} loading={analyzing} icon={<Ionicons name="camera-outline" size={18} color="#fff" />} testID="meals-camera-button" style={{ flex: 1 }} />
               <Button title="Galerie" onPress={() => pickImage(false)} variant="secondary" icon={<Ionicons name="images-outline" size={18} color={colors.primary} />} testID="meals-library-button" style={{ flex: 1 }} />
             </View>
+            <Button
+              title="Ajout manuel (aliment)"
+              onPress={openManual}
+              variant="ghost"
+              icon={<Ionicons name="add-circle-outline" size={18} color={colors.primary} />}
+              testID="meals-manual-button"
+            />
 
             {error && (
               <View style={styles.errorBox} testID="meals-error">
@@ -286,8 +379,180 @@ export default function Meals() {
           </View>
         </View>
       )}
+
+      {/* Manual food entry modal */}
+      <Modal visible={manualOpen} transparent animationType="slide" onRequestClose={() => setManualOpen(false)}>
+        <View style={styles.modalBg}>
+          <View style={[styles.modalCard, { maxHeight: "92%", paddingBottom: 0 }]}>
+            <View style={styles.modalHandle} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={styles.modalTitle}>Ajouter un aliment</Text>
+              <TouchableOpacity onPress={() => setManualOpen(false)} testID="manual-close">
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {!selectedFood ? (
+              <>
+                {/* Search */}
+                <View style={styles.searchBox}>
+                  <Ionicons name="search" size={16} color={colors.textSecondary} />
+                  <TextInput
+                    value={manualSearch}
+                    onChangeText={setManualSearch}
+                    placeholder="Rechercher (whey, riz, banane...)"
+                    placeholderTextColor={colors.textMuted}
+                    style={{ flex: 1, fontSize: 15, color: colors.textMain }}
+                    testID="manual-search-input"
+                  />
+                </View>
+
+                {/* Categories chip row (horizontal) */}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={{ marginHorizontal: -spacing.lg, marginTop: spacing.sm }}
+                  contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: 8 }}
+                  testID="manual-cat-chips"
+                >
+                  {foodCategories.map((c) => {
+                    const isOn = c === manualCategory;
+                    return (
+                      <TouchableOpacity
+                        key={c}
+                        onPress={() => setManualCategory(c)}
+                        style={[styles.catChip, isOn && styles.catChipOn]}
+                        testID={`manual-cat-${c}`}
+                      >
+                        <Text style={[styles.catChipText, isOn && { color: colors.primary, fontWeight: "700" }]}>{c}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+
+                {/* Food list */}
+                <ScrollView style={{ marginTop: spacing.sm }} contentContainerStyle={{ paddingBottom: spacing.xxl }}>
+                  {filteredFoods.length === 0 ? (
+                    <Text style={[typography.small, { textAlign: "center", marginTop: spacing.lg }]}>Aucun aliment trouvé.</Text>
+                  ) : (
+                    filteredFoods.map((f) => (
+                      <TouchableOpacity
+                        key={f.id}
+                        onPress={() => { setSelectedFood(f); setManualQty(String(f.default_qty)); }}
+                        style={styles.foodRow}
+                        testID={`food-${f.id}`}
+                      >
+                        <View style={{ flex: 1 }}>
+                          <Text style={[typography.body, { fontWeight: "600" }]}>{f.name}</Text>
+                          <Text style={typography.small}>
+                            {f.kcal} kcal · P {f.protein_g}g · G {f.carbs_g}g · L {f.fat_g}g
+                            <Text style={{ color: colors.textMuted }}>
+                              {f.unit === "g" || f.unit === "ml" ? ` (pour 100 ${f.unit})` : ` (par ${f.unit})`}
+                            </Text>
+                          </Text>
+                        </View>
+                        <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                      </TouchableOpacity>
+                    ))
+                  )}
+                </ScrollView>
+              </>
+            ) : (
+              <KeyboardAwareScrollView contentContainerStyle={{ paddingBottom: spacing.xxl }} bottomOffset={20} keyboardShouldPersistTaps="handled">
+                <TouchableOpacity onPress={() => setSelectedFood(null)} style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: spacing.sm }} testID="manual-back">
+                  <Ionicons name="chevron-back" size={18} color={colors.primary} />
+                  <Text style={[typography.small, { color: colors.primary, fontWeight: "600" }]}>Retour</Text>
+                </TouchableOpacity>
+
+                <Text style={[typography.h3, { marginTop: spacing.sm }]}>{selectedFood.name}</Text>
+                <Text style={typography.small}>{selectedFood.category}</Text>
+
+                <Text style={[typography.caption, { marginTop: spacing.lg }]}>Quantité</Text>
+                <View style={styles.qtyRow}>
+                  <TextInput
+                    value={manualQty}
+                    onChangeText={(t) => setManualQty(t.replace(/[^0-9.]/g, ""))}
+                    keyboardType="decimal-pad"
+                    placeholder="0"
+                    placeholderTextColor={colors.textMuted}
+                    style={styles.qtyInput}
+                    autoFocus
+                    testID="manual-qty-input"
+                  />
+                  <Text style={styles.qtyUnit}>{selectedFood.unit}</Text>
+                </View>
+
+                {/* Quick qty chips */}
+                <View style={styles.quickQtyRow}>
+                  {quickQtyOptions(selectedFood).map((q) => (
+                    <TouchableOpacity
+                      key={q}
+                      onPress={() => setManualQty(String(q))}
+                      style={styles.quickQtyChip}
+                      testID={`qty-quick-${q}`}
+                    >
+                      <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>{q} {selectedFood.unit}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Meal type selector */}
+                <Text style={[typography.caption, { marginTop: spacing.lg }]}>Catégorie de repas</Text>
+                <View style={styles.mealTypeRow}>
+                  {MEAL_TYPE_ORDER.map((t) => (
+                    <TouchableOpacity
+                      key={t}
+                      onPress={() => setManualMealType(t)}
+                      style={[styles.mealTypeChip, manualMealType === t && styles.mealTypeChipOn]}
+                      testID={`manual-meal-type-${t}`}
+                    >
+                      <Text style={[typography.small, { fontWeight: "600", color: manualMealType === t ? colors.primary : colors.textSecondary }]}>
+                        {MEAL_TYPE_LABEL[t]}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                {/* Macros preview */}
+                {previewMacros && (
+                  <View style={styles.previewBox} testID="manual-preview">
+                    <View style={{ flex: 1 }}>
+                      <Text style={typography.caption}>Pour {manualQty} {selectedFood.unit}</Text>
+                      <Text style={[typography.h2, { lineHeight: 32 }]}>
+                        {previewMacros.kcal} <Text style={[typography.small, { fontSize: 14 }]}>kcal</Text>
+                      </Text>
+                      <Text style={[typography.small, { marginTop: 2 }]}>
+                        P {previewMacros.p}g · G {previewMacros.c}g · L {previewMacros.f}g
+                      </Text>
+                    </View>
+                    <Ionicons name="leaf" size={26} color={colors.primary} />
+                  </View>
+                )}
+
+                <Button
+                  title="Ajouter à mes repas"
+                  onPress={saveManual}
+                  loading={savingManual}
+                  disabled={!previewMacros}
+                  style={{ marginTop: spacing.md }}
+                  testID="manual-save"
+                />
+                <View style={{ height: spacing.lg }} />
+              </KeyboardAwareScrollView>
+            )}
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
+}
+
+function quickQtyOptions(f: Food): number[] {
+  const d = f.default_qty || 100;
+  if (f.unit === "g" || f.unit === "ml") {
+    return [Math.round(d / 2), d, d * 2, d * 3];
+  }
+  return [1, 2, 3, 5];
 }
 
 function MealCard({ meal, onDelete }: { meal: Meal; onDelete: () => void }) {
