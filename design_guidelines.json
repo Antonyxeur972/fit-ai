@@ -1,0 +1,117 @@
+{
+  "project_name": "Performance-Driven Fitness App",
+  "theme": "light",
+  "archetype": "Organic & Earthy",
+  "typography": {
+    "headings": "Poppins",
+    "body": "Inter",
+    "scale": {
+      "h1": "text-4xl sm:text-5xl tracking-tight leading-none",
+      "h2": "text-2xl sm:text-3xl tracking-tight",
+      "h3": "text-xl sm:text-2xl tracking-tight",
+      "h4": "text-lg sm:text-xl",
+      "body": "text-base leading-relaxed",
+      "small": "text-sm",
+      "caption": "text-xs tracking-[0.2em] uppercase"
+    }
+  },
+  "colors": {
+    "background": "#FAFAF8",
+    "surface": "#FFFFFF",
+    "primary": "#2D7C3E",
+    "primary_light": "#4ADE80",
+    "primary_pale": "#E8F5E9",
+    "text_main": "#1A1A1A",
+    "text_secondary": "#666666",
+    "alert": "#EF4444",
+    "border": "#E5E5E5"
+  },
+  "spacing": {
+    "xs": "4px",
+    "sm": "8px",
+    "md": "16px",
+    "lg": "24px",
+    "xl": "32px",
+    "2xl": "48px",
+    "3xl": "64px"
+  },
+  "border_radius": {
+    "sm": "8px",
+    "md": "16px",
+    "lg": "24px",
+    "full": "9999px"
+  },
+  "shadows": {
+    "sm": "0 2px 8px rgba(0,0,0,0.04)",
+    "md": "0 8px 24px rgba(0,0,0,0.06)",
+    "lg": "0 16px 40px rgba(0,0,0,0.08)"
+  },
+  "screens": [
+    {
+      "name": "Onboarding",
+      "description": "Profil setup (poids, âge, objectif) with organic progress bar."
+    },
+    {
+      "name": "Dashboard",
+      "description": "Daily performance breakdown, caloric budget, activity rings."
+    },
+    {
+      "name": "MealAnalysis",
+      "description": "Camera integration, AI macro breakdown, history charts."
+    },
+    {
+      "name": "Training",
+      "description": "Custom home workout plan, exercise list, progress tracking."
+    },
+    {
+      "name": "Transformation",
+      "description": "Before/after photo comparison, upload interface."
+    }
+  ],
+  "navigation": {
+    "type": "BottomTabs",
+    "items": [
+      { "name": "Dashboard", "icon": "home" },
+      { "name": "Repas", "icon": "camera" },
+      { "name": "Entraînement", "icon": "activity" },
+      { "name": "Progression", "icon": "trending-up" }
+    ]
+  },
+  "component_patterns": {
+    "buttons": {
+      "primary": "Background #2D7C3E, text #FFFFFF, rounded-full or rounded-xl, no shadow, subtle scale on press.",
+      "secondary": "Background #E8F5E9, text #2D7C3E, rounded-full or rounded-xl."
+    },
+    "cards": {
+      "base": "Background #FFFFFF, border 1px solid #E5E5E5 or very light shadow, rounded-2xl, generous internal padding (p-6)."
+    },
+    "progress_rings": {
+      "style": "Organic curves, track color #E8F5E9, progress color #2D7C3E or #4ADE80, rounded stroke caps."
+    },
+    "charts": {
+      "style": "Minimalist bar or spline area charts. Monochromatic green scales. No grid lines or very faint."
+    }
+  },
+  "media_urls": {
+    "food_healthy": [
+      "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDB8MHwxfHNlYXJjaHwxfHxoZWFsdGh5JTIwc2FsYWQlMjBib3dsfGVufDB8fHx8MTc4MTE0MDA5Mnww&ixlib=rb-4.1.0&q=85",
+      "https://images.unsplash.com/photo-1540420773420-3366772f4999?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA3MDB8MHwxfHNlYXJjaHwzfHxoZWFsdGh5JTIwc2FsYWQlMjBib3dsfGVufDB8fHx8MTc4MTE0MDA5Mnww&ixlib=rb-4.1.0&q=85"
+    ],
+    "workout_home": [
+      "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwxfHxob21lJTIwd29ya291dHxlbnwwfHx8fDE3ODExNDAwOTJ8MA&ixlib=rb-4.1.0&q=85",
+      "https://images.unsplash.com/photo-1591258370814-01609b341790?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2OTF8MHwxfHNlYXJjaHwyfHxob21lJTIwd29ya291dHxlbnwwfHx8fDE3ODExNDAwOTJ8MA&ixlib=rb-4.1.0&q=85"
+    ],
+    "fitness_portrait": [
+      "https://images.unsplash.com/photo-1518617840859-acd542e13a99?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2MjJ8MHwxfHNlYXJjaHwzfHxmaXRuZXNzJTIwcG9ydHJhaXQlMjBuYXR1cmFsfGVufDB8fHx8MTc4MTE0MDA5M3ww&ixlib=rb-4.1.0&q=85",
+      "https://images.pexels.com/photos/842545/pexels-photo-842545.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+    ]
+  },
+  "instructions_to_main_agent": [
+    "Use React Native (Expo). Do NOT use standard Shadcn UI components for web, stick to React Native compatible UI libraries or build custom components matching the Tailwind instructions (e.g., using NativeWind).",
+    "Implement the 'Organic & Earthy' archetype: The app must feel premium and natural, utilizing the specific color palette (#FAFAF8 background, #2D7C3E accents).",
+    "Keep text high contrast. Poppins for headings and Inter for body text.",
+    "Adopt 'Performance over motivation' tone. Prioritize readable real-time data.",
+    "Layout: Focus on organic curves (rounded-2xl or full). Use 1px soft borders or very light shadows for elevation.",
+    "Every interactive or key informational element MUST include a `testID` attribute (React Native equivalent to `data-testid`) formatted as role-based kebab-case, e.g. `testID=\"login-submit-button\"`."
+  ]
+}
