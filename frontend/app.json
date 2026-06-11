@@ -1,22 +1,27 @@
 {
   "expo": {
-    "name": "frontend",
+    "name": "Performance Fitness",
     "slug": "frontend",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "frontend",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Prendre des photos de tes repas et progressions",
+        "NSPhotoLibraryUsageDescription": "Sélectionner photos de repas et transformations"
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#000"
+        "backgroundColor": "#FAFAF8"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "permissions": ["CAMERA", "READ_EXTERNAL_STORAGE", "READ_MEDIA_IMAGES"]
     },
     "web": {
       "bundler": "metro",
@@ -31,10 +36,23 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#000"
+          "backgroundColor": "#FAFAF8"
         }
       ],
-      "expo-font"
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "L'app accède à tes photos pour analyser tes repas.",
+          "cameraPermission": "L'app utilise la caméra pour photographier tes repas."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "L'app utilise la caméra pour photographier tes repas."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
