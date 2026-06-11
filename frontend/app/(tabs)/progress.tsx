@@ -1,11 +1,11 @@
-import { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator } from "react-native";
+import { useCallback, useMemo, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
-import { Card, Button, SectionTitle, WeekBars } from "@/src/components/UI";
+import { Card, Button, SectionTitle, WeekBars, LineChart1RM } from "@/src/components/UI";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type Transfo = {
@@ -23,23 +23,45 @@ type Week = {
   target: number;
 };
 
+type Perf = {
+  id: string;
+  exercise_name: string;
+  weight_kg: number;
+  reps: number;
+  est_1rm: number;
+  created_at: string;
+};
+
+type PerfPayload = { items: Perf[]; personal_bests: Perf[] };
+
 export default function Progress() {
   const [transfos, setTransfos] = useState<Transfo[]>([]);
   const [week, setWeek] = useState<Week | null>(null);
+  const [perf, setPerf] = useState<PerfPayload>({ items: [], personal_bests: [] });
+  const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [list, w] = await Promise.all([
+      const [list, w, p] = await Promise.all([
         api<Transfo[]>("/transformations"),
         api<Week>("/dashboard/week"),
+        api<PerfPayload>("/perf/recent?limit=200"),
       ]);
       setTransfos(list);
       setWeek(w);
+      setPerf(p);
+      if (!selectedExercise && p.personal_bests.length > 0) {
+        // Pre-select exercise with most data points
+        const counts: Record<string, number> = {};
+        p.items.forEach((it) => { counts[it.exercise_name] = (counts[it.exercise_name] || 0) + 1; });
+        const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0];
+        if (top) setSelectedExercise(top);
+      }
     } catch (e) {
       console.warn("progress load", e);
     }
-  }, []);
+  }, [selectedExercise]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -69,6 +91,33 @@ export default function Progress() {
   const totalWeekSteps = week?.days.reduce((s, d) => s + d.steps, 0) || 0;
   const totalCardioMin = week?.days.reduce((s, d) => s + d.cardio_minutes, 0) || 0;
 
+  // 1RM chart data for the selected exercise (chronological order)
+  const chartData = useMemo(() => {
+    if (!selectedExercise) return [];
+    return perf.items
+      .filter((p) => p.exercise_name === selectedExercise)
+      .map((p) => ({ x: new Date(p.created_at).getTime(), y: p.est_1rm }))
+      .sort((a, b) => a.x - b.x);
+  }, [perf.items, selectedExercise]);
+
+  const selectedBest = useMemo(() => {
+    if (!selectedExercise) return null;
+    return perf.personal_bests.find((p) => p.exercise_name === selectedExercise) || null;
+  }, [perf.personal_bests, selectedExercise]);
+
+  const trend = useMemo(() => {
+    if (chartData.length < 2) return null;
+    const first = chartData[0].y;
+    const last = chartData[chartData.length - 1].y;
+    const delta = last - first;
+    const pct = first > 0 ? (delta / first) * 100 : 0;
+    return { delta, pct };
+  }, [chartData]);
+
+  const exerciseList = perf.personal_bests
+    .slice()
+    .sort((a, b) => b.est_1rm - a.est_1rm);
+
   return (
     <SafeAreaView style={styles.safe} edges={["top"]} testID="progress-screen">
       <View style={styles.header}>
@@ -77,6 +126,100 @@ export default function Progress() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {/* 1RM Progression — THE addictive number */}
+        <Card testID="rm-card">
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm }}>
+            <Text style={typography.caption}>Force · Progression 1RM</Text>
+            {exerciseList.length > 0 && (
+              <View style={styles.flashChip}>
+                <Ionicons name="flash" size={12} color={colors.primary} />
+                <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Epley</Text>
+              </View>
+            )}
+          </View>
+
+          {exerciseList.length === 0 ? (
+            <View style={{ alignItems: "center", paddingVertical: spacing.lg }}>
+              <View style={styles.emptyIcon}>
+                <Ionicons name="trending-up" size={28} color={colors.primary} />
+              </View>
+              <Text style={[typography.body, { fontWeight: "600", marginTop: spacing.md }]}>
+                {"Aucune perf enregistrée"}
+              </Text>
+              <Text style={[typography.small, { textAlign: "center", marginTop: 6 }]}>
+                {"Tape sur un exercice dans Training → enregistre charge × reps. Ta courbe 1RM commence ici."}
+              </Text>
+            </View>
+          ) : (
+            <>
+              {selectedExercise && (
+                <View style={{ marginBottom: spacing.sm }}>
+                  <Text style={[typography.h2, { lineHeight: 32 }]}>
+                    {selectedBest?.est_1rm.toFixed(1)} <Text style={[typography.small, { fontSize: 14 }]}>kg</Text>
+                  </Text>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
+                    <Text style={[typography.small, { color: colors.textSecondary }]}>
+                      Record · {selectedExercise}
+                    </Text>
+                    {trend && (
+                      <View style={[styles.trendChip, { backgroundColor: trend.delta >= 0 ? "#DCFCE7" : "#FEE2E2" }]}>
+                        <Ionicons
+                          name={trend.delta >= 0 ? "trending-up" : "trending-down"}
+                          size={12}
+                          color={trend.delta >= 0 ? colors.primary : colors.alert}
+                        />
+                        <Text style={[typography.small, { fontWeight: "700", color: trend.delta >= 0 ? colors.primary : colors.alert }]}>
+                          {trend.delta >= 0 ? "+" : ""}{trend.delta.toFixed(1)} kg · {trend.pct >= 0 ? "+" : ""}{trend.pct.toFixed(0)}%
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              )}
+
+              <View style={{ alignItems: "center" }}>
+                {chartData.length >= 2 ? (
+                  <LineChart1RM data={chartData} width={320} height={160} testID="rm-chart" />
+                ) : (
+                  <View style={styles.chartEmpty}>
+                    <Text style={[typography.small, { textAlign: "center" }]}>
+                      {"Enregistre une 2e perf pour voir ta courbe d'évolution."}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Exercise selector chips */}
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={{ gap: 8, paddingHorizontal: 0 }}
+                style={{ marginTop: spacing.md, marginHorizontal: -spacing.lg, paddingHorizontal: spacing.lg }}
+                testID="rm-exercise-chips"
+              >
+                {exerciseList.map((pb) => {
+                  const isOn = pb.exercise_name === selectedExercise;
+                  return (
+                    <TouchableOpacity
+                      key={pb.exercise_name}
+                      onPress={() => setSelectedExercise(pb.exercise_name)}
+                      style={[styles.exerciseChip, isOn && styles.exerciseChipOn]}
+                      testID={`rm-chip-${pb.exercise_name}`}
+                    >
+                      <Text style={[styles.exerciseChipText, isOn && { color: colors.primary, fontWeight: "700" }]} numberOfLines={1}>
+                        {pb.exercise_name}
+                      </Text>
+                      <Text style={[styles.exerciseChipKg, isOn && { color: colors.primary }]}>
+                        {pb.est_1rm.toFixed(0)} kg
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </>
+          )}
+        </Card>
+
         {/* Week chart */}
         <Card testID="week-card">
           <SectionTitle title="Calories cette semaine" />
@@ -188,4 +331,11 @@ const styles = StyleSheet.create({
   emptyIcon: { width: 56, height: 56, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center" },
   transfoImg: { width: 96, height: 128, borderRadius: radius.md, backgroundColor: colors.border },
   uploadingRow: { flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", paddingVertical: spacing.sm },
+  flashChip: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, backgroundColor: colors.primaryPale },
+  trendChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full },
+  chartEmpty: { width: 320, height: 100, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderStyle: "dashed", borderRadius: radius.md, paddingHorizontal: spacing.lg },
+  exerciseChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, flexShrink: 0, alignItems: "center" },
+  exerciseChipOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
+  exerciseChipText: { fontSize: 12, color: colors.textSecondary, fontWeight: "600", maxWidth: 130 },
+  exerciseChipKg: { fontSize: 10, color: colors.textMuted, fontWeight: "700", marginTop: 1 },
 });

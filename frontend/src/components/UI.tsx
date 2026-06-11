@@ -1,6 +1,6 @@
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ViewStyle, TextStyle } from "react-native";
 import { ReactNode } from "react";
-import Svg, { Circle, Defs, LinearGradient, Stop } from "react-native-svg";
+import Svg, { Circle, Defs, LinearGradient, Stop, Path, Polyline } from "react-native-svg";
 import { colors, radius, spacing, shadow, typography } from "../theme";
 
 // --- Card ---
@@ -167,6 +167,126 @@ export function MacroBar({
       </View>
       <View style={styles.macroTrack}>
         <View style={[styles.macroFill, { width: `${pct * 100}%`, backgroundColor: color }]} />
+      </View>
+    </View>
+  );
+}
+
+// --- Line chart 1RM progression ---
+export function LineChart1RM({
+  data,
+  width = 320,
+  height = 140,
+  color = colors.primary,
+  testID,
+}: {
+  data: { x: number; y: number }[]; // x = timestamp ms, y = 1rm kg
+  width?: number;
+  height?: number;
+  color?: string;
+  testID?: string;
+}) {
+  if (data.length === 0) return null;
+  const pad = { top: 14, right: 12, bottom: 22, left: 36 };
+  const w = width - pad.left - pad.right;
+  const h = height - pad.top - pad.bottom;
+
+  const xs = data.map((d) => d.x);
+  const ys = data.map((d) => d.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  const spanX = Math.max(1, maxX - minX);
+  // Add 10% padding to y range for breathing room
+  const yPad = (maxY - minY) * 0.12 || maxY * 0.1 || 1;
+  const lowY = minY - yPad;
+  const highY = maxY + yPad;
+  const spanY = highY - lowY || 1;
+
+  const scaleX = (x: number) => pad.left + ((x - minX) / spanX) * w;
+  const scaleY = (y: number) => pad.top + h - ((y - lowY) / spanY) * h;
+
+  const points = data
+    .map((d) => `${scaleX(d.x).toFixed(1)},${scaleY(d.y).toFixed(1)}`)
+    .join(" ");
+
+  // Area under curve
+  const areaPath = (() => {
+    if (data.length < 2) return "";
+    const top = data
+      .map((d, i) => `${i === 0 ? "M" : "L"} ${scaleX(d.x).toFixed(1)} ${scaleY(d.y).toFixed(1)}`)
+      .join(" ");
+    const last = data[data.length - 1];
+    const first = data[0];
+    return `${top} L ${scaleX(last.x).toFixed(1)} ${(pad.top + h).toFixed(1)} L ${scaleX(first.x).toFixed(1)} ${(pad.top + h).toFixed(1)} Z`;
+  })();
+
+  // Y axis labels (low, mid, high)
+  const yLabels = [highY, (highY + lowY) / 2, lowY];
+
+  return (
+    <View testID={testID} style={{ width, height }}>
+      <Svg width={width} height={height}>
+        <Defs>
+          <LinearGradient id="rmgrad" x1="0" y1="0" x2="0" y2="1">
+            <Stop offset="0" stopColor={color} stopOpacity={0.25} />
+            <Stop offset="1" stopColor={color} stopOpacity={0} />
+          </LinearGradient>
+        </Defs>
+        {/* gridlines */}
+        {yLabels.map((y, i) => {
+          const py = scaleY(y);
+          return (
+            <Polyline
+              key={i}
+              points={`${pad.left},${py.toFixed(1)} ${(pad.left + w).toFixed(1)},${py.toFixed(1)}`}
+              stroke={colors.border}
+              strokeWidth={1}
+              strokeDasharray="4 6"
+            />
+          );
+        })}
+        {data.length > 1 && <Path d={areaPath} fill="url(#rmgrad)" />}
+        {data.length > 1 && (
+          <Polyline points={points} fill="none" stroke={color} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+        )}
+        {data.map((d, i) => (
+          <Circle
+            key={i}
+            cx={scaleX(d.x)}
+            cy={scaleY(d.y)}
+            r={i === data.length - 1 ? 5 : 3.5}
+            fill={i === data.length - 1 ? color : "#fff"}
+            stroke={color}
+            strokeWidth={2}
+          />
+        ))}
+      </Svg>
+      {/* Y axis labels (rendered with absolute text views) */}
+      {yLabels.map((y, i) => (
+        <View
+          key={i}
+          style={{
+            position: "absolute",
+            left: 0,
+            top: scaleY(y) - 8,
+            width: pad.left - 4,
+          }}
+        >
+          <Text style={{ fontSize: 10, color: colors.textMuted, textAlign: "right" }}>
+            {Math.round(y)}
+          </Text>
+        </View>
+      ))}
+      {/* X axis: first & last date */}
+      <View style={{ position: "absolute", left: pad.left, right: pad.right, bottom: 2, flexDirection: "row", justifyContent: "space-between" }}>
+        <Text style={{ fontSize: 10, color: colors.textMuted }}>
+          {new Date(minX).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
+        </Text>
+        <Text style={{ fontSize: 10, color: colors.textMuted }}>
+          {new Date(maxX).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}
+        </Text>
       </View>
     </View>
   );
