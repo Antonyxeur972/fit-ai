@@ -45,8 +45,11 @@ export default function Login() {
         end={{ x: 0.9, y: 0.7 }}
       />
       <View style={styles.container}>
-        <View style={styles.heroLeaf}>
-          <Ionicons name="leaf" size={28} color={colors.primary} />
+        <View style={styles.brandRow}>
+          <View style={styles.heroLeaf}>
+            <Ionicons name="leaf" size={28} color={colors.primary} />
+          </View>
+          <Text style={styles.brandText}>FIT AI</Text>
         </View>
         <Text style={typography.caption}>Performance over motivation</Text>
         <Text style={styles.title}>{"Les données\nne mentent pas."}</Text>
@@ -93,14 +96,15 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   container: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.xl },
   heroLeaf: {
-    width: 56,
-    height: 56,
+    width: 44,
+    height: 44,
     borderRadius: radius.full,
     backgroundColor: colors.primaryPale,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: spacing.lg,
   },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: 12, marginBottom: spacing.lg },
+  brandText: { fontSize: 22, fontWeight: "800", color: colors.textMain, letterSpacing: 2 },
   title: { fontSize: 40, fontWeight: "800", color: colors.textMain, letterSpacing: -1.2, lineHeight: 44, marginTop: 4 },
   subtitle: { ...typography.body, color: colors.textSecondary, marginTop: spacing.md, lineHeight: 22 },
   previewCard: {

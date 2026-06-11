@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 2 backend-only testing for FIT AI (rename + new features). All 16 new tests + 19 regression tests pass (35/35 = 100%). Verified: (1) auth bypass via seeded user_sessions + Bearer test_session_token_abc still works; (2) POST /api/workouts/generate?session_type=puissance returns 7 workouts with session_type='puissance' and reps='6-8' in non-rest days; session_type=force returns reps='3-6'; default (no param) returns volume + reps='10-12'; (3) GET /api/exercises/library returns >=20 grouped exercises (Pectoraux/Dos/Jambes/Épaules/Bras/Core/Cardio) + session_types dict with volume/puissance/force entries each carrying reps; (4) PUT /api/workouts/{id} with new exercises + session_type='force' persists, GET /api/workouts/today reflects updates; (5) POST /api/workouts/{id}/perf with weight_kg=80 reps=5 returns est_1rm=93.3 (Epley) and reps=1 returns weight itself; (6) GET /api/perf/recent returns items + personal_bests as max est_1rm per exercise_name; (7) POST /api/activity/steps increments (3500+3500=7000); (8) POST /api/meals/analyze auto-sets meal_type from UTC hour (breakfast/lunch/snack/dinner); explicit meal_type='dinner' overrides; (9) GET /api/meals?history=true returns {days:[{date, compliance:{compliance_pct,target,consumed,meals_count}, meals:[]}]} sorted desc; (10) Lifecycle: meal at -10d auto-archives (hidden by default, visible with include_archived=true); meal at -16d gets compliance snapshot then deleted; (11) DELETE /api/meals/older-than/3 snapshots and purges; (12) GET /api/compliance/history returns snapshots sorted desc; (13) No MongoDB _id leak in any response (recursively checked).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration2_features.py",
+    "/app/backend/tests/test_fitness_api.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml",
+    "/app/test_reports/pytest/iteration2_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "auto_meal_type uses UTC hour (created_at.hour) — comment in code acknowledges 'good enough for MVP' but real users in non-UTC timezones may get wrong meal_type around timezone boundaries. Consider passing client tz offset later.",
+    "run_meal_lifecycle runs on every GET /api/meals; for users with many meals this is O(distinct dates) aggregate + 2 writes per request. Acceptable for MVP but should be moved to a daily cron / background task at scale.",
+    "estimate_1rm caps reps at 12 but does not cap weight or guard against extreme inputs (e.g., negative reps already short-circuit). Pydantic-side validation (Field(gt=0)) on ExercisePerf would be safer.",
+    "PUT /api/workouts/{id}: when 'exercises' is provided, every exercise field is reset to defaults if not supplied by client (sets=3, reps='10', rest_s=60). This is acceptable since clients usually echo full state, but documentation should make this explicit.",
+    "FastAPI @app.on_event('startup'/'shutdown') is deprecated — migrate to lifespan context manager (carried over from iteration 1)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration2_features.py (new — 16 tests for all iteration 2 features)"
+  ],
+  "success_rate": {"backend": "100% (35/35)", "frontend": "N/A (not requested)"},
+  "seed_data_creation": "Reused user_test_001 + session test_session_token_abc seeded by conftest.py. Per-test fixtures also seed transient meals (10d/16d/5d old) and compliance snapshots, all cleaned up after each test.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 2 test file is /app/backend/tests/test_iteration2_features.py. Run all backend tests with: pytest /app/backend/tests/ -v. Reuses /tmp/meal.jpg and /tmp/person.jpg (already on disk). Session token is test_session_token_abc against user_test_001 — fixtures handle seed+cleanup. Auto-meal_type test uses current UTC hour, so it's time-deterministic without freezing time. The history endpoint returns purged dates with purged=true flag when snapshots exist without live meals — verified working but no dedicated test yet (covered indirectly by snapshot tests).",
+  "rca_of_issue": "No bugs found in iteration 2 features. Auth bypass pattern via direct MongoDB seeding still works as documented in /app/memory/test_credentials.md. All new endpoints behave per spec: Epley 1RM (80kg × 5 reps → 93.3 kg, 100kg × 1 rep → 100 kg), meal_type auto-derivation, archive-at-7d/delete-at-14d lifecycle with compliance snapshots preserving daily compliance_pct after meals are purged, and exercise library grouping. No mongo _id leaks anywhere (recursive check on all responses)."
+}

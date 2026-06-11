@@ -1,12 +1,13 @@
 import { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, TextInput, Modal } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
-import { Card, ProgressRing, MacroBar, SectionTitle, Stat } from "@/src/components/UI";
+import { Card, ProgressRing, MacroBar, SectionTitle, Stat, Button } from "@/src/components/UI";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type DashboardData = {
@@ -27,6 +28,9 @@ export default function Dashboard() {
   const { user } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [stepsModal, setStepsModal] = useState(false);
+  const [stepsInput, setStepsInput] = useState("");
+  const [savingSteps, setSavingSteps] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -47,6 +51,20 @@ export default function Dashboard() {
     setRefreshing(true);
     await load();
     setRefreshing(false);
+  };
+
+  const addSteps = async () => {
+    const n = parseInt(stepsInput || "0", 10);
+    if (!n || n <= 0) return;
+    setSavingSteps(true);
+    try {
+      await api("/activity/steps", { method: "POST", body: { steps: n } });
+      setStepsInput("");
+      setStepsModal(false);
+      await load();
+    } finally {
+      setSavingSteps(false);
+    }
   };
 
   if (!data) {
@@ -181,8 +199,11 @@ export default function Dashboard() {
         {/* Activity quick */}
         <Card testID="dashboard-activity-card">
           <SectionTitle title="Activité" action={
-            <TouchableOpacity onPress={() => router.push("/(tabs)/training")} testID="dashboard-activity-edit">
-              <Text style={[typography.small, { color: colors.primary, fontWeight: "600" }]}>Modifier</Text>
+            <TouchableOpacity onPress={() => setStepsModal(true)} testID="dashboard-add-steps">
+              <View style={styles.addStepsBtn}>
+                <Ionicons name="add" size={16} color={colors.primary} />
+                <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Pas</Text>
+              </View>
             </TouchableOpacity>
           } />
           <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
@@ -194,6 +215,43 @@ export default function Dashboard() {
 
         <View style={{ height: spacing.xl }} />
       </ScrollView>
+
+      <Modal visible={stepsModal} transparent animationType="slide" onRequestClose={() => setStepsModal(false)}>
+        <View style={styles.modalBg}>
+          <KeyboardAwareScrollView contentContainerStyle={styles.modalCard} keyboardShouldPersistTaps="handled" bottomOffset={20}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Ajouter des pas</Text>
+            <Text style={[typography.small, { marginTop: 4 }]}>Total actuel : {data.activity.steps.toLocaleString("fr-FR")} pas</Text>
+            <TextInput
+              value={stepsInput}
+              onChangeText={(t) => setStepsInput(t.replace(/[^0-9]/g, ""))}
+              keyboardType="numeric"
+              placeholder="ex: 3500"
+              placeholderTextColor={colors.textMuted}
+              style={styles.stepInput}
+              testID="dashboard-steps-input"
+              autoFocus
+            />
+            <View style={styles.quickRow}>
+              {[500, 1000, 2500, 5000].map((n) => (
+                <TouchableOpacity
+                  key={n}
+                  onPress={() => setStepsInput(String((parseInt(stepsInput || "0", 10) || 0) + n))}
+                  style={styles.quickChip}
+                  testID={`steps-quick-${n}`}
+                >
+                  <Text style={[typography.small, { color: colors.primary, fontWeight: "600" }]}>+{n.toLocaleString("fr-FR")}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.md }}>
+              <Button title="Annuler" variant="secondary" onPress={() => { setStepsInput(""); setStepsModal(false); }} style={{ flex: 1 }} testID="steps-cancel" />
+              <Button title="Ajouter" onPress={addSteps} loading={savingSteps} style={{ flex: 1.4 }} testID="steps-add-confirm" />
+            </View>
+            <View style={{ height: spacing.lg }} />
+          </KeyboardAwareScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -231,4 +289,23 @@ const styles = StyleSheet.create({
   workoutRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.sm },
   workoutBadge: { width: 48, height: 48, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
   workoutTitle: { fontSize: 15, fontWeight: "600", color: colors.textMain },
+  addStepsBtn: {
+    flexDirection: "row", alignItems: "center", gap: 4,
+    backgroundColor: colors.primaryPale, paddingHorizontal: 10, paddingVertical: 6,
+    borderRadius: radius.full,
+  },
+  modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
+  modalCard: { backgroundColor: colors.surface, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg },
+  modalHandle: { width: 40, height: 4, backgroundColor: colors.border, borderRadius: 4, alignSelf: "center", marginBottom: spacing.md },
+  modalTitle: { fontSize: 22, fontWeight: "700", color: colors.textMain },
+  stepInput: {
+    marginTop: spacing.md, padding: spacing.md, fontSize: 22, fontWeight: "600",
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, color: colors.textMain,
+    backgroundColor: colors.surface,
+  },
+  quickRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: spacing.md },
+  quickChip: {
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.full,
+    backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: "#D5EAD8",
+  },
 });

@@ -127,6 +127,7 @@ class Meal(BaseModel):
 class MealAnalyzeRequest(BaseModel):
     image_base64: str  # raw base64, no data prefix
     mime: str = "image/jpeg"
+    meal_type: Optional[str] = None  # breakfast | lunch | dinner | snack
 
 
 class ActivityIn(BaseModel):
@@ -134,6 +135,27 @@ class ActivityIn(BaseModel):
     steps: int = 0
     cardio_minutes: int = 0
     cardio_type: Optional[str] = None
+
+
+class StepsIn(BaseModel):
+    date: Optional[str] = None
+    steps: int
+
+
+class ExercisePerf(BaseModel):
+    workout_id: str
+    exercise_name: str
+    weight_kg: float
+    reps: int
+    sets: int = 1
+    notes: Optional[str] = None
+
+
+class WorkoutUpdate(BaseModel):
+    session_type: Optional[str] = None  # volume | puissance | force
+    focus: Optional[str] = None
+    duration_min: Optional[int] = None
+    exercises: Optional[List[Dict[str, Any]]] = None
 
 
 class TransformationPhoto(BaseModel):
@@ -194,71 +216,133 @@ def compute_targets(p: ProfileIn) -> Dict[str, int]:
     }
 
 
+# --- Exercise library ---
+EXERCISE_LIBRARY: List[Dict[str, Any]] = [
+    # Pectoraux
+    {"id": "pompes", "name": "Pompes", "category": "Pectoraux", "equipment": "Poids du corps"},
+    {"id": "pompes_inclinees", "name": "Pompes inclinées", "category": "Pectoraux", "equipment": "Poids du corps"},
+    {"id": "pompes_diamant", "name": "Pompes diamant", "category": "Pectoraux", "equipment": "Poids du corps"},
+    {"id": "dips", "name": "Dips sur chaise", "category": "Pectoraux", "equipment": "Chaise"},
+    {"id": "develop_couche_halt", "name": "Développé couché haltères", "category": "Pectoraux", "equipment": "Haltères"},
+    {"id": "ecarte_halt", "name": "Écarté haltères", "category": "Pectoraux", "equipment": "Haltères"},
+    # Dos
+    {"id": "tractions", "name": "Tractions", "category": "Dos", "equipment": "Barre"},
+    {"id": "rowing_halt", "name": "Rowing haltère", "category": "Dos", "equipment": "Haltère"},
+    {"id": "rowing_renverse", "name": "Rowing renversé", "category": "Dos", "equipment": "Barre / table"},
+    {"id": "souleve_de_terre", "name": "Soulevé de terre", "category": "Dos", "equipment": "Haltères / barre"},
+    {"id": "superman", "name": "Superman", "category": "Dos", "equipment": "Poids du corps"},
+    # Jambes
+    {"id": "squat", "name": "Squat", "category": "Jambes", "equipment": "Poids du corps / haltères"},
+    {"id": "squat_bulgare", "name": "Squat bulgare", "category": "Jambes", "equipment": "Chaise"},
+    {"id": "fentes", "name": "Fentes alternées", "category": "Jambes", "equipment": "Poids du corps"},
+    {"id": "hip_thrust", "name": "Hip thrust", "category": "Jambes", "equipment": "Canapé / box"},
+    {"id": "mollets", "name": "Mollets debout", "category": "Jambes", "equipment": "Poids du corps"},
+    {"id": "squat_saute", "name": "Squat sauté", "category": "Jambes", "equipment": "Poids du corps"},
+    {"id": "pistol_squat", "name": "Pistol squat", "category": "Jambes", "equipment": "Poids du corps"},
+    # Épaules
+    {"id": "elev_lat", "name": "Élévations latérales", "category": "Épaules", "equipment": "Haltères"},
+    {"id": "develop_militaire", "name": "Développé militaire", "category": "Épaules", "equipment": "Haltères"},
+    {"id": "face_pull", "name": "Face pull élastique", "category": "Épaules", "equipment": "Élastique"},
+    {"id": "pike_pushup", "name": "Pike push-up", "category": "Épaules", "equipment": "Poids du corps"},
+    # Bras
+    {"id": "curl_biceps", "name": "Curl biceps", "category": "Bras", "equipment": "Haltères"},
+    {"id": "ext_triceps", "name": "Extension triceps", "category": "Bras", "equipment": "Haltère"},
+    {"id": "dips_triceps", "name": "Dips triceps", "category": "Bras", "equipment": "Chaise"},
+    # Core
+    {"id": "planche", "name": "Planche", "category": "Core", "equipment": "Poids du corps"},
+    {"id": "planche_lat", "name": "Planche latérale", "category": "Core", "equipment": "Poids du corps"},
+    {"id": "crunchs", "name": "Crunchs", "category": "Core", "equipment": "Poids du corps"},
+    {"id": "russian_twist", "name": "Russian twist", "category": "Core", "equipment": "Poids du corps"},
+    {"id": "leg_raises", "name": "Leg raises", "category": "Core", "equipment": "Poids du corps"},
+    {"id": "mountain_climbers", "name": "Mountain climbers", "category": "Core", "equipment": "Poids du corps"},
+    {"id": "hollow_hold", "name": "Hollow hold", "category": "Core", "equipment": "Poids du corps"},
+    # Cardio
+    {"id": "burpees", "name": "Burpees", "category": "Cardio", "equipment": "Poids du corps"},
+    {"id": "jumping_jacks", "name": "Jumping jacks", "category": "Cardio", "equipment": "Poids du corps"},
+    {"id": "high_knees", "name": "High knees", "category": "Cardio", "equipment": "Poids du corps"},
+    {"id": "skater_jumps", "name": "Skater jumps", "category": "Cardio", "equipment": "Poids du corps"},
+]
+
+SESSION_TYPES: Dict[str, Dict[str, Any]] = {
+    "volume": {"label": "Volume", "reps": "10-12", "sets": 4, "rest_s": 60, "desc": "Hypertrophie, prise de masse"},
+    "puissance": {"label": "Puissance", "reps": "6-8", "sets": 4, "rest_s": 90, "desc": "Force-vitesse, explosivité"},
+    "force": {"label": "Force", "reps": "3-6", "sets": 5, "rest_s": 150, "desc": "Force maximale, charges lourdes"},
+}
+
+
+def reps_for(session_type: str) -> str:
+    return SESSION_TYPES.get(session_type, SESSION_TYPES["volume"])["reps"]
+
+
+def auto_meal_type(created_at: datetime) -> str:
+    """Categorize meal by local hour (UTC for now, good enough for MVP)."""
+    h = created_at.hour
+    if 5 <= h < 11:
+        return "breakfast"
+    if 11 <= h < 15:
+        return "lunch"
+    if 15 <= h < 19:
+        return "snack"
+    return "dinner"
+
+
+def estimate_1rm(weight_kg: float, reps: int) -> float:
+    """Epley formula. Capped reps to 12 to stay realistic."""
+    if weight_kg <= 0 or reps <= 0:
+        return 0.0
+    r = min(reps, 12)
+    if r == 1:
+        return round(weight_kg, 1)
+    return round(weight_kg * (1 + r / 30), 1)
+
+
 # --- Workout generator ---
-def generate_week_plan(profile: dict) -> List[Dict[str, Any]]:
-    goal = profile.get("goal", "maintain")
-    intensity = {"lose": "moderate-high", "gain": "high", "maintain": "moderate"}.get(goal, "moderate")
+def generate_week_plan(profile: dict, session_type: str = "volume") -> List[Dict[str, Any]]:
+    st = SESSION_TYPES.get(session_type, SESSION_TYPES["volume"])
+    reps = st["reps"]
+    sets = st["sets"]
+    rest = st["rest_s"]
+
+    def ex(name: str) -> Dict[str, Any]:
+        return {"name": name, "sets": sets, "reps": reps, "rest_s": rest, "checked": True}
+
     base = [
         {
             "focus": "Haut du corps",
-            "exercises": [
-                {"name": "Pompes", "sets": 4, "reps": "10-15", "rest_s": 60},
-                {"name": "Dips sur chaise", "sets": 3, "reps": "10-12", "rest_s": 60},
-                {"name": "Rowing haltère", "sets": 4, "reps": "12 / côté", "rest_s": 60},
-                {"name": "Élévations latérales", "sets": 3, "reps": "15", "rest_s": 45},
-                {"name": "Gainage planche", "sets": 3, "reps": "45s", "rest_s": 45},
-            ],
+            "exercises": [ex("Pompes"), ex("Dips sur chaise"), ex("Rowing haltère"),
+                          ex("Élévations latérales"), ex("Planche")],
         },
         {
             "focus": "Bas du corps",
-            "exercises": [
-                {"name": "Squat poids du corps", "sets": 4, "reps": "15-20", "rest_s": 60},
-                {"name": "Fentes alternées", "sets": 3, "reps": "12 / jambe", "rest_s": 60},
-                {"name": "Hip thrust", "sets": 4, "reps": "15", "rest_s": 60},
-                {"name": "Mollets debout", "sets": 4, "reps": "20", "rest_s": 45},
-                {"name": "Gainage latéral", "sets": 3, "reps": "30s / côté", "rest_s": 45},
-            ],
+            "exercises": [ex("Squat"), ex("Fentes alternées"), ex("Hip thrust"),
+                          ex("Mollets debout"), ex("Planche latérale")],
         },
         {
             "focus": "Repos actif",
-            "exercises": [
-                {"name": "Marche rapide", "sets": 1, "reps": "30 min", "rest_s": 0},
-                {"name": "Mobilité hanche/épaule", "sets": 1, "reps": "10 min", "rest_s": 0},
-            ],
+            "exercises": [{"name": "Marche rapide", "sets": 1, "reps": "30 min", "rest_s": 0, "checked": True},
+                          {"name": "Mobilité hanche / épaule", "sets": 1, "reps": "10 min", "rest_s": 0, "checked": True}],
         },
         {
             "focus": "Full body",
-            "exercises": [
-                {"name": "Burpees", "sets": 4, "reps": "10", "rest_s": 60},
-                {"name": "Squat sauté", "sets": 4, "reps": "12", "rest_s": 60},
-                {"name": "Pompes inclinées", "sets": 4, "reps": "12", "rest_s": 60},
-                {"name": "Mountain climbers", "sets": 3, "reps": "30s", "rest_s": 45},
-                {"name": "Gainage planche", "sets": 3, "reps": "60s", "rest_s": 45},
-            ],
+            "exercises": [ex("Burpees"), ex("Squat sauté"), ex("Pompes inclinées"),
+                          ex("Mountain climbers"), ex("Planche")],
         },
         {
             "focus": "Cardio HIIT",
             "exercises": [
-                {"name": "Jumping jacks", "sets": 5, "reps": "45s on / 15s off", "rest_s": 15},
-                {"name": "High knees", "sets": 5, "reps": "45s on / 15s off", "rest_s": 15},
-                {"name": "Skater jumps", "sets": 5, "reps": "45s on / 15s off", "rest_s": 15},
-                {"name": "Récupération", "sets": 1, "reps": "5 min marche", "rest_s": 0},
+                {"name": "Jumping jacks", "sets": 5, "reps": "45s on / 15s off", "rest_s": 15, "checked": True},
+                {"name": "High knees", "sets": 5, "reps": "45s on / 15s off", "rest_s": 15, "checked": True},
+                {"name": "Skater jumps", "sets": 5, "reps": "45s on / 15s off", "rest_s": 15, "checked": True},
+                {"name": "Récupération", "sets": 1, "reps": "5 min marche", "rest_s": 0, "checked": True},
             ],
         },
         {
             "focus": "Core & gainage",
-            "exercises": [
-                {"name": "Planche", "sets": 4, "reps": "45-60s", "rest_s": 30},
-                {"name": "Crunchs", "sets": 4, "reps": "20", "rest_s": 30},
-                {"name": "Russian twist", "sets": 4, "reps": "30", "rest_s": 30},
-                {"name": "Leg raises", "sets": 4, "reps": "12", "rest_s": 30},
-            ],
+            "exercises": [ex("Planche"), ex("Crunchs"), ex("Russian twist"), ex("Leg raises")],
         },
         {
             "focus": "Repos",
-            "exercises": [
-                {"name": "Récupération totale", "sets": 1, "reps": "Étirements 15 min", "rest_s": 0},
-            ],
+            "exercises": [{"name": "Étirements doux", "sets": 1, "reps": "15 min", "rest_s": 0, "checked": True}],
         },
     ]
     today = now_utc().date()
@@ -275,7 +359,7 @@ def generate_week_plan(profile: dict) -> List[Dict[str, Any]]:
                 "duration_min": 45 if "Repos" not in day["focus"] else 20,
                 "exercises": day["exercises"],
                 "completed": False,
-                "intensity": intensity,
+                "session_type": session_type,
             }
         )
     return plan
@@ -475,18 +559,91 @@ async def upsert_profile(body: ProfileIn, authorization: Optional[str] = Header(
 
 
 # --- MEALS ---
+async def compute_compliance(user_id: str, date: str) -> Dict[str, Any]:
+    """Compute % of target respected for a given date."""
+    profile = await db.profiles.find_one({"user_id": user_id}, {"_id": 0}) or {}
+    target = int(profile.get("daily_calories", 0))
+    meals = await db.meals.find(
+        {"user_id": user_id, "date": date}, {"_id": 0, "image_base64": 0}
+    ).to_list(500)
+    consumed = sum(m.get("calories", 0) for m in meals)
+    if target <= 0:
+        compliance_pct = 0
+    else:
+        # 100% = exactly at target, scales down as you over/under shoot
+        deviation = abs(consumed - target) / target
+        compliance_pct = max(0, round((1 - deviation) * 100))
+    return {
+        "user_id": user_id,
+        "date": date,
+        "target": target,
+        "consumed": consumed,
+        "compliance_pct": compliance_pct,
+        "meals_count": len(meals),
+        "snapshot_at": now_utc(),
+    }
+
+
+async def archive_compliance_snapshot(user_id: str, date: str) -> None:
+    """Persist compliance summary for a date so it survives meal deletion."""
+    snap = await compute_compliance(user_id, date)
+    await db.daily_compliance.update_one(
+        {"user_id": user_id, "date": date}, {"$set": snap}, upsert=True
+    )
+
+
+async def run_meal_lifecycle(user_id: str) -> Dict[str, int]:
+    """
+    Lifecycle policy:
+      - meals between 7 and 14 days old → marked archived (kept, hidden by default)
+      - meals older than 14 days → snapshot daily compliance, then delete
+    Returns counts.
+    """
+    today = now_utc().date()
+    archive_cutoff = today - timedelta(days=7)
+    delete_cutoff = today - timedelta(days=14)
+
+    # Snapshot compliance for any day we're about to purge
+    purge_dates_cursor = db.meals.aggregate(
+        [
+            {"$match": {"user_id": user_id, "date": {"$lt": delete_cutoff.isoformat()}}},
+            {"$group": {"_id": "$date"}},
+        ]
+    )
+    purge_dates = [d["_id"] async for d in purge_dates_cursor]
+    for d in purge_dates:
+        await archive_compliance_snapshot(user_id, d)
+
+    # Delete old (>14d)
+    deleted = await db.meals.delete_many(
+        {"user_id": user_id, "date": {"$lt": delete_cutoff.isoformat()}}
+    )
+    # Mark 7-14d as archived if not already
+    archived = await db.meals.update_many(
+        {
+            "user_id": user_id,
+            "date": {"$lt": archive_cutoff.isoformat()},
+            "archived": {"$ne": True},
+        },
+        {"$set": {"archived": True}},
+    )
+    return {"deleted": deleted.deleted_count, "archived": archived.modified_count}
+
+
 @api.post("/meals/analyze")
 async def analyze_and_save_meal(
     body: MealAnalyzeRequest, authorization: Optional[str] = Header(default=None)
 ):
     user = await get_current_user(authorization)
     analysis = await analyze_meal_with_claude(body.image_base64)
+    created = now_utc()
     meal = {
         "id": new_id("meal"),
         "user_id": user["user_id"],
         "date": today_str(),
-        "created_at": now_utc(),
+        "created_at": created,
         "image_base64": body.image_base64[:200000],  # cap to avoid bloat
+        "meal_type": body.meal_type or auto_meal_type(created),
         **analysis,
     }
     await db.meals.insert_one(meal)
@@ -496,14 +653,83 @@ async def analyze_and_save_meal(
 @api.get("/meals")
 async def list_meals(
     date: Optional[str] = None,
+    include_archived: bool = False,
+    history: bool = False,
     authorization: Optional[str] = Header(default=None),
 ):
     user = await get_current_user(authorization)
+    # Run lifecycle (auto-archive >7d, delete >14d) on every read — cheap
+    await run_meal_lifecycle(user["user_id"])
+
     q: Dict[str, Any] = {"user_id": user["user_id"]}
     if date:
         q["date"] = date
+    if not include_archived and not history:
+        q["archived"] = {"$ne": True}
     cursor = db.meals.find(q, {"_id": 0, "image_base64": 0}).sort("created_at", -1)
     items = await cursor.to_list(500)
+
+    if history:
+        # Group by date, include compliance for each day
+        by_date: Dict[str, List[Dict[str, Any]]] = {}
+        for m in items:
+            by_date.setdefault(m["date"], []).append(m)
+        days = []
+        for d in sorted(by_date.keys(), reverse=True):
+            comp = await compute_compliance(user["user_id"], d)
+            days.append({"date": d, "compliance": comp, "meals": by_date[d]})
+        # Add snapshots for dates with no live meals (already purged)
+        snapshot_dates = await db.daily_compliance.find(
+            {"user_id": user["user_id"]}, {"_id": 0}
+        ).sort("date", -1).to_list(60)
+        existing = {d["date"] for d in days}
+        for s in snapshot_dates:
+            if s["date"] not in existing:
+                days.append({"date": s["date"], "compliance": s, "meals": [], "purged": True})
+        days.sort(key=lambda x: x["date"], reverse=True)
+        return {"days": days}
+
+    return items
+
+
+@api.post("/meals/cleanup")
+async def cleanup_meals(authorization: Optional[str] = Header(default=None)):
+    """Manually trigger lifecycle (already auto-runs on GET /meals)."""
+    user = await get_current_user(authorization)
+    res = await run_meal_lifecycle(user["user_id"])
+    return res
+
+
+@api.delete("/meals/older-than/{days}")
+async def delete_old_meals(
+    days: int, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    if days < 1:
+        raise HTTPException(400, "days must be >= 1")
+    cutoff = (now_utc().date() - timedelta(days=days)).isoformat()
+    # Snapshot before delete
+    dates_cursor = db.meals.aggregate(
+        [
+            {"$match": {"user_id": user["user_id"], "date": {"$lt": cutoff}}},
+            {"$group": {"_id": "$date"}},
+        ]
+    )
+    dates = [d["_id"] async for d in dates_cursor]
+    for d in dates:
+        await archive_compliance_snapshot(user["user_id"], d)
+    res = await db.meals.delete_many(
+        {"user_id": user["user_id"], "date": {"$lt": cutoff}}
+    )
+    return {"deleted": res.deleted_count, "snapshots": len(dates)}
+
+
+@api.get("/compliance/history")
+async def compliance_history(authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    items = await db.daily_compliance.find(
+        {"user_id": user["user_id"]}, {"_id": 0}
+    ).sort("date", -1).to_list(180)
     return items
 
 
@@ -554,12 +780,15 @@ async def get_activity(date: str, authorization: Optional[str] = Header(default=
 
 # --- WORKOUTS ---
 @api.post("/workouts/generate")
-async def generate_workouts(authorization: Optional[str] = Header(default=None)):
+async def generate_workouts(
+    session_type: str = "volume", authorization: Optional[str] = Header(default=None)
+):
     user = await get_current_user(authorization)
     profile = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
     if not profile:
         raise HTTPException(400, "Profile required before generating workouts")
-    # wipe upcoming sessions (next 7 days) and rebuild
+    if session_type not in SESSION_TYPES:
+        session_type = "volume"
     today = now_utc().date()
     end = today + timedelta(days=7)
     await db.workouts.delete_many(
@@ -568,10 +797,139 @@ async def generate_workouts(authorization: Optional[str] = Header(default=None))
             "date": {"$gte": today.isoformat(), "$lt": end.isoformat()},
         }
     )
-    plan = generate_week_plan(profile)
+    plan = generate_week_plan(profile, session_type=session_type)
     if plan:
         await db.workouts.insert_many([{**w} for w in plan])
     return [strip_id(w) for w in plan]
+
+
+@api.put("/workouts/{workout_id}")
+async def update_workout(
+    workout_id: str, body: WorkoutUpdate, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    update_doc: Dict[str, Any] = {}
+    if body.session_type is not None and body.session_type in SESSION_TYPES:
+        update_doc["session_type"] = body.session_type
+    if body.focus is not None:
+        update_doc["focus"] = body.focus
+    if body.duration_min is not None:
+        update_doc["duration_min"] = body.duration_min
+    if body.exercises is not None:
+        # Normalize each exercise
+        new_ex = []
+        for e in body.exercises:
+            new_ex.append(
+                {
+                    "name": str(e.get("name", "")).strip(),
+                    "sets": int(e.get("sets", 3)),
+                    "reps": str(e.get("reps", "10")),
+                    "rest_s": int(e.get("rest_s", 60)),
+                    "checked": bool(e.get("checked", True)),
+                }
+            )
+        update_doc["exercises"] = new_ex
+    if not update_doc:
+        raise HTTPException(400, "Nothing to update")
+    res = await db.workouts.update_one(
+        {"id": workout_id, "user_id": user["user_id"]}, {"$set": update_doc}
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Workout not found")
+    w = await db.workouts.find_one(
+        {"id": workout_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    return strip_id(w)
+
+
+@api.post("/workouts/{workout_id}/perf")
+async def log_performance(
+    workout_id: str, body: ExercisePerf, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    w = await db.workouts.find_one(
+        {"id": workout_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not w:
+        raise HTTPException(404, "Workout not found")
+    est = estimate_1rm(body.weight_kg, body.reps)
+    doc = {
+        "id": new_id("perf"),
+        "user_id": user["user_id"],
+        "workout_id": workout_id,
+        "date": w.get("date", today_str()),
+        "exercise_name": body.exercise_name,
+        "weight_kg": body.weight_kg,
+        "reps": body.reps,
+        "sets": body.sets,
+        "est_1rm": est,
+        "notes": body.notes,
+        "created_at": now_utc(),
+    }
+    await db.exercise_perf.insert_one(doc)
+    return strip_id(doc)
+
+
+@api.get("/workouts/{workout_id}/perf")
+async def list_workout_perf(
+    workout_id: str, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    items = await db.exercise_perf.find(
+        {"user_id": user["user_id"], "workout_id": workout_id}, {"_id": 0}
+    ).sort("created_at", -1).to_list(200)
+    return items
+
+
+@api.get("/perf/recent")
+async def perf_recent(
+    exercise: Optional[str] = None,
+    limit: int = 30,
+    authorization: Optional[str] = Header(default=None),
+):
+    user = await get_current_user(authorization)
+    q: Dict[str, Any] = {"user_id": user["user_id"]}
+    if exercise:
+        q["exercise_name"] = exercise
+    items = await db.exercise_perf.find(q, {"_id": 0}).sort("created_at", -1).to_list(min(200, max(1, limit)))
+    # Best lifts per exercise (max est_1rm)
+    bests: Dict[str, Dict[str, Any]] = {}
+    for p in items:
+        ex = p["exercise_name"]
+        if ex not in bests or p.get("est_1rm", 0) > bests[ex].get("est_1rm", 0):
+            bests[ex] = p
+    return {"items": items, "personal_bests": list(bests.values())}
+
+
+@api.get("/exercises/library")
+async def exercises_library(authorization: Optional[str] = Header(default=None)):
+    _ = await get_current_user(authorization)
+    return {"exercises": EXERCISE_LIBRARY, "session_types": SESSION_TYPES}
+
+
+@api.post("/activity/steps")
+async def quick_add_steps(
+    body: StepsIn, authorization: Optional[str] = Header(default=None)
+):
+    """Increment today's step count (or replace if date provided)."""
+    user = await get_current_user(authorization)
+    d = body.date or today_str()
+    existing = await db.activity.find_one(
+        {"user_id": user["user_id"], "date": d}, {"_id": 0}
+    ) or {"steps": 0, "cardio_minutes": 0, "cardio_type": None}
+    new_steps = int(existing.get("steps", 0)) + max(0, int(body.steps))
+    doc = {
+        "user_id": user["user_id"],
+        "date": d,
+        "steps": new_steps,
+        "cardio_minutes": int(existing.get("cardio_minutes", 0)),
+        "cardio_type": existing.get("cardio_type"),
+        "updated_at": now_utc(),
+    }
+    await db.activity.update_one(
+        {"user_id": user["user_id"], "date": d}, {"$set": doc}, upsert=True
+    )
+    return strip_id(doc)
 
 
 @api.get("/workouts/week")
@@ -759,6 +1117,9 @@ async def startup_event():
     await db.workouts.create_index("id", unique=True)
     await db.workouts.create_index([("user_id", 1), ("date", 1)])
     await db.transformations.create_index([("user_id", 1), ("created_at", -1)])
+    await db.exercise_perf.create_index([("user_id", 1), ("created_at", -1)])
+    await db.exercise_perf.create_index([("user_id", 1), ("exercise_name", 1)])
+    await db.daily_compliance.create_index([("user_id", 1), ("date", 1)], unique=True)
     log.info("Indexes ready")
 
 
