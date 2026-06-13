@@ -19,7 +19,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage, ImageContent
+from anthropic import AsyncAnthropic
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -27,7 +27,9 @@ load_dotenv(ROOT_DIR / ".env")
 # --- Config ---
 MONGO_URL = os.environ["MONGO_URL"]
 DB_NAME = os.environ["DB_NAME"]
-EMERGENT_LLM_KEY = os.environ.get("EMERGENT_LLM_KEY", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
+anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
 client = AsyncIOMotorClient(MONGO_URL)
 db = client[DB_NAME]
@@ -1079,8 +1081,28 @@ def extract_json(text: str) -> Optional[dict]:
             return None
 
 
+async def call_claude(system: str, text: str, images_base64: Optional[List[str]] = None) -> str:
+    """Send a message to Claude via the Anthropic API and return the text response."""
+    if not anthropic_client:
+        raise RuntimeError("ANTHROPIC_API_KEY not configured")
+    content: List[Dict[str, Any]] = []
+    for img in images_base64 or []:
+        content.append({
+            "type": "image",
+            "source": {"type": "base64", "media_type": "image/jpeg", "data": img},
+        })
+    content.append({"type": "text", "text": text})
+    response = await anthropic_client.messages.create(
+        model=CLAUDE_MODEL,
+        max_tokens=2048,
+        system=system,
+        messages=[{"role": "user", "content": content}],
+    )
+    return "".join(block.text for block in response.content if block.type == "text")
+
+
 async def analyze_meal_with_claude(image_base64: str) -> Dict[str, Any]:
-    if not EMERGENT_LLM_KEY:
+    if not anthropic_client:
         raise HTTPException(status_code=500, detail="LLM key not configured")
     system = (
         "Tu es un nutritionniste expert. Tu analyses des photos d'assiette et tu réponds "
@@ -1090,18 +1112,12 @@ async def analyze_meal_with_claude(image_base64: str) -> Dict[str, Any]:
         '"protein_g": int, "carbs_g": int, "fat_g": int, '
         '"notes": "courte note (max 12 mots) sur la qualité nutritionnelle"}'
     )
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=new_id("meal"),
-        system_message=system,
-    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-
-    msg = UserMessage(
-        text="Analyse cette assiette. Retourne UNIQUEMENT le JSON, rien d'autre.",
-        file_contents=[ImageContent(image_base64=image_base64)],
-    )
     try:
-        response = await chat.send_message(msg)
+        response = await call_claude(
+            system,
+            "Analyse cette assiette. Retourne UNIQUEMENT le JSON, rien d'autre.",
+            images_base64=[image_base64],
+        )
     except Exception as e:
         log.exception("Claude meal analysis failed")
         raise HTTPException(status_code=502, detail=f"LLM error: {e}")
@@ -1122,7 +1138,7 @@ async def analyze_meal_with_claude(image_base64: str) -> Dict[str, Any]:
 async def ai_food_search(query: str) -> List[Dict[str, Any]]:
     """Use Claude to estimate nutritional values for an unknown food name.
     Returns 1-3 suggestions: per 100g/100ml/per unit + a standard portion."""
-    if not EMERGENT_LLM_KEY or not query.strip():
+    if not anthropic_client or not query.strip():
         return []
     system = (
         "Tu es un nutritionniste expert. L'utilisateur tape le nom d'un aliment ou d'un plat. "
@@ -1140,15 +1156,8 @@ async def ai_food_search(query: str) -> List[Dict[str, Any]]:
         ']}'
         "\nSi tu ne reconnais pas, retourne {\"suggestions\": []}. Ne devine pas."
     )
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=new_id("foodai"),
-        system_message=system,
-    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-
-    msg = UserMessage(text=f"Aliment: {query.strip()[:100]}\nRetourne UNIQUEMENT le JSON.")
     try:
-        response = await chat.send_message(msg)
+        response = await call_claude(system, f"Aliment: {query.strip()[:100]}\nRetourne UNIQUEMENT le JSON.")
     except Exception:
         log.exception("Claude food search failed")
         return []
@@ -1181,7 +1190,7 @@ async def ai_food_search(query: str) -> List[Dict[str, Any]]:
 
 async def generate_recipes_with_claude(ingredients: List[str], goal: Optional[str]) -> List[Dict[str, Any]]:
     """Use Claude to suggest 3-5 recipes from a list of ingredients, filtered by goal."""
-    if not EMERGENT_LLM_KEY or not ingredients:
+    if not anthropic_client or not ingredients:
         return []
     goal_clean = (goal or "maintenance").lower()
     goal_hint = {
@@ -1206,16 +1215,9 @@ async def generate_recipes_with_claude(ingredients: List[str], goal: Optional[st
         ']}'
         f"\n{goal_hint}"
     )
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=new_id("recipeai"),
-        system_message=system,
-    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-
     user_text = "Ingrédients disponibles : " + ", ".join(ingredients[:25])[:500] + "\nRetourne UNIQUEMENT le JSON."
-    msg = UserMessage(text=user_text)
     try:
-        response = await chat.send_message(msg)
+        response = await call_claude(system, user_text)
     except Exception:
         log.exception("Claude recipe generation failed")
         return []
@@ -1260,26 +1262,20 @@ def validate_meal_date(d: Optional[str]) -> str:
 
 
 async def analyze_transformation_with_claude(image_base64: str, prev_image_base64: Optional[str] = None) -> str:
-    if not EMERGENT_LLM_KEY:
+    if not anthropic_client:
         return "Analyse IA indisponible."
     system = (
         "Tu es un coach physique. Tu donnes un feedback bref, factuel et bienveillant sur la "
         "composition corporelle visible (définition musculaire, posture, niveau de gras visible). "
         "Réponds en français, 2 à 3 phrases max. Pas de jugement, que des observations utiles."
     )
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=new_id("transfo"),
-        system_message=system,
-    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-    files = [ImageContent(image_base64=image_base64)]
+    images = [image_base64]
     text = "Analyse cette photo de transformation. Donne un feedback bref et concret."
     if prev_image_base64:
-        files.insert(0, ImageContent(image_base64=prev_image_base64))
+        images.insert(0, prev_image_base64)
         text = "Compare la photo précédente et la nouvelle (la 2e). Donne un feedback bref."
     try:
-        msg = UserMessage(text=text, file_contents=files)
-        response = await chat.send_message(msg)
+        response = await call_claude(system, text, images_base64=images)
         return (response or "").strip()[:500]
     except Exception as e:
         log.exception("Claude transformation failed")
@@ -1847,7 +1843,7 @@ async def get_activity(date: str, authorization: Optional[str] = Header(default=
 # --- WORKOUTS ---
 async def ai_generate_exercise(description: str) -> Optional[Dict[str, Any]]:
     """Use Claude to generate a structured exercise from a free-text description."""
-    if not EMERGENT_LLM_KEY or not description.strip():
+    if not anthropic_client or not description.strip():
         return None
     system = (
         "Tu es coach de musculation. À partir d'une description courte d'un exercice, retourne "
@@ -1860,14 +1856,8 @@ async def ai_generate_exercise(description: str) -> Optional[Dict[str, Any]]:
         '"recommended_rest_s": int }'
         "\nSi l'exercice n'a pas de sens, retourne {\"name\":\"\"}."
     )
-    chat = LlmChat(
-        api_key=EMERGENT_LLM_KEY,
-        session_id=new_id("exai"),
-        system_message=system,
-    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
-    msg = UserMessage(text=f"Description : {description.strip()[:200]}\nRetourne UNIQUEMENT le JSON.")
     try:
-        response = await chat.send_message(msg)
+        response = await call_claude(system, f"Description : {description.strip()[:200]}\nRetourne UNIQUEMENT le JSON.")
     except Exception:
         log.exception("Claude exercise gen failed")
         return None
