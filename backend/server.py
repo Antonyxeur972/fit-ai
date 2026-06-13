@@ -1356,6 +1356,140 @@ async def generate_workouts(
     return [strip_id(w) for w in plan]
 
 
+# Default block periodization pattern for a 4-week cycle
+DEFAULT_CYCLE_PATTERN: List[str] = ["volume", "volume", "force", "puissance"]
+
+
+@api.post("/workouts/cycle/generate")
+async def generate_cycle(
+    weeks: int = 4,
+    pattern: Optional[str] = None,  # e.g. "volume,volume,force,puissance"
+    authorization: Optional[str] = Header(default=None),
+):
+    """Generate a multi-week periodization cycle starting from this week.
+    Each week alternates session_type per the pattern (e.g. Volume → Volume → Force → Puissance/deload).
+    """
+    user = await get_current_user(authorization)
+    profile = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if not profile:
+        raise HTTPException(400, "Profile required before generating workouts")
+    weeks = max(1, min(int(weeks), 8))
+    seq: List[str] = []
+    if pattern:
+        for p in pattern.split(","):
+            p_clean = p.strip().lower()
+            if p_clean in SESSION_TYPES:
+                seq.append(p_clean)
+    if not seq:
+        seq = DEFAULT_CYCLE_PATTERN
+    today = now_utc().date()
+    end = today + timedelta(days=7 * weeks)
+    await db.workouts.delete_many(
+        {
+            "user_id": user["user_id"],
+            "date": {"$gte": today.isoformat(), "$lt": end.isoformat()},
+        }
+    )
+    all_workouts: List[Dict[str, Any]] = []
+    for w_idx in range(weeks):
+        st = seq[w_idx % len(seq)]
+        week_plan = generate_week_plan(profile, session_type=st)
+        # Shift each workout's date by w_idx weeks
+        for w in week_plan:
+            d = datetime.strptime(w["date"], "%Y-%m-%d").date() + timedelta(days=7 * w_idx)
+            w["date"] = d.isoformat()
+            w["cycle_week_index"] = w_idx
+            w["cycle_session_type"] = st
+        all_workouts.extend(week_plan)
+    if all_workouts:
+        await db.workouts.insert_many(all_workouts)
+    return {
+        "weeks": weeks,
+        "pattern": seq,
+        "total_workouts": len(all_workouts),
+    }
+
+
+@api.get("/workouts/calendar")
+async def workouts_calendar(
+    month: Optional[str] = None,  # YYYY-MM
+    authorization: Optional[str] = Header(default=None),
+):
+    """Return all workouts of a given month (planned + completed) as a dict keyed by date."""
+    user = await get_current_user(authorization)
+    if month:
+        try:
+            datetime.strptime(month, "%Y-%m")
+            year_s, month_s = month.split("-")
+            year_i, month_i = int(year_s), int(month_s)
+        except (ValueError, IndexError):
+            raise HTTPException(400, "Invalid month format (expected YYYY-MM)")
+    else:
+        today = now_utc().date()
+        year_i, month_i = today.year, today.month
+    start = dt_date(year_i, month_i, 1)
+    if month_i == 12:
+        end = dt_date(year_i + 1, 1, 1)
+    else:
+        end = dt_date(year_i, month_i + 1, 1)
+    cur = db.workouts.find({
+        "user_id": user["user_id"],
+        "date": {"$gte": start.isoformat(), "$lt": end.isoformat()},
+    })
+    items = await cur.to_list(200)
+    out: Dict[str, Dict[str, Any]] = {}
+    for w in items:
+        d = w.get("date")
+        if not d:
+            continue
+        out[d] = {
+            "id": w.get("id"),
+            "session_type": w.get("session_type", "volume"),
+            "completed": bool(w.get("completed", False)),
+            "focus": w.get("focus", ""),
+            "exercises_count": len(w.get("exercises") or []),
+        }
+    return {
+        "month": f"{year_i:04d}-{month_i:02d}",
+        "days": out,
+    }
+
+
+@api.get("/workouts/history")
+async def workouts_history(
+    limit: int = 30, authorization: Optional[str] = Header(default=None)
+):
+    """Return user's completed workout history (most recent first), grouped by date."""
+    user = await get_current_user(authorization)
+    cur = (
+        db.workouts.find({
+            "user_id": user["user_id"],
+            "completed": True,
+        }, {"_id": 0})
+        .sort("date", -1)
+        .limit(max(1, min(int(limit), 100)))
+    )
+    items = await cur.to_list(200)
+    history: List[Dict[str, Any]] = []
+    for w in items:
+        # Attach perf records logged for this workout
+        perfs = await db.performances.find(
+            {"user_id": user["user_id"], "workout_id": w.get("id")}, {"_id": 0}
+        ).sort("created_at", 1).to_list(50)
+        history.append({
+            "id": w.get("id"),
+            "date": w.get("date"),
+            "title": w.get("title", ""),
+            "focus": w.get("focus", ""),
+            "session_type": w.get("session_type", "volume"),
+            "duration_min": w.get("duration_min", 45),
+            "completed": True,
+            "exercises": [e for e in (w.get("exercises") or []) if e.get("checked", True) is not False],
+            "performances": perfs,
+        })
+    return history
+
+
 @api.put("/workouts/{workout_id}")
 async def update_workout(
     workout_id: str, body: WorkoutUpdate, authorization: Optional[str] = Header(default=None)

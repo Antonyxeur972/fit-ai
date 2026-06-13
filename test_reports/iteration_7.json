@@ -1,0 +1,55 @@
+{
+  "summary": "Iteration 7 — TRAINING new features. Backend: 23/23 pytest cases PASS covering cycle generation (clamp 1/4/8 boundary at 8, default + custom pattern, invalid pattern fallback, auth, cycle_week_index/cycle_session_type fields), calendar (current month, specific month, invalid month=400, empty future month, auth), history (only completed, sorted desc, limit clamp to 100, auth) and backwards-compat (/workouts/week, /workouts/today, /workouts/{id}/complete, /workouts/{id}/perf, /perf/recent). Frontend smoke: training-screen renders, all 3 tabs (Aujourd'hui / Calendrier / Historique) switch correctly. Calendar tab shows cycle generator card with 2/4/6/8 sem chips, 'Générer X sem. de cycle' button, color legend (Volume/Force/Puissance/Deload) and monthly grid with today's cell highlighted. History tab shows empty state when no completed workouts. Nutrition endpoints untouched.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "calendar grid color cells",
+        "issue": "Visual check inconclusive: after a successful cycle generation (POST /workouts/cycle/generate?weeks=1) and navigating to Calendrier, the monthly grid cells appeared without distinct background colors per session_type in the screenshot (only today's darker border was visible). Backend GET /workouts/calendar returns correct session_type per day — verify the frontend mapping of session_type → cell background color.",
+        "affected_testIDs": ["training-tab-calendar", "cycle-generate-btn"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": [
+      {
+        "component": "RN Web shim",
+        "issue": "Console warning: '\"shadow*\" style props are deprecated. Use \"boxShadow\"'. Non-blocking but should migrate shadow styles to boxShadow in StyleSheet. Reference: any component using shadowColor/shadowOffset/shadowOpacity/shadowRadius."
+      },
+      {
+        "component": "RN Web shim",
+        "issue": "Console warning: 'props.pointerEvents is deprecated. Use style.pointerEvents'. Move pointerEvents prop into style. Reference: search frontend for pointerEvents=."
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration7_training.py",
+    "/app/test_reports/pytest/iteration7_results.xml"
+  ],
+  "action_items": [
+    "Verify frontend calendar cell coloring against /workouts/calendar response (session_type → bg color). Screenshot suggests cells may not show colors; double-check sessionTypeColor map and ensure days API data is populated before render.",
+    "Migrate deprecated shadow* style props to boxShadow (RN Web).",
+    "Move props.pointerEvents to style.pointerEvents."
+  ],
+  "critical_code_review_comments": [
+    "POST /workouts/cycle/generate deletes all workouts in range BEFORE inserting — works but if pattern parsing fails silently (all invalid tokens) it falls back to DEFAULT_CYCLE_PATTERN with no warning to client. Could add a 400 on completely invalid pattern instead of silent fallback.",
+    "GET /workouts/calendar to_list(200) cap — a month has max 31 days so 200 is safe.",
+    "GET /workouts/history to_list(200) but cursor is limited to min(limit,100) — fine; redundant 200 is harmless.",
+    "session_type in calendar defaults to 'volume' when missing — acceptable but consider returning null to let frontend grey-out unknown days."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration7_training.py (new — 23 tests)"
+  ],
+  "success_rate": {
+    "backend": "100%",
+    "frontend": "smoke-pass (3 tabs + cycle UI visible; coloring needs visual confirmation)"
+  },
+  "seed_data_creation": "Tests reuse conftest seeded user (user_test_001 / test_session_token_abc). A profile is PUT at module start to satisfy /workouts/cycle/generate requirement. Workouts collection is overwritten by each cycle generate call (delete_many of date-range). Cleanup of workouts is handled by the suite-level autouse teardown in conftest.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend training endpoints are stable. If retesting, the existing test_iteration7_training.py covers all new + backcompat flows. Calendar cell coloring on the frontend warrants a deeper visual check (not just DOM presence): inspect the rendered style of [data-testid=training-tab-calendar] grid cells after a fresh cycle generation and compare against backend response.",
+  "rca_of_issue": "N/A — no backend failures. Only minor UX/visual observations noted above."
+}

@@ -1,11 +1,12 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
 import { Card, Button, SectionTitle, Stat } from "@/src/components/UI";
 import { colors, spacing, typography, radius } from "@/src/theme";
@@ -23,9 +24,31 @@ type Perf = { id: string; exercise_name: string; weight_kg: number; reps: number
 
 const SESSION_KEYS = ["volume", "puissance", "force"] as const;
 type SessionKey = typeof SESSION_KEYS[number];
+type TrainingTab = "today" | "calendar" | "history";
+
+// Color code per session_type (block periodization legend)
+const SESSION_COLOR: Record<string, { bg: string; fg: string; border: string }> = {
+  volume: { bg: "#DCEAFE", fg: "#1E4FA8", border: "#7AAEEF" },      // bleu
+  force: { bg: "#FBDDDB", fg: "#A12A22", border: "#E58880" },       // rouge
+  puissance: { bg: "#FCE3CB", fg: "#A85B0F", border: "#F0A861" },   // orange
+  deload: { bg: "#E6E6DF", fg: "#666661", border: "#BFBFB7" },      // gris (déload)
+};
+
+type CalendarDay = {
+  id: string; session_type: string; completed: boolean; focus: string; exercises_count: number;
+};
+
+// Rest timer defaults per session_type
+const REST_DEFAULTS: Record<string, number> = {
+  force: 240,      // 4 min
+  puissance: 180,  // 3 min
+  volume: 75,      // 1 min 15
+  endurance: 45,
+};
 
 export default function Training() {
   const today = new Date().toISOString().slice(0, 10);
+  const [tab, setTab] = useState<TrainingTab>("today");
   const [week, setWeek] = useState<Workout[]>([]);
   const [activity, setActivity] = useState<Activity | null>(null);
   const [library, setLibrary] = useState<LibExercise[]>([]);
@@ -36,6 +59,7 @@ export default function Training() {
   const [cardioType, setCardioType] = useState("");
   const [generating, setGenerating] = useState(false);
   const [generateType, setGenerateType] = useState<SessionKey>("volume");
+  const [cycleWeeks, setCycleWeeks] = useState<number>(4);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editWorkout, setEditWorkout] = useState<Workout | null>(null);
@@ -45,6 +69,20 @@ export default function Training() {
   const [perfWeight, setPerfWeight] = useState("");
   const [perfReps, setPerfReps] = useState("");
   const [perfHistory, setPerfHistory] = useState<Perf[]>([]);
+
+  // Calendar / history state
+  const [calMonth, setCalMonth] = useState<Date>(() => new Date());
+  const [calDays, setCalDays] = useState<Record<string, CalendarDay>>({});
+  const [calLoading, setCalLoading] = useState(false);
+  const [historyItems, setHistoryItems] = useState<Workout[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyExpanded, setHistoryExpanded] = useState<string | null>(null);
+
+  // Rest timer state
+  const [restTotal, setRestTotal] = useState(0);
+  const [restRemaining, setRestRemaining] = useState(0);
+  const [restRunning, setRestRunning] = useState(false);
+  const [restPerExercise, setRestPerExercise] = useState<Record<string, number>>({});
 
   const load = useCallback(async () => {
     try {
@@ -80,7 +118,132 @@ export default function Training() {
   const completeWorkout = async (id: string) => {
     await api(`/workouts/${id}/complete`, { method: "POST" });
     await load();
+    if (tab === "calendar") loadCalendar(calMonth);
   };
+
+  // ---- Cycle / Calendar / History ----
+
+  const generateCycle = async () => {
+    setGenerating(true);
+    try {
+      await api(`/workouts/cycle/generate?weeks=${cycleWeeks}`, { method: "POST" });
+      await load();
+      await loadCalendar(calMonth);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const loadCalendar = useCallback(async (anchor: Date) => {
+    setCalLoading(true);
+    try {
+      const monthStr = `${anchor.getFullYear()}-${String(anchor.getMonth() + 1).padStart(2, "0")}`;
+      const resp = await api<{ month: string; days: Record<string, CalendarDay> }>(`/workouts/calendar?month=${monthStr}`);
+      setCalDays(resp.days || {});
+    } catch {
+      setCalDays({});
+    } finally {
+      setCalLoading(false);
+    }
+  }, []);
+
+  const loadHistory = useCallback(async () => {
+    setHistoryLoading(true);
+    try {
+      const items = await api<Workout[]>(`/workouts/history?limit=40`);
+      setHistoryItems(items);
+    } catch {
+      setHistoryItems([]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "calendar") loadCalendar(calMonth);
+    if (tab === "history") loadHistory();
+  }, [tab, calMonth, loadCalendar, loadHistory]);
+
+  // ---- Rest Timer ----
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const finishedRef = useRef(false);
+
+  const beep = useCallback(() => {
+    try {
+      if (Platform.OS === "ios" || Platform.OS === "android") {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy), 300);
+        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy), 600);
+      } else if (Platform.OS === "web" && typeof window !== "undefined") {
+        // Web fallback : synthetize a short beep via Web Audio API
+        const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          const ctx = new AudioCtx();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = "sine"; osc.frequency.value = 880;
+          gain.gain.value = 0.2;
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.start(); osc.stop(ctx.currentTime + 0.18);
+          setTimeout(() => ctx.close(), 300);
+        }
+      }
+    } catch {}
+  }, []);
+
+  const startRestTimer = useCallback((seconds: number) => {
+    if (seconds <= 0) return;
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    finishedRef.current = false;
+    setRestTotal(seconds);
+    setRestRemaining(seconds);
+    setRestRunning(true);
+    timerIntervalRef.current = setInterval(() => {
+      setRestRemaining((prev) => {
+        if (prev <= 1) {
+          if (!finishedRef.current) {
+            finishedRef.current = true;
+            beep();
+          }
+          if (timerIntervalRef.current) {
+            clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = null;
+          }
+          setRestRunning(false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [beep]);
+
+  const stopRestTimer = useCallback(() => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+    setRestRunning(false);
+    setRestRemaining(0);
+    setRestTotal(0);
+  }, []);
+
+  const adjustRest = useCallback((delta: number) => {
+    setRestRemaining((prev) => Math.max(0, prev + delta));
+    setRestTotal((prev) => Math.max(prev + delta, prev));
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    };
+  }, []);
+
+  // Auto rest duration for an exercise based on session type + manual override
+  const getRestForExercise = useCallback((exName: string, sessionType?: string) => {
+    if (restPerExercise[exName]) return restPerExercise[exName];
+    const st = (sessionType || "volume").toLowerCase();
+    return REST_DEFAULTS[st] ?? 60;
+  }, [restPerExercise]);
 
   const saveActivity = async () => {
     await api("/activity", {
@@ -197,6 +360,9 @@ export default function Training() {
     } catch {}
     setPerfWeight("");
     setPerfReps("");
+    // Auto start rest timer based on session type / saved override
+    const restSec = getRestForExercise(perfEx.exercise.name, perfEx.workout.session_type);
+    startRestTimer(restSec);
   };
 
   const todayWorkout = week.find((w) => w.date === today);
@@ -219,7 +385,22 @@ export default function Training() {
         <Text style={styles.title}>Ton entraînement</Text>
       </View>
 
+      {/* Tabs */}
+      <View style={styles.tabRow}>
+        <TouchableOpacity onPress={() => setTab("today")} style={[styles.tabChip, tab === "today" && styles.tabChipActive]} testID="training-tab-today">
+          <Text style={[styles.tabText, tab === "today" && styles.tabTextActive]}>Aujourd&apos;hui</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setTab("calendar")} style={[styles.tabChip, tab === "calendar" && styles.tabChipActive]} testID="training-tab-calendar">
+          <Text style={[styles.tabText, tab === "calendar" && styles.tabTextActive]}>Calendrier</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setTab("history")} style={[styles.tabChip, tab === "history" && styles.tabChipActive]} testID="training-tab-history">
+          <Text style={[styles.tabText, tab === "history" && styles.tabTextActive]}>Historique</Text>
+        </TouchableOpacity>
+      </View>
+
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {tab === "today" && (
+          <>
         {/* Activity card */}
         <Card testID="activity-card">
           <SectionTitle title="Activité du jour" action={
@@ -321,7 +502,141 @@ export default function Training() {
         </View>
 
         <View style={{ height: spacing.xxl }} />
+          </>
+        )}
+
+        {tab === "calendar" && (
+          <>
+            <Card testID="cycle-generator-card">
+              <SectionTitle title="Cycle de périodisation" />
+              <Text style={[typography.small, { marginBottom: spacing.sm }]}>
+                Volume × Volume × Force × Puissance. Cycle paramétrable de 1 à 8 semaines.
+              </Text>
+              <View style={{ flexDirection: "row", gap: 8, marginBottom: spacing.sm }}>
+                {[2, 4, 6, 8].map((n) => (
+                  <TouchableOpacity
+                    key={n}
+                    onPress={() => setCycleWeeks(n)}
+                    style={[styles.cycleChip, cycleWeeks === n && styles.cycleChipOn]}
+                    testID={`cycle-${n}w`}
+                  >
+                    <Text style={[typography.small, { fontWeight: "700", color: cycleWeeks === n ? colors.primary : colors.textSecondary }]}>
+                      {n} sem.
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <Button
+                title={`Générer ${cycleWeeks} sem. de cycle`}
+                loading={generating}
+                onPress={generateCycle}
+                icon={<Ionicons name="layers-outline" size={16} color="#fff" />}
+                testID="cycle-generate-btn"
+              />
+            </Card>
+
+            <SessionLegend />
+
+            <CalendarTrainingView
+              monthDate={calMonth}
+              days={calDays}
+              loading={calLoading}
+              onPrev={() => setCalMonth(addMonths(calMonth, -1))}
+              onNext={() => setCalMonth(addMonths(calMonth, 1))}
+            />
+          </>
+        )}
+
+        {tab === "history" && (
+          <>
+            <SectionTitle title="Historique des séances" />
+            {historyLoading ? (
+              <Text style={typography.small}>Chargement...</Text>
+            ) : historyItems.length === 0 ? (
+              <Card>
+                <Text style={[typography.body, { color: colors.textSecondary }]}>
+                  Aucune séance terminée pour le moment.
+                </Text>
+                <Text style={[typography.small, { marginTop: 4 }]}>
+                  Termine une séance pour la voir ici.
+                </Text>
+              </Card>
+            ) : (
+              historyItems.map((w) => {
+                const isOpen = historyExpanded === w.id;
+                return (
+                  <Card key={w.id} testID={`history-${w.id}`} style={{ marginBottom: 0 }}>
+                    <TouchableOpacity onPress={() => setHistoryExpanded(isOpen ? null : w.id)} activeOpacity={0.7}>
+                      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+                        <View style={[styles.histDot, { backgroundColor: SESSION_COLOR[w.session_type || "volume"]?.fg || colors.primary }]} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={[typography.body, { fontWeight: "700" }]}>{w.focus || w.title}</Text>
+                          <Text style={typography.small}>
+                            {new Date(w.date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "short" })} · {w.exercises.length} exercices · {w.duration_min} min
+                          </Text>
+                        </View>
+                        <TypeChip type={(w.session_type as SessionKey) || "volume"} compact />
+                        <Ionicons name={isOpen ? "chevron-up" : "chevron-down"} size={18} color={colors.textMuted} />
+                      </View>
+                    </TouchableOpacity>
+                    {isOpen && (
+                      <View style={{ marginTop: spacing.sm, gap: 4 }}>
+                        {w.exercises.map((e, idx) => (
+                          <Text key={`${e.name}-${idx}`} style={typography.small}>
+                            • {e.name} — {e.sets} × {e.reps}
+                          </Text>
+                        ))}
+                      </View>
+                    )}
+                  </Card>
+                );
+              })
+            )}
+            <View style={{ height: spacing.xxl }} />
+          </>
+        )}
       </ScrollView>
+
+      {/* Rest Timer Overlay */}
+      {(restRunning || restRemaining > 0) && (
+        <View style={styles.timerOverlay} testID="rest-timer-overlay">
+          <View style={styles.timerCard}>
+            <Text style={[typography.caption, { color: colors.textMuted }]}>Repos</Text>
+            <Text style={styles.timerBig}>
+              {Math.floor(restRemaining / 60)}:{String(restRemaining % 60).padStart(2, "0")}
+            </Text>
+            <View style={styles.timerProgressTrack}>
+              <View style={[styles.timerProgressFill, { width: `${restTotal > 0 ? Math.min(100, (1 - restRemaining / restTotal) * 100) : 0}%` }]} />
+            </View>
+            <View style={{ flexDirection: "row", gap: 8, marginTop: spacing.sm }}>
+              <TouchableOpacity onPress={() => adjustRest(-15)} style={styles.timerBtn} testID="timer-minus">
+                <Text style={styles.timerBtnTxt}>-15s</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => adjustRest(15)} style={styles.timerBtn} testID="timer-plus">
+                <Text style={styles.timerBtnTxt}>+15s</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={stopRestTimer} style={[styles.timerBtn, { backgroundColor: colors.alert }]} testID="timer-stop">
+                <Text style={[styles.timerBtnTxt, { color: "#fff" }]}>Passer</Text>
+              </TouchableOpacity>
+            </View>
+            {perfEx && (
+              <TouchableOpacity
+                onPress={() => {
+                  // memorize this custom duration for the current exercise
+                  setRestPerExercise((prev) => ({ ...prev, [perfEx.exercise.name]: restTotal }));
+                }}
+                style={styles.timerSaveCfg}
+                testID="timer-save-default"
+              >
+                <Ionicons name="bookmark-outline" size={12} color={colors.primary} />
+                <Text style={[typography.small, { color: colors.primary, fontWeight: "700", fontSize: 11 }]}>
+                  Mémoriser {Math.floor(restTotal/60)}:{String(restTotal % 60).padStart(2, "0")} pour {perfEx.exercise.name.slice(0, 20)}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      )}
 
       {/* Activity modal */}
       <Modal visible={showActivity} transparent animationType="slide" onRequestClose={() => setShowActivity(false)}>
@@ -564,4 +879,139 @@ const styles = StyleSheet.create({
   rmBox: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.primaryPale, padding: spacing.md, borderRadius: radius.md, marginTop: spacing.md },
   rmValue: { fontSize: 24, fontWeight: "800", color: colors.primary, marginTop: 2 },
   perfRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+  // Tabs
+  tabRow: { flexDirection: "row", gap: 6, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
+  tabChip: { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  tabChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  tabText: { fontSize: 12, fontWeight: "700", color: colors.textSecondary },
+  tabTextActive: { color: colors.surface },
+  // Cycle
+  cycleChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
+  cycleChipOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
+  // History
+  histDot: { width: 8, height: 8, borderRadius: 4 },
+  // Timer overlay
+  timerOverlay: { position: "absolute", left: 0, right: 0, bottom: spacing.lg, alignItems: "center", padding: spacing.md, zIndex: 100, elevation: 10 },
+  timerCard: { backgroundColor: colors.surface, padding: spacing.md, borderRadius: radius.lg, alignItems: "center", borderWidth: 2, borderColor: colors.primary, width: "92%", maxWidth: 360, gap: 4 },
+  timerBig: { fontSize: 40, fontWeight: "800", color: colors.primary, letterSpacing: -1 },
+  timerProgressTrack: { height: 6, backgroundColor: colors.border, borderRadius: 3, width: "100%", overflow: "hidden" },
+  timerProgressFill: { height: "100%", backgroundColor: colors.primary, borderRadius: 3 },
+  timerBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: colors.primary },
+  timerBtnTxt: { fontSize: 13, fontWeight: "700", color: colors.primary },
+  timerSaveCfg: { flexDirection: "row", gap: 4, alignItems: "center", paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, marginTop: 4 },
+  // Calendar
+  calWrap: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
+  calHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
+  calNavBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: colors.background },
+  calWeekRow: { flexDirection: "row", marginBottom: 4 },
+  calGrid: { flexDirection: "row", flexWrap: "wrap" },
+  calCell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: "center", justifyContent: "center", padding: 2 },
+  calCellEmpty: { width: `${100 / 7}%`, aspectRatio: 1 },
+  calCellInner: { width: "85%", aspectRatio: 1, borderRadius: radius.sm, alignItems: "center", justifyContent: "center", borderWidth: 1.5 },
+  calToday: { borderColor: colors.textMain, borderWidth: 2 },
+  legendRow: { flexDirection: "row", gap: 12, flexWrap: "wrap", justifyContent: "center", marginVertical: spacing.sm },
+  legendItem: { flexDirection: "row", alignItems: "center", gap: 4 },
+  legendDot: { width: 10, height: 10, borderRadius: 5 },
 });
+
+// ----- Helpers / sub-components -----
+
+function addMonths(d: Date, n: number) {
+  const out = new Date(d);
+  out.setMonth(out.getMonth() + n);
+  return out;
+}
+
+const MONTH_LABELS = ["Janv", "Févr", "Mars", "Avril", "Mai", "Juin", "Juil", "Août", "Sept", "Oct", "Nov", "Déc"];
+const WEEKDAY_LABELS = ["L", "M", "M", "J", "V", "S", "D"];
+
+function SessionLegend() {
+  return (
+    <View style={styles.legendRow} testID="session-legend">
+      {Object.entries(SESSION_COLOR).map(([key, c]) => (
+        <View key={key} style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: c.fg }]} />
+          <Text style={[typography.small, { fontWeight: "700", fontSize: 11, color: colors.textSecondary, textTransform: "capitalize" }]}>
+            {key}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function CalendarTrainingView({
+  monthDate, days, loading, onPrev, onNext,
+}: {
+  monthDate: Date;
+  days: Record<string, CalendarDay>;
+  loading: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const totalDays = lastDay.getDate();
+  const firstWeekday = (firstDay.getDay() + 6) % 7;
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  for (let d = 1; d <= totalDays; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const todayISO = new Date().toISOString().slice(0, 10);
+  return (
+    <View style={styles.calWrap} testID="training-calendar">
+      <View style={styles.calHeader}>
+        <TouchableOpacity onPress={onPrev} style={styles.calNavBtn} testID="cal-prev">
+          <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
+        <Text style={[typography.body, { fontWeight: "700", textTransform: "capitalize" }]}>
+          {MONTH_LABELS[month]} {year}{loading ? " ..." : ""}
+        </Text>
+        <TouchableOpacity onPress={onNext} style={styles.calNavBtn} testID="cal-next">
+          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+      <View style={styles.calWeekRow}>
+        {WEEKDAY_LABELS.map((d, i) => (
+          <Text key={`${d}-${i}`} style={[typography.small, { fontSize: 11, textAlign: "center", flex: 1, color: colors.textMuted, fontWeight: "700" }]}>
+            {d}
+          </Text>
+        ))}
+      </View>
+      <View style={styles.calGrid}>
+        {cells.map((day, idx) => {
+          if (day === null) return <View key={idx} style={styles.calCellEmpty} />;
+          const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+          const info = days[iso];
+          const palette = info ? SESSION_COLOR[info.session_type] || SESSION_COLOR.volume : null;
+          const isToday = iso === todayISO;
+          return (
+            <View key={idx} style={styles.calCell}>
+              <View
+                style={[
+                  styles.calCellInner,
+                  {
+                    backgroundColor: palette ? palette.bg : colors.background,
+                    borderColor: palette ? palette.border : colors.border,
+                  },
+                  isToday && styles.calToday,
+                ]}
+                testID={`cal-day-${iso}`}
+              >
+                <Text style={{ fontSize: 13, fontWeight: palette ? "800" : "500", color: palette ? palette.fg : colors.textMuted }}>
+                  {day}
+                </Text>
+                {info?.completed && (
+                  <Ionicons name="checkmark" size={12} color={palette?.fg || colors.primary} style={{ position: "absolute", bottom: 2, right: 2 }} />
+                )}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
