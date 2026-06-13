@@ -1,0 +1,40 @@
+{
+  "summary": "Iteration 6 (Nutrition: meal duplication + AI recipes) — 19/19 backend tests PASS (incl. 4 Claude live calls @ ~5-8s each). Validated POST /api/meals/{meal_id}/duplicate (happy path duplicates with new id + same name/calories/protein/carbs/fat to target_date; target_date>14d→400; future target_date→400; non-existent meal_id→404; other user's meal→404; missing bearer→401), POST /api/meals/duplicate-day (copies N meals to target_date with response {copied, source_date, target_date}; source w/ no meals→404; target_date>14d→400; source_date may be older than 14d (30d test passes); invalid source_date format→400; no bearer→401), POST /api/recipes/from-ingredients (empty list→{recipes:[]}; whitespace-only→empty; no bearer→401; happy path with [poulet, riz, brocoli] for goals cutting/bulking/maintenance/null returns 1-5 recipes with all required keys: id, name, ingredients_used, instructions_brief, kcal, protein_g, carbs_g, fat_g, portion_label, prep_min, category). Frontend smoke (mobile 390x844, seeded user_test_001 onboarded=true): meals-screen + 'Recettes IA' button on Today tab opens recipes-modal with 3 goal chips (Sèche/Maintien/Prise muscle visible), ingredient-input + arrow + Enter add chips, Proposer button enabled once ingredients present. Manual search debounce verified: 0 AI calls during typing (`ratatouille` typed @ 40ms/char), exactly 1 call fires ~300ms after typing stops. food-results-scroll has the spec'd CSS min/maxHeight (320px/420px) so the list is stable. search-clear (×) appears when text non-empty (and loading completes). Today-tab meal cards expose meal-duplicate-<id> next to meal-delete-<id> → tap opens duplicate-modal with date chips → tap date + 'Coller' → POST /api/meals/{id}/duplicate fires + modal closes. Calendar tab day-detail-modal exposes day-detail-add + (only when meals exist) day-detail-duplicate → opens duplicate-modal. History tab: expanding a day card reveals history-duplicate-day-<date> button → tap opens duplicate-modal in 'day' mode. Minor: duplicate-modal renders 15 date chips (today + past 14 days) where the brief said '14 date chips' — likely off-by-one in spec, the impl is correct in supporting today + past 14d. No deprecated expo packages detected (audio uses expo-av is NOT used; barcode-scanner not used; background-fetch not used). Carry-over: shadow*→boxShadow and pointerEvents prop→style.pointerEvents deprecation warnings still emitted from iter-4/5, non-blocking.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": [
+      {"component": "Carry-over from iter-4/5", "issue": "Console still emits 'shadow* style props are deprecated. Use boxShadow' and 'props.pointerEvents is deprecated. Use style.pointerEvents' on every render. Search components/UI.tsx and theme.ts and migrate."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration6_nutrition.py",
+    "/app/test_reports/pytest/iteration6_results.xml"
+  ],
+  "action_items": [
+    "Spec vs. impl: brief says duplicate-modal shows '14 date chips' but UI renders 15 (today + 14 past days). Confirm whether 'Aujourd'hui' chip should be excluded or count is intentional.",
+    "Carry-over: migrate shadow* style props → boxShadow and pointerEvents prop → style.pointerEvents to clear deprecation warnings (uncleared since iter-4)."
+  ],
+  "critical_code_review_comments": [
+    "DuplicateMealRequest.target_date and DuplicateDayRequest.{source_date,target_date} have no Pydantic format validator — only string-typed. validate_meal_date() catches malformed target_date with 400 but the source_date branch in /meals/duplicate-day catches ValueError manually. Consider Field(pattern=r'^\\d{4}-\\d{2}-\\d{2}$') or pydantic.types.date for cleaner schema-level validation.",
+    "RecipeFromIngredientsRequest.goal accepts ANY string (only checked against 3 known values via .get() lookup, defaults to 'maintenance'). Use Literal['cutting','bulking','maintenance'] | None to reject typos with 422 instead of silently coercing.",
+    "duplicate_meal/duplicate_day both copy 'notes' and append ' · dupliqué' — over many round-trip duplicates this string keeps growing. Consider capping or only appending once.",
+    "/recipes/from-ingredients silently returns an empty list when Claude fails (try/except wraps send_message). Consider surfacing a 503/'service unavailable' so the UI can show a meaningful error instead of 'no recipes found' which is ambiguous.",
+    "server.py is now 2149 lines — extract Claude-prompt logic (ai_food_search, analyze_meal_with_claude, generate_recipes_with_claude, analyze_transformation_with_claude) and FOOD_LIBRARY/EXERCISE_LIBRARY into separate modules to stay under the 700-line guideline.",
+    "duplicate_meal copies ALL fields (incl. ai_food_snapshot, food_id, image_base64 if present); confirm image_base64 carry-over is desired (large field, may bloat docs). For photo meals it makes sense but verify by-design."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration6_nutrition.py (new — 19 tests, 3 classes covering all 3 new nutrition endpoints; uses per-test autouse meals cleanup; includes parametrized goal test for Claude integration)"
+  ],
+  "success_rate": {"backend": "100% (19/19 iter-6 tests)", "frontend": "100% — recipes modal opens with goal chips/ingredient form, duplicate modals open from all 3 entry points (Today meal card / Calendar day modal / History expanded day), search debounce + min/maxHeight + clear button all verified"},
+  "seed_data_creation": "Backend: conftest seed_user fixture (user_test_001 + session test_session_token_abc) + per-test autouse meals cleanup. Frontend smoke: additionally set users.onboarded=true + profiles doc, then localStorage['fit_session_token']=JSON.stringify('test_session_token_abc'). Seeded one meal (id=meal_smoke_today, date=today, calories=520) to exercise the duplicate UI; cleaned at end of run.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Frontend auth bypass unchanged: DB-seed user_test_001 (onboarded=true) + session + profile, localStorage['fit_session_token']=JSON.stringify('test_session_token_abc'), reload http://localhost:3000/meals. New testIDs for iter-6: meals-recipes-button (Today tab) | recipes-modal | recipe-goal-{cutting|maintenance|bulking} | ingredient-input | ingredient-add | ingredient-rm-{name} (uses ingredient text, NOT index) | recipes-generate | recipes-close | recipe-{id} | recipe-add-{id} | meal-duplicate-{mealId} (Today tab next to meal-delete) | duplicate-modal | duplicate-date-chips | duplicate-date-{YYYY-MM-DD} | duplicate-confirm | duplicate-close | day-detail-duplicate (renders only if selectedDayMeals.length>0) | history-duplicate-day-{date} (renders only when history day card is EXPANDED). duplicate-modal renders 15 date chips (today + 14 past days). Backend cleanup endpoint POST /api/meals/cleanup unchanged. All iter-6 backend tests live in /app/backend/tests/test_iteration6_nutrition.py and clean meals before+after each test. Claude calls in /api/recipes/from-ingredients average ~5-8s each — keep timeouts >=30s.",
+  "rca_of_issue": "No code bugs found. Two test iterations were spent on frontend smoke setup: (1) test user got reset to onboarded=false by a prior pytest run's seed fixture, redirecting the browser to /onboarding instead of /(tabs)/meals — fixed by re-seeding onboarded=true + profile. (2) Initial playwright script tried ingredient-rm-0 (index-based) but the actual testID uses the ingredient name (ingredient-rm-poulet). Minor testID inconsistency vs. typical index pattern — not a bug, but worth noting in next iteration's test scripts."
+}

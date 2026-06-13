@@ -214,6 +214,20 @@ class TransformationIn(BaseModel):
     view: Optional[str] = "front"  # "front" | "back" | "side"
 
 
+class DuplicateMealRequest(BaseModel):
+    target_date: str  # YYYY-MM-DD
+
+
+class DuplicateDayRequest(BaseModel):
+    source_date: str
+    target_date: str
+
+
+class RecipeFromIngredientsRequest(BaseModel):
+    ingredients: List[str]
+    goal: Optional[str] = None  # "cutting" | "bulking" | "maintenance" | None
+
+
 class WorkoutSession(BaseModel):
     id: str
     user_id: str
@@ -876,6 +890,70 @@ async def ai_food_search(query: str) -> List[Dict[str, Any]]:
                 "fat_g": float(s.get("fat_g", 0)),
                 "portion_label": str(s.get("portion_label", ""))[:80],
                 "source": "ai",
+            })
+        except (ValueError, TypeError):
+            continue
+    return out
+
+
+async def generate_recipes_with_claude(ingredients: List[str], goal: Optional[str]) -> List[Dict[str, Any]]:
+    """Use Claude to suggest 3-5 recipes from a list of ingredients, filtered by goal."""
+    if not EMERGENT_LLM_KEY or not ingredients:
+        return []
+    goal_clean = (goal or "maintenance").lower()
+    goal_hint = {
+        "cutting": "Objectif PERTE DE GRAS : favorise les recettes peu denses en calories, riches en protéines (≥30g/portion) et fibres.",
+        "bulking": "Objectif PRISE DE MUSCLE : favorise les recettes riches en protéines (≥40g/portion) et calories suffisantes (450-700 kcal/portion).",
+        "maintenance": "Objectif MAINTIEN : recettes équilibrées (protéines, glucides, lipides modérés).",
+    }.get(goal_clean, "Objectif équilibré.")
+
+    system = (
+        "Tu es un chef nutritionniste. À partir d'une liste d'ingrédients que possède l'utilisateur, "
+        "tu proposes 3 à 5 recettes RÉALISABLES UNIQUEMENT avec ces ingrédients (ou +sel/poivre/huile/épices basiques). "
+        "Sois RÉALISTE et précis. Tu retournes UNIQUEMENT un JSON valide :\n"
+        '{"recipes": ['
+        '  {"name": "nom court", '
+        '   "ingredients_used": ["ingrédient 1", "ingrédient 2"], '
+        '   "instructions_brief": "Texte court (1-3 phrases) des étapes principales", '
+        '   "kcal": int (par portion), '
+        '   "protein_g": float, "carbs_g": float, "fat_g": float, '
+        '   "portion_label": "1 portion (~Xg)", '
+        '   "prep_min": int, '
+        '   "category": "Protéines|Glucides|Plats préparés|Légumes"}'
+        ']}'
+        f"\n{goal_hint}"
+    )
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=new_id("recipeai"),
+        system_message=system,
+    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+    user_text = "Ingrédients disponibles : " + ", ".join(ingredients[:25])[:500] + "\nRetourne UNIQUEMENT le JSON."
+    msg = UserMessage(text=user_text)
+    try:
+        response = await chat.send_message(msg)
+    except Exception:
+        log.exception("Claude recipe generation failed")
+        return []
+    data = extract_json(response or "")
+    if not data or not isinstance(data.get("recipes"), list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for r in data["recipes"][:5]:
+        try:
+            out.append({
+                "id": f"rcp_{new_id('recipe')}",
+                "name": str(r.get("name", "Recette"))[:80],
+                "ingredients_used": [str(x)[:60] for x in (r.get("ingredients_used") or [])[:15]],
+                "instructions_brief": str(r.get("instructions_brief", ""))[:400],
+                "kcal": int(r.get("kcal", 0)),
+                "protein_g": float(r.get("protein_g", 0)),
+                "carbs_g": float(r.get("carbs_g", 0)),
+                "fat_g": float(r.get("fat_g", 0)),
+                "portion_label": str(r.get("portion_label", "1 portion"))[:60],
+                "prep_min": int(r.get("prep_min", 0)),
+                "category": str(r.get("category", "Plats préparés"))[:30],
             })
         except (ValueError, TypeError):
             continue
@@ -1772,6 +1850,68 @@ async def foods_recent(authorization: Optional[str] = Header(default=None)):
             "ai_snapshot": it.get("ai_snapshot"),
         })
     return {"items": out}
+
+
+@api.post("/meals/{meal_id}/duplicate")
+async def duplicate_meal(
+    meal_id: str, body: DuplicateMealRequest, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    original = await db.meals.find_one({"id": meal_id, "user_id": user["user_id"]})
+    if not original:
+        raise HTTPException(404, "Meal not found")
+    target_date = validate_meal_date(body.target_date)
+    new_meal = {k: v for k, v in original.items() if k not in ("_id", "id", "created_at", "date", "archived")}
+    new_meal["id"] = new_id("meal")
+    new_meal["user_id"] = user["user_id"]
+    new_meal["date"] = target_date
+    new_meal["created_at"] = now_utc()
+    new_meal["notes"] = (new_meal.get("notes") or "") + " · dupliqué"
+    await db.meals.insert_one(new_meal)
+    return strip_id(new_meal)
+
+
+@api.post("/meals/duplicate-day")
+async def duplicate_day(
+    body: DuplicateDayRequest, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    # Validate both source and target are within window (source can be older if archived, but typically <=14d)
+    target_date = validate_meal_date(body.target_date)
+    # Source date: must exist; no 14-day restriction on source (allows from older archived if available)
+    try:
+        datetime.strptime(body.source_date, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(400, "Invalid source_date")
+    cur = db.meals.find({"user_id": user["user_id"], "date": body.source_date})
+    src_meals = await cur.to_list(200)
+    if not src_meals:
+        raise HTTPException(404, "Aucun repas trouvé pour cette date source")
+    inserted: List[Dict[str, Any]] = []
+    now = now_utc()
+    for original in src_meals:
+        new_meal = {k: v for k, v in original.items() if k not in ("_id", "id", "created_at", "date", "archived")}
+        new_meal["id"] = new_id("meal")
+        new_meal["user_id"] = user["user_id"]
+        new_meal["date"] = target_date
+        new_meal["created_at"] = now
+        new_meal["notes"] = (new_meal.get("notes") or "") + " · dupliqué"
+        inserted.append(new_meal)
+    if inserted:
+        await db.meals.insert_many(inserted)
+    return {"copied": len(inserted), "target_date": target_date, "source_date": body.source_date}
+
+
+@api.post("/recipes/from-ingredients")
+async def recipes_from_ingredients(
+    body: RecipeFromIngredientsRequest, authorization: Optional[str] = Header(default=None)
+):
+    _ = await get_current_user(authorization)
+    cleaned = [str(x).strip() for x in (body.ingredients or []) if str(x).strip()]
+    if not cleaned:
+        return {"recipes": []}
+    recipes = await generate_recipes_with_claude(cleaned[:25], body.goal)
+    return {"recipes": recipes}
 
 
 @api.post("/activity/steps")

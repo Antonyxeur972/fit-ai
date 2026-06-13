@@ -106,6 +106,20 @@ type RecentFood = {
   };
 };
 
+type Recipe = {
+  id: string;
+  name: string;
+  ingredients_used: string[];
+  instructions_brief: string;
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  portion_label: string;
+  prep_min: number;
+  category: string;
+};
+
 export default function Meals() {
   const [tab, setTab] = useState<Tab>("today");
   const [todayMeals, setTodayMeals] = useState<Meal[]>([]);
@@ -121,6 +135,7 @@ export default function Meals() {
   const [foods, setFoods] = useState<Food[]>([]);
   const [manualOpen, setManualOpen] = useState(false);
   const [manualSearch, setManualSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [manualCategory, setManualCategory] = useState<string>("Tout");
   const [selectedFood, setSelectedFood] = useState<Food | AiSuggestion | null>(null);
   const [isSelectedAi, setIsSelectedAi] = useState(false);
@@ -132,6 +147,20 @@ export default function Meals() {
   const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion[]>([]);
   const [aiLoading, setAiLoading] = useState(false);
   const [recentFoods, setRecentFoods] = useState<RecentFood[]>([]);
+
+  // Recipes state
+  const [recipesOpen, setRecipesOpen] = useState(false);
+  const [ingredientInput, setIngredientInput] = useState("");
+  const [ingredients, setIngredients] = useState<string[]>([]);
+  const [recipeGoal, setRecipeGoal] = useState<"cutting" | "bulking" | "maintenance">("maintenance");
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [recipesLoading, setRecipesLoading] = useState(false);
+
+  // Duplicate state
+  const [duplicateOpen, setDuplicateOpen] = useState(false);
+  const [duplicatePayload, setDuplicatePayload] = useState<{ kind: "meal" | "day"; mealId?: string; sourceDate?: string; label?: string } | null>(null);
+  const [duplicateTargetDate, setDuplicateTargetDate] = useState<string>("");
+  const [duplicateBusy, setDuplicateBusy] = useState(false);
 
   // Calendar tab state
   const [calMonth, setCalMonth] = useState<Date>(() => new Date());
@@ -228,33 +257,40 @@ export default function Meals() {
     return out;
   }, []);
 
+  // Debounce search input (~300ms) — used for filtering food list AND AI search
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(manualSearch), 300);
+    return () => clearTimeout(t);
+  }, [manualSearch]);
+
   // Debounced AI food search when query has no good local match
   useEffect(() => {
     if (!manualOpen || selectedFood) {
       setAiSuggestions([]);
       return;
     }
-    const q = manualSearch.trim();
+    const q = debouncedSearch.trim();
     if (q.length < 3) {
       setAiSuggestions([]);
       return;
     }
-    const handle = setTimeout(async () => {
-      setAiLoading(true);
+    let cancelled = false;
+    setAiLoading(true);
+    (async () => {
       try {
         const resp = await api<{ suggestions: AiSuggestion[] }>("/foods/ai-search", {
           method: "POST",
           body: { query: q },
         });
-        setAiSuggestions(resp.suggestions || []);
+        if (!cancelled) setAiSuggestions(resp.suggestions || []);
       } catch {
-        setAiSuggestions([]);
+        if (!cancelled) setAiSuggestions([]);
       } finally {
-        setAiLoading(false);
+        if (!cancelled) setAiLoading(false);
       }
-    }, 600);
-    return () => clearTimeout(handle);
-  }, [manualSearch, manualOpen, selectedFood]);
+    })();
+    return () => { cancelled = true; };
+  }, [debouncedSearch, manualOpen, selectedFood]);
 
   const addRecent = async (r: RecentFood) => {
     setSavingManual(true);
@@ -344,6 +380,99 @@ export default function Meals() {
     } catch {}
   };
 
+  // --- Duplicate helpers ---
+  const openDuplicateMeal = (mealId: string, label: string) => {
+    setDuplicatePayload({ kind: "meal", mealId, label });
+    setDuplicateTargetDate("");
+    setDuplicateOpen(true);
+  };
+  const openDuplicateDay = (sourceDate: string, label: string) => {
+    setDuplicatePayload({ kind: "day", sourceDate, label });
+    setDuplicateTargetDate("");
+    setDuplicateOpen(true);
+  };
+  const confirmDuplicate = async () => {
+    if (!duplicatePayload) return;
+    setDuplicateBusy(true);
+    try {
+      if (duplicatePayload.kind === "meal" && duplicatePayload.mealId) {
+        await api(`/meals/${duplicatePayload.mealId}/duplicate`, {
+          method: "POST",
+          body: { target_date: duplicateTargetDate || new Date().toISOString().slice(0, 10) },
+        });
+      } else if (duplicatePayload.kind === "day" && duplicatePayload.sourceDate) {
+        await api(`/meals/duplicate-day`, {
+          method: "POST",
+          body: {
+            source_date: duplicatePayload.sourceDate,
+            target_date: duplicateTargetDate || new Date().toISOString().slice(0, 10),
+          },
+        });
+      }
+      setDuplicateOpen(false);
+      setDuplicatePayload(null);
+      await load();
+      if (tab === "calendar") loadCalendarMonth(calMonth);
+    } catch (e: any) {
+      setError(e?.message || "Erreur lors de la duplication");
+    } finally {
+      setDuplicateBusy(false);
+    }
+  };
+
+  // --- Recipes helpers ---
+  const addIngredient = () => {
+    const v = ingredientInput.trim();
+    if (!v) return;
+    if (ingredients.includes(v.toLowerCase())) {
+      setIngredientInput("");
+      return;
+    }
+    setIngredients((prev) => [...prev, v.toLowerCase()]);
+    setIngredientInput("");
+  };
+  const removeIngredient = (i: string) => {
+    setIngredients((prev) => prev.filter((x) => x !== i));
+  };
+  const loadRecipes = async () => {
+    if (ingredients.length === 0) return;
+    setRecipesLoading(true);
+    setRecipes([]);
+    try {
+      const resp = await api<{ recipes: Recipe[] }>("/recipes/from-ingredients", {
+        method: "POST",
+        body: { ingredients, goal: recipeGoal },
+      });
+      setRecipes(resp.recipes || []);
+    } catch {
+      setRecipes([]);
+    } finally {
+      setRecipesLoading(false);
+    }
+  };
+  const addRecipeToJournal = async (r: Recipe) => {
+    try {
+      await api("/meals/manual_ai", {
+        method: "POST",
+        body: {
+          name: r.name,
+          category: r.category || "Plats préparés",
+          quantity: 1,
+          unit: "unit",
+          kcal_per_unit: r.kcal,
+          protein_g_per_unit: r.protein_g,
+          carbs_g_per_unit: r.carbs_g,
+          fat_g_per_unit: r.fat_g,
+          meal_type: autoMealTypeFromHour(),
+        },
+      });
+      await load();
+      setRecipesOpen(false);
+    } catch (e: any) {
+      setError(e?.message || "Erreur ajout recette");
+    }
+  };
+
   const pickImage = async (fromCamera: boolean) => {
     setError(null);
     const permission = fromCamera
@@ -400,6 +529,7 @@ export default function Meals() {
     setIsSelectedAi(false);
     setManualQty("");
     setManualSearch("");
+    setDebouncedSearch("");
     setManualCategory("Tout");
     setManualMealType(autoMealTypeFromHour());
     setManualDate(forDate || "");
@@ -468,13 +598,13 @@ export default function Meals() {
   }, [foods]);
 
   const filteredFoods = useMemo(() => {
-    const q = manualSearch.trim().toLowerCase();
+    const q = debouncedSearch.trim().toLowerCase();
     return foods.filter((f) => {
       if (manualCategory !== "Tout" && f.category !== manualCategory) return false;
       if (q && !f.name.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [foods, manualSearch, manualCategory]);
+  }, [foods, debouncedSearch, manualCategory]);
 
   const total = todayMeals.reduce((s, m) => s + m.calories, 0);
 
@@ -550,20 +680,30 @@ export default function Meals() {
               icon={<Ionicons name="add-circle-outline" size={18} color={colors.primary} />}
               testID="meals-manual-button"
             />
-            <TouchableOpacity
-              onPress={() => {
-                const y = new Date();
-                y.setDate(y.getDate() - 1);
-                openManual(y.toISOString().slice(0, 10));
-              }}
-              style={styles.pastBtn}
-              testID="meals-past-button"
-            >
-              <Ionicons name="calendar-outline" size={16} color={colors.textSecondary} />
-              <Text style={[typography.small, { color: colors.textSecondary, fontWeight: "600" }]}>
-                Repas oublié ? Logger un jour passé
-              </Text>
-            </TouchableOpacity>
+            <View style={{ flexDirection: "row", gap: spacing.sm }}>
+              <Button
+                title="Recettes IA"
+                onPress={() => setRecipesOpen(true)}
+                variant="ghost"
+                icon={<Ionicons name="sparkles-outline" size={16} color={colors.primary} />}
+                testID="meals-recipes-button"
+                style={{ flex: 1 }}
+              />
+              <TouchableOpacity
+                onPress={() => {
+                  const y = new Date();
+                  y.setDate(y.getDate() - 1);
+                  openManual(y.toISOString().slice(0, 10));
+                }}
+                style={[styles.pastBtn, { flex: 1 }]}
+                testID="meals-past-button"
+              >
+                <Ionicons name="calendar-outline" size={16} color={colors.textSecondary} />
+                <Text style={[typography.small, { color: colors.textSecondary, fontWeight: "600" }]}>
+                  Jour passé
+                </Text>
+              </TouchableOpacity>
+            </View>
 
             {error && (
               <View style={styles.errorBox} testID="meals-error">
@@ -591,7 +731,7 @@ export default function Meals() {
                       {todayGrouped[t].reduce((s, m) => s + m.calories, 0)} kcal
                     </Text>
                   </View>
-                  {todayGrouped[t].map((m) => <MealCard key={m.id} meal={m} onDelete={() => remove(m.id)} />)}
+                  {todayGrouped[t].map((m) => <MealCard key={m.id} meal={m} onDelete={() => remove(m.id)} onDuplicate={() => openDuplicateMeal(m.id, m.name)} />)}
                 </View>
               ))
             )}
@@ -627,7 +767,12 @@ export default function Meals() {
                 <View key={bucket.label} style={{ gap: spacing.sm }} testID={`history-bucket-${bucket.label}`}>
                   <SectionTitle title={bucket.label} />
                   {bucket.days.map((d) => (
-                    <HistoryDayCard key={d.date} day={d} onDeleteMeal={remove} />
+                    <HistoryDayCard
+                      key={d.date}
+                      day={d}
+                      onDeleteMeal={remove}
+                      onDuplicateDay={d.meals && d.meals.length > 0 ? () => openDuplicateDay(d.date, `${d.compliance.meals_count} repas du ${new Date(d.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`) : undefined}
+                    />
                   ))}
                 </View>
               ))
@@ -731,18 +876,37 @@ export default function Meals() {
               </ScrollView>
             )}
 
-            <Button
-              title="Ajouter un aliment à ce jour"
-              variant="ghost"
-              icon={<Ionicons name="add-circle-outline" size={18} color={colors.primary} />}
-              onPress={() => {
-                if (selectedDay) {
-                  setSelectedDay(null);
-                  openManual(selectedDay);
-                }
-              }}
-              testID="day-detail-add"
-            />
+            <View style={{ flexDirection: "row", gap: spacing.sm }}>
+              <Button
+                title="Ajouter un aliment"
+                variant="ghost"
+                icon={<Ionicons name="add-circle-outline" size={18} color={colors.primary} />}
+                onPress={() => {
+                  if (selectedDay) {
+                    setSelectedDay(null);
+                    openManual(selectedDay);
+                  }
+                }}
+                testID="day-detail-add"
+                style={{ flex: 1 }}
+              />
+              {selectedDayMeals.length > 0 && (
+                <Button
+                  title="Dupliquer ce jour"
+                  variant="ghost"
+                  icon={<Ionicons name="copy-outline" size={16} color={colors.primary} />}
+                  onPress={() => {
+                    if (selectedDay) {
+                      const label = `${selectedDayMeals.length} repas du ${new Date(selectedDay).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`;
+                      setSelectedDay(null);
+                      openDuplicateDay(selectedDay, label);
+                    }
+                  }}
+                  testID="day-detail-duplicate"
+                  style={{ flex: 1 }}
+                />
+              )}
+            </View>
           </View>
         </View>
       </Modal>
@@ -757,6 +921,191 @@ export default function Meals() {
       )}
 
       {/* Manual food entry modal */}
+      {/* Recipes modal */}
+      <Modal visible={recipesOpen} transparent animationType="slide" onRequestClose={() => setRecipesOpen(false)}>
+        <View style={styles.modalBg}>
+          <View style={[styles.modalCard, { maxHeight: "92%" }]} testID="recipes-modal">
+            <View style={styles.modalHandle} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle}>Recettes du frigo</Text>
+                <Text style={[typography.small, { color: colors.textMuted }]}>L&apos;IA propose des recettes selon tes ingrédients.</Text>
+              </View>
+              <TouchableOpacity onPress={() => setRecipesOpen(false)} testID="recipes-close">
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[typography.caption, { marginTop: spacing.md }]}>Objectif</Text>
+            <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+              {([
+                { v: "cutting" as const, label: "Sèche" },
+                { v: "maintenance" as const, label: "Maintien" },
+                { v: "bulking" as const, label: "Prise muscle" },
+              ]).map((g) => (
+                <TouchableOpacity
+                  key={g.v}
+                  onPress={() => setRecipeGoal(g.v)}
+                  style={[styles.mealTypeChip, recipeGoal === g.v && styles.mealTypeChipOn]}
+                  testID={`recipe-goal-${g.v}`}
+                >
+                  <Text style={[typography.small, { fontWeight: "700", color: recipeGoal === g.v ? colors.primary : colors.textSecondary }]}>
+                    {g.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={[typography.caption, { marginTop: spacing.md }]}>Ingrédients disponibles</Text>
+            <View style={[styles.searchBox, { marginTop: 4 }]}>
+              <Ionicons name="add" size={16} color={colors.textSecondary} />
+              <TextInput
+                value={ingredientInput}
+                onChangeText={setIngredientInput}
+                onSubmitEditing={addIngredient}
+                placeholder="ex: poulet, riz, brocoli..."
+                placeholderTextColor={colors.textMuted}
+                returnKeyType="done"
+                style={{ flex: 1, fontSize: 15, color: colors.textMain }}
+                testID="ingredient-input"
+                autoCorrect={false}
+                autoCapitalize="none"
+              />
+              {ingredientInput.length > 0 && (
+                <TouchableOpacity onPress={addIngredient} testID="ingredient-add">
+                  <Ionicons name="arrow-forward-circle" size={22} color={colors.primary} />
+                </TouchableOpacity>
+              )}
+            </View>
+            {ingredients.length > 0 && (
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                {ingredients.map((i) => (
+                  <View key={i} style={localStyles.ingredientChip}>
+                    <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>{i}</Text>
+                    <TouchableOpacity onPress={() => removeIngredient(i)} testID={`ingredient-rm-${i}`}>
+                      <Ionicons name="close" size={14} color={colors.primary} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <Button
+              title={recipesLoading ? "L'IA cuisine..." : "Proposer des recettes"}
+              onPress={loadRecipes}
+              loading={recipesLoading}
+              disabled={ingredients.length === 0 || recipesLoading}
+              icon={<Ionicons name="sparkles" size={16} color="#fff" />}
+              style={{ marginTop: spacing.md }}
+              testID="recipes-generate"
+            />
+
+            <ScrollView style={{ marginTop: spacing.md, maxHeight: 380 }} keyboardShouldPersistTaps="handled">
+              {recipes.length === 0 ? (
+                <Text style={[typography.small, { textAlign: "center", color: colors.textMuted, paddingVertical: spacing.md }]}>
+                  {recipesLoading ? "Recherche en cours..." : "Ajoute des ingrédients puis lance la recherche."}
+                </Text>
+              ) : (
+                recipes.map((r) => (
+                  <View key={r.id} style={localStyles.recipeCard} testID={`recipe-${r.id}`}>
+                    <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[typography.body, { fontWeight: "700" }]}>{r.name}</Text>
+                        <Text style={[typography.small, { marginTop: 2, color: colors.textMuted }]}>
+                          {r.prep_min}min · {r.portion_label}
+                        </Text>
+                      </View>
+                      <View style={{ alignItems: "flex-end" }}>
+                        <Text style={[typography.h3, { color: colors.primary }]}>{r.kcal}<Text style={typography.small}> kcal</Text></Text>
+                      </View>
+                    </View>
+                    <Text style={[typography.small, { marginTop: 4 }]}>
+                      P {r.protein_g}g · G {r.carbs_g}g · L {r.fat_g}g
+                    </Text>
+                    <Text style={[typography.small, { marginTop: 6, color: colors.textSecondary, lineHeight: 18 }]}>
+                      {r.instructions_brief}
+                    </Text>
+                    {r.ingredients_used.length > 0 && (
+                      <Text style={[typography.small, { marginTop: 4, fontSize: 11, color: colors.textMuted }]}>
+                        Ingrédients : {r.ingredients_used.join(", ")}
+                      </Text>
+                    )}
+                    <TouchableOpacity
+                      onPress={() => addRecipeToJournal(r)}
+                      style={localStyles.recipeAddBtn}
+                      testID={`recipe-add-${r.id}`}
+                    >
+                      <Ionicons name="add-circle" size={16} color={colors.primary} />
+                      <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Ajouter au journal</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Duplicate modal */}
+      <Modal visible={duplicateOpen} transparent animationType="fade" onRequestClose={() => setDuplicateOpen(false)}>
+        <View style={styles.modalBg}>
+          <View style={[styles.modalCard, { maxHeight: "70%" }]} testID="duplicate-modal">
+            <View style={styles.modalHandle} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle}>
+                  {duplicatePayload?.kind === "day" ? "Dupliquer la journée" : "Dupliquer le repas"}
+                </Text>
+                <Text style={[typography.small, { color: colors.textMuted }]} numberOfLines={1}>
+                  {duplicatePayload?.label || ""}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setDuplicateOpen(false)} testID="duplicate-close">
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={[typography.caption, { marginTop: spacing.md, marginBottom: 6 }]}>Coller sur</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ marginHorizontal: -spacing.lg }}
+              contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: 8 }}
+              testID="duplicate-date-chips"
+            >
+              {dateChips.map((d) => {
+                const value = d.value || new Date().toISOString().slice(0, 10);
+                const isOn = duplicateTargetDate === value || (!duplicateTargetDate && d.value === "");
+                const isToday = d.value === "";
+                const parts = d.label.split(" ");
+                const dayLabel = isToday ? "Auj." : (parts[0] || d.label);
+                const numLabel = isToday ? new Date().getDate().toString() : (parts[1] || "");
+                return (
+                  <TouchableOpacity
+                    key={value}
+                    onPress={() => setDuplicateTargetDate(value)}
+                    style={[styles.dateChip, isOn && styles.dateChipOn]}
+                    testID={`duplicate-date-${value}`}
+                  >
+                    <Text style={[styles.dateChipDay, isOn && styles.dateChipDayOn]}>{dayLabel}</Text>
+                    <Text style={[styles.dateChipNum, isOn && styles.dateChipNumOn]}>{numLabel}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <Button
+              title="Coller"
+              onPress={confirmDuplicate}
+              loading={duplicateBusy}
+              icon={<Ionicons name="copy" size={16} color="#fff" />}
+              style={{ marginTop: spacing.lg }}
+              testID="duplicate-confirm"
+            />
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={manualOpen} transparent animationType="slide" onRequestClose={() => setManualOpen(false)}>
         <View style={styles.modalBg}>
           <View style={[styles.modalCard, { maxHeight: "92%", paddingBottom: 0 }]}>
@@ -846,7 +1195,17 @@ export default function Meals() {
                     placeholderTextColor={colors.textMuted}
                     style={{ flex: 1, fontSize: 15, color: colors.textMain }}
                     testID="manual-search-input"
+                    autoCorrect={false}
+                    autoCapitalize="none"
                   />
+                  {aiLoading && manualSearch.trim().length >= 3 && (
+                    <ActivityIndicator size="small" color={colors.primary} testID="search-ai-loader" />
+                  )}
+                  {manualSearch.length > 0 && !aiLoading && (
+                    <TouchableOpacity onPress={() => setManualSearch("")} testID="search-clear">
+                      <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+                    </TouchableOpacity>
+                  )}
                 </View>
 
                 {/* Categories chip row (horizontal) */}
@@ -905,8 +1264,13 @@ export default function Meals() {
                   </View>
                 )}
 
-                {/* Food list */}
-                <ScrollView style={{ marginTop: spacing.sm }} contentContainerStyle={{ paddingBottom: spacing.xxl }}>
+                {/* Food list — reserved height to prevent layout shifts */}
+                <ScrollView
+                  style={{ marginTop: spacing.sm, minHeight: 320, maxHeight: 420 }}
+                  contentContainerStyle={{ paddingBottom: spacing.xxl }}
+                  keyboardShouldPersistTaps="handled"
+                  testID="food-results-scroll"
+                >
                   {filteredFoods.length === 0 ? (
                     <View style={{ paddingVertical: spacing.md, paddingHorizontal: spacing.sm, alignItems: "center" }}>
                       <Text style={[typography.small, { textAlign: "center" }]}>Aucun résultat dans la base.</Text>
@@ -1119,7 +1483,7 @@ function quickQtyOptions(f: Food): number[] {
   return [1, 2, 3, 5];
 }
 
-function MealCard({ meal, onDelete }: { meal: Meal; onDelete: () => void }) {
+function MealCard({ meal, onDelete, onDuplicate }: { meal: Meal; onDelete: () => void; onDuplicate?: () => void }) {
   return (
     <Card style={{ marginBottom: 0 }} testID={`meal-card-${meal.id}`}>
       <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
@@ -1132,16 +1496,23 @@ function MealCard({ meal, onDelete }: { meal: Meal; onDelete: () => void }) {
         </View>
         <View style={{ alignItems: "flex-end" }}>
           <Text style={[typography.body, { fontWeight: "700" }]}>{meal.calories} <Text style={typography.small}>kcal</Text></Text>
-          <TouchableOpacity onPress={onDelete} testID={`meal-delete-${meal.id}`} style={{ marginTop: 6 }}>
-            <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
-          </TouchableOpacity>
+          <View style={{ flexDirection: "row", gap: 12, marginTop: 6 }}>
+            {onDuplicate && (
+              <TouchableOpacity onPress={onDuplicate} testID={`meal-duplicate-${meal.id}`}>
+                <Ionicons name="copy-outline" size={16} color={colors.textMuted} />
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={onDelete} testID={`meal-delete-${meal.id}`}>
+              <Ionicons name="trash-outline" size={16} color={colors.textMuted} />
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Card>
   );
 }
 
-function HistoryDayCard({ day, onDeleteMeal }: { day: HistoryDay; onDeleteMeal: (id: string) => void }) {
+function HistoryDayCard({ day, onDeleteMeal, onDuplicateDay }: { day: HistoryDay; onDeleteMeal: (id: string) => void; onDuplicateDay?: () => void }) {
   const [expanded, setExpanded] = useState(false);
   const pct = day.compliance.compliance_pct || 0;
   const pctColor = pct >= 80 ? colors.primary : pct >= 50 ? "#F59E0B" : colors.alert;
@@ -1177,6 +1548,18 @@ function HistoryDayCard({ day, onDeleteMeal }: { day: HistoryDay; onDeleteMeal: 
               </TouchableOpacity>
             </View>
           ))}
+          {onDuplicateDay && (
+            <TouchableOpacity
+              onPress={onDuplicateDay}
+              style={localStyles.dupDayBtn}
+              testID={`history-duplicate-day-${day.date}`}
+            >
+              <Ionicons name="copy-outline" size={14} color={colors.primary} />
+              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>
+                Dupliquer cette journée
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       )}
     </Card>
@@ -1196,6 +1579,10 @@ const localStyles = StyleSheet.create({
   mealIcon: { width: 40, height: 40, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center", marginRight: spacing.md },
   pctBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.full },
   histMealRow: { flexDirection: "row", alignItems: "center", paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.border },
+  dupDayBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8, marginTop: 6, borderTopWidth: 1, borderTopColor: colors.border },
+  ingredientChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.full, backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: colors.primary },
+  recipeCard: { padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.sm, backgroundColor: colors.surface },
+  recipeAddBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: spacing.sm, paddingVertical: 8, borderRadius: radius.full, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primaryPale },
 });
 
 // ----- Calendar helpers / components -----
