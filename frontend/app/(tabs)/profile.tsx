@@ -8,6 +8,8 @@ import Svg, { Path, Circle, Defs, LinearGradient, Stop } from "react-native-svg"
 import { useAuth } from "@/src/auth";
 import { api } from "@/src/api";
 import { Card, SectionTitle, Stat, Button } from "@/src/components/UI";
+import { Silhouette, SILHOUETTE_LABELS } from "@/src/components/Silhouette";
+import { SilhouettePicker } from "@/src/components/SilhouettePicker";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type Profile = {
@@ -49,6 +51,22 @@ export default function ProfileTab() {
 
   const [avatarOpen, setAvatarOpen] = useState(false);
 
+  // Phase 4: silhouette edit modal
+  const [silhouetteModal, setSilhouetteModal] = useState(false);
+  const [silSex, setSilSex] = useState<"male" | "female">("male");
+  const [silLevel, setSilLevel] = useState(3);
+  const [savingSil, setSavingSil] = useState(false);
+
+  // Phase 4: 1RM estimate modal
+  const [forceModal, setForceModal] = useState(false);
+  const [squatKg, setSquatKg] = useState("");
+  const [squatReps, setSquatReps] = useState("");
+  const [benchKg, setBenchKg] = useState("");
+  const [benchReps, setBenchReps] = useState("");
+  const [dlKg, setDlKg] = useState("");
+  const [dlReps, setDlReps] = useState("");
+  const [savingForce, setSavingForce] = useState(false);
+
   const load = useCallback(async () => {
     try {
       const [p, c, transfos] = await Promise.all([
@@ -74,6 +92,56 @@ export default function ProfileTab() {
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // sync silhouette modal seed values with currently-stored user data
+  const openSilhouette = () => {
+    setSilSex((user?.silhouette?.sex as any) || (profile.gender as any) || "male");
+    setSilLevel(user?.silhouette?.level || 3);
+    setSilhouetteModal(true);
+  };
+
+  const saveSilhouette = async () => {
+    setSavingSil(true);
+    try {
+      await api("/users/me/silhouette", {
+        method: "PUT",
+        body: { sex: silSex, level: silLevel },
+      });
+      await refreshUser();
+      setSilhouetteModal(false);
+    } finally {
+      setSavingSil(false);
+    }
+  };
+
+  const openForce = () => {
+    setSquatKg(""); setSquatReps("");
+    setBenchKg(""); setBenchReps("");
+    setDlKg(""); setDlReps("");
+    setForceModal(true);
+  };
+
+  const saveForce = async () => {
+    setSavingForce(true);
+    try {
+      await api("/workouts/estimate-1rm", {
+        method: "POST",
+        body: {
+          squat_kg: parseFloat(squatKg) || null,
+          squat_reps: parseInt(squatReps, 10) || null,
+          bench_kg: parseFloat(benchKg) || null,
+          bench_reps: parseInt(benchReps, 10) || null,
+          deadlift_kg: parseFloat(dlKg) || null,
+          deadlift_reps: parseInt(dlReps, 10) || null,
+        },
+      });
+      await refreshUser();
+      await load();
+      setForceModal(false);
+    } finally {
+      setSavingForce(false);
+    }
+  };
 
   const saveName = async () => {
     const n = nameInput.trim();
@@ -129,6 +197,59 @@ export default function ProfileTab() {
             <Text style={typography.small}>{user?.email}</Text>
           </View>
         </View>
+
+        {/* Silhouette + 1RM card (Phase 4) */}
+        <Card testID="silhouette-card">
+          <SectionTitle title="Ta silhouette" action={
+            <TouchableOpacity onPress={openSilhouette} testID="edit-silhouette">
+              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>
+                {user?.silhouette ? "Modifier" : "Choisir"}
+              </Text>
+            </TouchableOpacity>
+          } />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.sm }}>
+            <Silhouette
+              sex={(user?.silhouette?.sex as any) || (profile.gender as any) || "male"}
+              level={user?.silhouette?.level || 3}
+              size={90}
+              active
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={[typography.h3]}>
+                {SILHOUETTE_LABELS[user?.silhouette?.level || 3]}
+              </Text>
+              <Text style={typography.small}>
+                Niveau {user?.silhouette?.level || 3} sur 5 ·{" "}
+                {(user?.silhouette?.sex || profile.gender) === "female" ? "Femme" : "Homme"}
+              </Text>
+              <Text style={[typography.small, { marginTop: 4, fontSize: 11, color: colors.textMuted }]}>
+                {user?.silhouette
+                  ? "Mise à jour rapide depuis ce profil."
+                  : "Indique ta morphologie actuelle pour personnaliser tes objectifs."}
+              </Text>
+            </View>
+          </View>
+        </Card>
+
+        <Card testID="force-card">
+          <SectionTitle title="Mes 1RM estimés" action={
+            <TouchableOpacity onPress={openForce} testID="edit-force">
+              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>
+                {user?.force_metrics?.squat || user?.force_metrics?.bench || user?.force_metrics?.deadlift ? "Mettre à jour" : "Estimer"}
+              </Text>
+            </TouchableOpacity>
+          } />
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm }}>
+            <Stat label="Squat" value={user?.force_metrics?.squat ? user.force_metrics.squat.toFixed(0) : "—"} unit="kg" testID="force-squat" />
+            <Stat label="Bench" value={user?.force_metrics?.bench ? user.force_metrics.bench.toFixed(0) : "—"} unit="kg" align="center" testID="force-bench" />
+            <Stat label="Deadlift" value={user?.force_metrics?.deadlift ? user.force_metrics.deadlift.toFixed(0) : "—"} unit="kg" align="center" testID="force-dl" />
+          </View>
+          {!user?.force_metrics?.squat && !user?.force_metrics?.bench && !user?.force_metrics?.deadlift && (
+            <Text style={[typography.small, { marginTop: 8, color: colors.textMuted }]}>
+              Renseigne tes meilleurs efforts (charge × reps) pour calculer ton 1RM Epley. Tu peux aussi les enregistrer pendant tes séances dans Training.
+            </Text>
+          )}
+        </Card>
 
         {/* Body Avatar */}
         {composition?.available && composition.muscle_groups && (
@@ -354,7 +475,107 @@ export default function ProfileTab() {
           </View>
         </View>
       </Modal>
+      {/* Silhouette modal */}
+      <Modal visible={silhouetteModal} transparent animationType="slide" onRequestClose={() => setSilhouetteModal(false)}>
+        <View style={styles.modalBg}>
+          <View style={[styles.modalCard]}>
+            <View style={styles.modalHandle} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={styles.modalTitle}>Choisis ta silhouette</Text>
+              <TouchableOpacity onPress={() => setSilhouetteModal(false)} testID="silhouette-modal-close">
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <View style={{ marginTop: spacing.md }}>
+              <SilhouettePicker
+                sex={silSex}
+                level={silLevel}
+                onChange={(s, lv) => {
+                  setSilSex(s);
+                  setSilLevel(lv);
+                }}
+              />
+            </View>
+            <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg }}>
+              <Button title="Annuler" variant="secondary" onPress={() => setSilhouetteModal(false)} style={{ flex: 1 }} testID="silhouette-cancel" />
+              <Button title="Enregistrer" onPress={saveSilhouette} loading={savingSil} style={{ flex: 1.4 }} testID="silhouette-save" />
+            </View>
+            <View style={{ height: spacing.md }} />
+          </View>
+        </View>
+      </Modal>
+
+      {/* Force / 1RM modal */}
+      <Modal visible={forceModal} transparent animationType="slide" onRequestClose={() => setForceModal(false)}>
+        <View style={styles.modalBg}>
+          <KeyboardAwareScrollView contentContainerStyle={styles.modalCard} keyboardShouldPersistTaps="handled" bottomOffset={20}>
+            <View style={styles.modalHandle} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={styles.modalTitle}>Estimer mes 1RM</Text>
+              <TouchableOpacity onPress={() => setForceModal(false)} testID="force-modal-close">
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <Text style={[typography.small, { marginTop: 4 }]}>
+              Indique ton meilleur effort (charge × reps) sur chaque mouvement. Formule Epley appliquée.
+            </Text>
+            <ForceLiftRow label="Squat" wKey={squatKg} rKey={squatReps} setW={setSquatKg} setR={setSquatReps} testID="force-squat" />
+            <ForceLiftRow label="Développé couché" wKey={benchKg} rKey={benchReps} setW={setBenchKg} setR={setBenchReps} testID="force-bench" />
+            <ForceLiftRow label="Soulevé de terre" wKey={dlKg} rKey={dlReps} setW={setDlKg} setR={setDlReps} testID="force-dl" />
+            <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg }}>
+              <Button title="Annuler" variant="secondary" onPress={() => setForceModal(false)} style={{ flex: 1 }} testID="force-cancel" />
+              <Button title="Enregistrer" onPress={saveForce} loading={savingForce} style={{ flex: 1.4 }} testID="force-save" />
+            </View>
+            <View style={{ height: spacing.lg }} />
+          </KeyboardAwareScrollView>
+        </View>
+      </Modal>
     </SafeAreaView>
+  );
+}
+
+function ForceLiftRow({
+  label, wKey, rKey, setW, setR, testID,
+}: { label: string; wKey: string; rKey: string; setW: (v: string) => void; setR: (v: string) => void; testID: string }) {
+  const w = parseFloat(wKey || "0");
+  const r = parseInt(rKey || "0", 10);
+  const est = w > 0 && r > 0 ? (r === 1 ? Math.round(w * 10) / 10 : Math.round(w * (1 + Math.min(r, 12) / 30) * 10) / 10) : 0;
+  return (
+    <View style={{ marginTop: spacing.md }}>
+      <Text style={[typography.caption, { marginBottom: 6 }]}>{label}</Text>
+      <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+        <View style={{ flex: 1, flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: 12, backgroundColor: colors.surface }}>
+          <TextInput
+            testID={`${testID}-kg`}
+            value={wKey}
+            onChangeText={(t) => setW(t.replace(/[^0-9.]/g, ""))}
+            keyboardType="decimal-pad"
+            style={{ flex: 1, paddingVertical: 12, fontSize: 16, fontWeight: "700", color: colors.textMain }}
+            placeholder="0"
+            placeholderTextColor={colors.textMuted}
+          />
+          <Text style={{ color: colors.textMuted, fontSize: 12 }}>kg</Text>
+        </View>
+        <Text style={{ color: colors.textMuted, fontWeight: "800" }}>×</Text>
+        <View style={{ flex: 1, flexDirection: "row", alignItems: "center", borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, paddingHorizontal: 12, backgroundColor: colors.surface }}>
+          <TextInput
+            testID={`${testID}-reps`}
+            value={rKey}
+            onChangeText={(t) => setR(t.replace(/[^0-9]/g, ""))}
+            keyboardType="numeric"
+            style={{ flex: 1, paddingVertical: 12, fontSize: 16, fontWeight: "700", color: colors.textMain }}
+            placeholder="0"
+            placeholderTextColor={colors.textMuted}
+          />
+          <Text style={{ color: colors.textMuted, fontSize: 12 }}>reps</Text>
+        </View>
+      </View>
+      {est > 0 && (
+        <Text style={[typography.small, { color: colors.primary, fontWeight: "800", marginTop: 4 }]}>
+          1RM estimé · {est} kg
+        </Text>
+      )}
+    </View>
   );
 }
 

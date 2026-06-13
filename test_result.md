@@ -101,3 +101,162 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+
+user_problem_statement: |
+  FIT AI – Phase 4 (June 2026). Suite des Phases 1-3 complétées.
+  Demande actuelle (Phase 4) :
+  1. Supprimer le bouton "Accélérer mes résultats" (côté UI training).
+  2. Corriger l'ajout d'exercice via IA (Mon exercice n'est pas listé).
+  3. Modes Home / Travel doivent rester 100 % poids du corps.
+  4. Choix d'une silhouette (10 visuels = 5 niveaux × 2 sexes) dans l'onboarding
+     ET dans le profil, modifiable ensuite.
+  5. Estimation 1RM (Squat / Bench / Deadlift) via normes standards en onboarding
+     ET dans le profil, modifiable ensuite.
+  6. Galerie photo PRIVÉE sans IA (suppression de toute analyse Claude des
+     photos corps), avec comparatif chronologique côte à côte.
+  7. Carte "Partager mes perfs" (story verticale premium) à la fin d'une séance
+     terminée, capturable via react-native-view-shot, avec options enregistrer
+     ET partager.
+
+backend:
+  - task: "PUT /users/me/silhouette (save sex+level 1..5)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Endpoint added. Smoke-tested with curl → returns {silhouette: {sex,level}} and persists to users.silhouette."
+  - task: "POST /workouts/estimate-1rm (Epley for squat/bench/dl/ohp)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Endpoint added. Inserts into exercise_perf for chart continuity AND saves a force_metrics snapshot on user doc."
+  - task: "Transformations: remove Claude AI analysis (private gallery)"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "POST /transformations no longer calls analyze_transformation_with_claude. Also added DELETE /transformations/{id} so user can remove photos in the new gallery."
+  - task: "/auth/me returns silhouette + force_metrics"
+    implemented: true
+    working: true
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: true
+        agent: "main"
+        comment: "Two extra optional fields added to /auth/me response."
+  - task: "/exercises/ai-add still works (no regression)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "No code change in this iteration but the endpoint is now hooked from the UI editor only. Worth a quick e2e check (description='farmer walk') with bearer token."
+
+frontend:
+  - task: "Onboarding: add silhouette step (step 5) + 1RM step (step 6)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/onboarding.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "New SilhouettePicker (5 levels × 2 sexes) + Lift rows (Squat / Bench / Deadlift) with auto live 1RM. Optional skip checkbox."
+  - task: "Profile: silhouette card + 1RM card with edit modals"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(tabs)/profile.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Two new cards above 'Avatar de force'. Modals open the picker / lift form. Save calls refreshUser to update local state."
+  - task: "Progress: private photo gallery (no AI) + chronologie / Avant-Après compare"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(tabs)/progress.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Removed ai_feedback rendering. New PhotoGallery component with grid + Avant/Après compare panes and delete buttons (uses DELETE /transformations/{id})."
+  - task: "Training: remove 'Accélérer' button + share card after session"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(tabs)/training.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "ProgramSummaryCard no longer renders 'Accélérer'. After 'Marquer comme terminée', auto-opens ShareCardModal and shows a 'Partager mes perfs' button on completed sessions."
+  - task: "ShareCard + ShareCardModal (capture, save, share)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/ShareCard.tsx, ShareCardModal.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "9:16 dark premium card with brand, focus, hero stats (volume / minutes / exercices), top 3 PRs (avec delta vs précédent), or best set fallback. Background photo optionnelle. Capture via react-native-view-shot, save (MediaLibrary), share (expo-sharing)."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 10
+  run_ui: true
+
+test_plan:
+  current_focus:
+    - "PUT /users/me/silhouette"
+    - "POST /workouts/estimate-1rm"
+    - "POST /transformations (no AI now) + DELETE /transformations/{id}"
+    - "Onboarding silhouette/1RM steps reach dashboard"
+    - "Profile silhouette + 1RM modals persist after refresh"
+    - "Progress gallery grid + compare modes"
+    - "Training 'Accélérer' is gone, share card opens after complete"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: |
+      Phase 4 backend + frontend implemented. Please test priority items above. Notes:
+      * Backend endpoints already pass curl smoke tests.
+      * Auth uses session bearer `test_session_token_abc` for user_test_001 (seeded).
+      * Share card uses react-native-view-shot; capture only fully works on native build,
+        web fallback opens preview URL. UI itself should still render & buttons must not crash.
+      * Photo background picker is optional. The card MUST also work without a background photo.

@@ -1,0 +1,48 @@
+{
+  "summary": "Phase 4 backend tested via pytest (18 tests, 17 PASS / 1 FAIL = 94%). Silhouette PUT works (clamp 0→1, 99→5, sex 'F'/'M' normalized, persists, 401 unauth). Estimate-1RM returns correct Epley items and inserts 4 rows into exercise_perf with est_1rm and source='estimate'. /auth/me now exposes silhouette and force_metrics (null when unset). Transformations no longer return/store ai_feedback (POST stores doc cleanly; view 'front'/'back'/'side' accepted). DELETE on own photo 200; on someone else's id 404; on missing id 404. Regression /api/exercises/ai-add returns name/category/equipment/recommended_reps/recommended_rest_s. CRITICAL bug: snapshot keys persisted to users.force_metrics are not squat/bench/deadlift/ohp as specified — server overrides the correct slug with name.split(' ')[0].lower(), yielding {at, squat, 'développé', 'soulevé'} where 'bench' collides with 'ohp' (both names start with 'Développé', so OHP overwrites bench).",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/workouts/estimate-1rm",
+        "issue": "force_metrics snapshot stores keys ['squat','développé','soulevé'] instead of ['squat','bench','deadlift','ohp']. Root cause: line 1410 of /app/backend/server.py reassigns `slug = name.split(' ')[0].lower()` AFTER the correct slug was already unpacked from the pairs tuple. Result: bench and ohp both map to 'développé' (collision — only the last wins, so 'bench' is silently lost). Spec explicitly requires keys squat/bench/deadlift/ohp + at. Fix: delete line `slug = name.split(' ')[0].lower()` so the original slug ('squat'|'bench'|'deadlift'|'ohp') is used.",
+        "priority": "CRITICAL"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Profile / Onboarding 1RM card",
+        "issue": "Any frontend that reads user.force_metrics.bench or user.force_metrics.deadlift / .ohp will silently render nothing because keys are 'développé'/'soulevé'. Fix the backend snapshot keys (see backend_issues.critical) before wiring the UI.",
+        "affected_testIDs": []
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration10_phase4.py",
+    "/app/test_reports/pytest/iteration10_results.xml"
+  ],
+  "action_items": [
+    "Fix server.py ~line 1410: remove `slug = name.split(' ')[0].lower()` inside estimate_1rm_endpoint so snapshot uses the slug already unpacked from the pairs tuple (squat/bench/deadlift/ohp). Without this, force_metrics is unreadable by the frontend and only 3 unique entries are stored instead of 4."
+  ],
+  "critical_code_review_comments": [
+    "estimate_1rm_endpoint: dead/buggy reassignment of `slug` at L1410 — the variable is already provided by the tuple `('Squat barre arrière','squat',...)` etc. Remove the line.",
+    "estimate_1rm_endpoint: `body_weight` is read from profile but ratio_bw / tier are computed even when body_weight==0 (ratio = 0 → tier likely unreliable). Consider returning null tier when no profile present.",
+    "server.py is 3052 lines — well over the 700-line guideline. Recommend splitting into routers (auth, profile, workouts, transformations, programs, challenges) for maintainability.",
+    "TransformationIn still accepts `mime` and `weight_kg` but they aren't persisted in the new no-AI doc. weight_kg IS persisted; `mime` is silently dropped — fine, but worth documenting.",
+    "DELETE /api/transformations/{id} correctly scopes by user_id (good — 404 leaks no info about other users)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration10_phase4.py (new)"
+  ],
+  "success_rate": {"backend": "94%", "frontend": "n/a (not tested per request)"},
+  "seed_data_creation": "Reused conftest seed_user fixture (user_test_001 + bearer test_session_token_abc). Added a 75kg male profile via direct Mongo upsert inside _seed_profile_75kg_male helper. Cleaned up test transformations via conftest teardown.",
+  "retest_needed": true,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "After main agent fixes the snapshot slug bug, only TestEstimate1RM::test_estimate_1rm_full_payload needs re-run. Command: `cd /app/backend && python -m pytest tests/test_iteration10_phase4.py::TestEstimate1RM -v`.",
+  "rca_of_issue": "RCA for snapshot key bug: in /app/backend/server.py estimate_1rm_endpoint(), the loop iterates `for name, slug, wkg, reps in pairs` with correct slugs ('squat','bench','deadlift','ohp'). However right before `snapshot[slug] = est`, the line `slug = name.split(' ')[0].lower()` overwrites the slug with the first French word of the exercise name. For 'Squat barre arrière' that's still 'squat', but for 'Développé couché barre' and 'Développé militaire barre' both become 'développé', and 'Soulevé de terre barre' becomes 'soulevé'. Net effect: keys are wrong AND bench is overwritten by ohp because both start with 'Développé'. Repro: POST /api/workouts/estimate-1rm with full payload (squat/bench/deadlift/ohp), then GET /api/auth/me — force_metrics has only {at, squat, développé, soulevé} (3 numeric keys instead of 4). Mitigation: delete the offending reassignment line. The tuple already provides the canonical slugs."
+}

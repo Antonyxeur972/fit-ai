@@ -252,6 +252,22 @@ class TravelModeRequest(BaseModel):
     goal_label: Optional[str] = "Maintien"
 
 
+class SilhouetteRequest(BaseModel):
+    sex: str  # "male" | "female"
+    level: int  # 1..5  (1 = très mince ; 5 = très musclé)
+
+
+class Estimate1RMRequest(BaseModel):
+    squat_kg: Optional[float] = None
+    squat_reps: Optional[int] = None
+    bench_kg: Optional[float] = None
+    bench_reps: Optional[int] = None
+    deadlift_kg: Optional[float] = None
+    deadlift_reps: Optional[int] = None
+    ohp_kg: Optional[float] = None  # développé militaire
+    ohp_reps: Optional[int] = None
+
+
 class ChallengeStartRequest(BaseModel):
     type: str  # "pushups" | "abs" | "squats"
 
@@ -824,10 +840,10 @@ FOCUS_BLUEPRINTS: Dict[str, List[str]] = {
     "Core": ["Crunchs", "Russian twist", "Leg raises", "Planche", "Planche latérale"],
     "Cardio": ["Marche rapide", "Course intermittente", "Burpees", "Mountain climbers"],
     "Repos actif": ["Marche rapide", "Mobilité hanche / épaule"],
-    # Bodyweight / home variants
-    "HomePush": ["Pompes diamant", "Pompes inclinées (pieds surélevés)", "Pompes archer", "Dips entre 2 chaises", "Pompes pike"],
-    "HomePull": ["Tractions porte (élastique)", "Rowing inversé table", "Curl élastique", "Superman", "Bird-dog"],
-    "HomeLegs": ["Squats sautés", "Fentes alternées", "Squat bulgare (chaise)", "Pont fessier 1 jambe", "Mollets sur marche"],
+    # Bodyweight / home variants — STRICT poids du corps, aucun matériel
+    "HomePush": ["Pompes diamant", "Pompes inclinées (pieds surélevés)", "Pompes archer", "Pompes pike", "Pompes lestées d'un sac"],
+    "HomePull": ["Rowing inversé sous table", "Superman", "Bird-dog", "Pompes diamant", "Tirage serviette (porte)"],
+    "HomeLegs": ["Squats sautés", "Fentes alternées", "Squat bulgare (chaise)", "Pont fessier 1 jambe", "Chaise au mur"],
     "HomeFullBody": ["Burpees", "Pompes diamant", "Squats sautés", "Mountain climbers", "Planche"],
     "HomeCore": ["Planche", "Planche latérale", "Mountain climbers", "Russian twist", "Hollow hold"],
 }
@@ -1324,7 +1340,80 @@ async def auth_me(authorization: Optional[str] = Header(default=None)):
         "name": user["name"],
         "picture": user.get("picture"),
         "onboarded": bool(user.get("onboarded", False)),
+        "silhouette": user.get("silhouette"),
+        "force_metrics": user.get("force_metrics"),
     }
+
+
+@api.put("/users/me/silhouette")
+async def update_silhouette(
+    body: SilhouetteRequest, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    sex = "female" if body.sex.lower().startswith("f") else "male"
+    level = max(1, min(5, int(body.level)))
+    silhouette = {"sex": sex, "level": level}
+    await db.users.update_one(
+        {"user_id": user["user_id"]}, {"$set": {"silhouette": silhouette}}
+    )
+    return {"silhouette": silhouette}
+
+
+@api.post("/workouts/estimate-1rm")
+async def estimate_1rm_endpoint(
+    body: Estimate1RMRequest, authorization: Optional[str] = Header(default=None)
+):
+    """Estimate 1RM for the big-3 + OHP from user-supplied weight×reps.
+    Stores both the raw entries (in exercise_perf, so charts include them) and
+    a compact `force_metrics` snapshot on the user doc for the profile screen."""
+    user = await get_current_user(authorization)
+    profile = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0}) or {}
+    body_weight = float(profile.get("weight_kg", 0) or 0)
+
+    pairs = [
+        ("Squat barre arrière", "squat", body.squat_kg, body.squat_reps),
+        ("Développé couché barre", "bench", body.bench_kg, body.bench_reps),
+        ("Soulevé de terre barre", "deadlift", body.deadlift_kg, body.deadlift_reps),
+        ("Développé militaire barre", "ohp", body.ohp_kg, body.ohp_reps),
+    ]
+    results: List[Dict[str, Any]] = []
+    snapshot: Dict[str, Any] = {"at": now_utc().isoformat()}
+    for name, slug, wkg, reps in pairs:
+        if not wkg or not reps:
+            continue
+        est = estimate_1rm(float(wkg), int(reps))
+        ratio = (est / body_weight) if body_weight > 0 else 0
+        tier = strength_tier(ratio)
+        # Persist in exercise_perf for chart continuity
+        await db.exercise_perf.insert_one({
+            "id": new_id("perf"),
+            "user_id": user["user_id"],
+            "workout_id": None,
+            "date": today_str(),
+            "exercise_name": name,
+            "weight_kg": float(wkg),
+            "reps": int(reps),
+            "sets": 1,
+            "est_1rm": est,
+            "notes": "estimation onboarding/profile",
+            "source": "estimate",
+            "created_at": now_utc(),
+        })
+        results.append({
+            "exercise": name,
+            "weight_kg": float(wkg),
+            "reps": int(reps),
+            "est_1rm": est,
+            "ratio_bw": round(ratio, 2),
+            "tier": tier,
+        })
+        slug = name.split(" ")[0].lower()
+        snapshot[slug] = est
+    if results:
+        await db.users.update_one(
+            {"user_id": user["user_id"]}, {"$set": {"force_metrics": snapshot}}
+        )
+    return {"items": results, "snapshot": snapshot}
 
 
 @api.post("/auth/logout")
@@ -1706,36 +1795,6 @@ async def program_create(
     }
     await db.programs.insert_one(doc)
     return strip_id(doc)
-
-
-@api.post("/program/{program_id}/accelerate")
-async def program_accelerate(
-    program_id: str, authorization: Optional[str] = Header(default=None)
-):
-    """Increase progressively the volume on remaining weeks (+1 set everywhere, +5s rest cap)."""
-    user = await get_current_user(authorization)
-    prog = await db.programs.find_one(
-        {"id": program_id, "user_id": user["user_id"]}, {"_id": 0}
-    )
-    if not prog:
-        raise HTTPException(404, "Program not found")
-    current_week = prog.get("current_week", 1)
-    weeks = prog.get("weeks") or []
-    bumped = 0
-    for w in weeks:
-        if w["week_index"] < current_week:
-            continue
-        for d in w.get("days", []):
-            for e in d.get("exercises", []):
-                old_sets = int(e.get("sets", 3))
-                e["sets"] = min(old_sets + 1, 6)
-                bumped += 1
-    prog["accelerated_count"] = int(prog.get("accelerated_count", 0)) + 1
-    await db.programs.update_one(
-        {"id": program_id, "user_id": user["user_id"]},
-        {"$set": {"weeks": weeks, "accelerated_count": prog["accelerated_count"]}},
-    )
-    return {"ok": True, "exercises_bumped": bumped, "accelerated_count": prog["accelerated_count"]}
 
 
 @api.post("/program/travel-mode")
@@ -2807,11 +2866,7 @@ async def complete_workout(workout_id: str, authorization: Optional[str] = Heade
 @api.post("/transformations")
 async def add_transformation(body: TransformationIn, authorization: Optional[str] = Header(default=None)):
     user = await get_current_user(authorization)
-    prev = await db.transformations.find_one(
-        {"user_id": user["user_id"]}, sort=[("created_at", -1)], projection={"_id": 0}
-    )
-    prev_img = prev.get("image_base64") if prev else None
-    feedback = await analyze_transformation_with_claude(body.image_base64, prev_img)
+    # PHASE 4: no AI analysis on body photos. Private gallery only.
     doc = {
         "id": new_id("transfo"),
         "user_id": user["user_id"],
@@ -2820,7 +2875,6 @@ async def add_transformation(body: TransformationIn, authorization: Optional[str
         "image_base64": body.image_base64[:300000],
         "weight_kg": body.weight_kg,
         "view": (body.view or "front").lower(),
-        "ai_feedback": feedback,
     }
     await db.transformations.insert_one(doc)
     return strip_id(doc)
@@ -2833,6 +2887,17 @@ async def list_transformations(authorization: Optional[str] = Header(default=Non
         {"user_id": user["user_id"]}, {"_id": 0}
     ).sort("created_at", -1).to_list(50)
     return items
+
+
+@api.delete("/transformations/{transfo_id}")
+async def delete_transformation(transfo_id: str, authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    res = await db.transformations.delete_one(
+        {"id": transfo_id, "user_id": user["user_id"]}
+    )
+    if res.deleted_count == 0:
+        raise HTTPException(404, "Photo introuvable")
+    return {"ok": True}
 
 
 # --- DASHBOARD ---

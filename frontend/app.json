@@ -12,7 +12,8 @@
       "supportsTablet": true,
       "infoPlist": {
         "NSCameraUsageDescription": "Prendre des photos de tes repas et progressions",
-        "NSPhotoLibraryUsageDescription": "Sélectionner photos de repas et transformations"
+        "NSPhotoLibraryUsageDescription": "Sélectionner photos de repas et transformations",
+        "NSPhotoLibraryAddUsageDescription": "Enregistrer ta story de performance dans tes photos"
       }
     },
     "android": {

@@ -8,7 +8,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
+import { useAuth } from "@/src/auth";
 import { Card, Button, SectionTitle, Stat } from "@/src/components/UI";
+import { ShareCardModal } from "@/src/components/ShareCardModal";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type Exercise = { name: string; sets: number; reps: string; rest_s: number; checked?: boolean; is_recommended?: boolean };
@@ -71,6 +73,7 @@ const REST_DEFAULTS: Record<string, number> = {
 };
 
 export default function Training() {
+  const { user } = useAuth();
   const today = new Date().toISOString().slice(0, 10);
   const [tab, setTab] = useState<TrainingTab>("today");
   const [week, setWeek] = useState<Workout[]>([]);
@@ -119,11 +122,14 @@ export default function Training() {
   const [setupBlocks, setSetupBlocks] = useState<{ volume: number; puissance: number; force: number }>({ volume: 1, puissance: 1, force: 1 });
   const [creatingProgram, setCreatingProgram] = useState(false);
 
-  // Travel mode + accelerate
+  // Travel mode
   const [travelOpen, setTravelOpen] = useState(false);
   const [travelDays, setTravelDays] = useState(7);
   const [travelBusy, setTravelBusy] = useState(false);
-  const [acceleratingBusy, setAcceleratingBusy] = useState(false);
+
+  // Share Card (after session complete)
+  const [shareOpen, setShareOpen] = useState(false);
+  const [shareData, setShareData] = useState<any>(null);
 
   // AI exercise add
   const [aiExModalOpen, setAiExModalOpen] = useState(false);
@@ -168,6 +174,60 @@ export default function Training() {
 
   const completeWorkout = async (id: string) => {
     await api(`/workouts/${id}/complete`, { method: "POST" });
+    // Build share card data from session perfs (best PR per exercise)
+    try {
+      const w = week.find((x) => x.id === id);
+      const perfs = await api<{ items: Perf[]; personal_bests: Perf[] }>(`/perf/recent?limit=200`);
+      const sessionPerfs = perfs.items.filter((p) => (p as any).workout_id === id);
+      const focus = w?.focus || w?.title || "Séance";
+      const sType = (w?.session_type || "").toString();
+      const sLabel = sType ? ` · ${sType.charAt(0).toUpperCase() + sType.slice(1)}` : "";
+      // Volume = sum(weight * reps * sets) from this session
+      const total_volume_kg = sessionPerfs.reduce(
+        (s, p) => s + (p.weight_kg || 0) * (p.reps || 0) * (p.sets || 1),
+        0
+      );
+      // PRs = max est_1rm per exercise in this session
+      const bestByEx: Record<string, Perf> = {};
+      for (const p of sessionPerfs) {
+        if (!bestByEx[p.exercise_name] || bestByEx[p.exercise_name].est_1rm < p.est_1rm) {
+          bestByEx[p.exercise_name] = p;
+        }
+      }
+      // Compute delta vs previous best
+      const prs = Object.values(bestByEx).map((p) => {
+        const prev = perfs.items
+          .filter(
+            (x) =>
+              x.exercise_name === p.exercise_name &&
+              (x as any).workout_id !== id &&
+              new Date(x.created_at).getTime() < new Date(p.created_at).getTime()
+          )
+          .reduce((mx, x) => Math.max(mx, x.est_1rm || 0), 0);
+        return {
+          exercise: p.exercise_name,
+          est_1rm: p.est_1rm,
+          delta_kg: prev > 0 ? Math.max(0, +(p.est_1rm - prev).toFixed(1)) : undefined,
+        };
+      }).sort((a, b) => b.est_1rm - a.est_1rm);
+      // Best set fallback
+      const bestSet = sessionPerfs.sort(
+        (a, b) => (b.weight_kg * b.reps) - (a.weight_kg * a.reps)
+      )[0];
+      setShareData({
+        focus: `${focus}${sLabel}`,
+        duration_min: w?.duration_min,
+        total_volume_kg: total_volume_kg > 0 ? total_volume_kg : undefined,
+        exercises_count: w?.exercises?.filter((e) => e.checked !== false).length || 0,
+        prs: prs.length ? prs : undefined,
+        best_set: !prs.length && bestSet
+          ? { exercise: bestSet.exercise_name, weight_kg: bestSet.weight_kg, reps: bestSet.reps }
+          : undefined,
+      });
+      setShareOpen(true);
+    } catch (e) {
+      console.warn("share data", e);
+    }
     await load();
     if (tab === "calendar") loadCalendar(calMonth);
   };
@@ -351,18 +411,6 @@ export default function Training() {
       setProgramSetupOpen(false);
     } catch {} finally {
       setCreatingProgram(false);
-    }
-  };
-
-  const accelerateProgram = async () => {
-    if (!program) return;
-    setAcceleratingBusy(true);
-    try {
-      await api(`/program/${program.id}/accelerate`, { method: "POST" });
-      const refreshed = await api<{ program: TrainingProgram | null }>("/program/current");
-      setProgram(refreshed.program);
-    } finally {
-      setAcceleratingBusy(false);
     }
   };
 
@@ -562,10 +610,8 @@ export default function Training() {
         <ProgramSummaryCard
           program={program}
           onCreate={() => setProgramSetupOpen(true)}
-          onAccelerate={accelerateProgram}
           onTravel={() => setTravelOpen(true)}
           onEndTravel={endTravelMode}
-          acceleratingBusy={acceleratingBusy}
           travelBusy={travelBusy}
         />
 
@@ -627,6 +673,53 @@ export default function Training() {
               testID="complete-workout-button"
               style={{ marginTop: spacing.md }}
             />
+            {todayWorkout.completed && (
+              <Button
+                title="Partager mes perfs"
+                variant="primary"
+                onPress={async () => {
+                  // Rebuild share data from history
+                  try {
+                    const perfs = await api<{ items: Perf[] }>(`/perf/recent?limit=200`);
+                    const sessionPerfs = perfs.items.filter((p) => (p as any).workout_id === todayWorkout.id);
+                    const focus = todayWorkout.focus || todayWorkout.title || "Séance";
+                    const sType = (todayWorkout.session_type || "").toString();
+                    const sLabel = sType ? ` · ${sType.charAt(0).toUpperCase() + sType.slice(1)}` : "";
+                    const total_volume_kg = sessionPerfs.reduce(
+                      (s, p) => s + (p.weight_kg || 0) * (p.reps || 0) * (p.sets || 1), 0,
+                    );
+                    const bestByEx: Record<string, Perf> = {};
+                    for (const p of sessionPerfs) {
+                      if (!bestByEx[p.exercise_name] || bestByEx[p.exercise_name].est_1rm < p.est_1rm) {
+                        bestByEx[p.exercise_name] = p;
+                      }
+                    }
+                    const prs = Object.values(bestByEx).map((p) => ({
+                      exercise: p.exercise_name, est_1rm: p.est_1rm,
+                    })).sort((a, b) => b.est_1rm - a.est_1rm);
+                    const bestSet = sessionPerfs.sort(
+                      (a, b) => (b.weight_kg * b.reps) - (a.weight_kg * a.reps),
+                    )[0];
+                    setShareData({
+                      focus: `${focus}${sLabel}`,
+                      duration_min: todayWorkout.duration_min,
+                      total_volume_kg: total_volume_kg > 0 ? total_volume_kg : undefined,
+                      exercises_count: todayWorkout.exercises.filter((e) => e.checked !== false).length,
+                      prs: prs.length ? prs : undefined,
+                      best_set: !prs.length && bestSet
+                        ? { exercise: bestSet.exercise_name, weight_kg: bestSet.weight_kg, reps: bestSet.reps }
+                        : undefined,
+                    });
+                    setShareOpen(true);
+                  } catch (e) {
+                    console.warn("share rebuild", e);
+                  }
+                }}
+                icon={<Ionicons name="share-social-outline" size={16} color="#fff" />}
+                testID="share-perf-button"
+                style={{ marginTop: spacing.sm }}
+              />
+            )}
           </Card>
         ) : !program ? (
           <Card>
@@ -1181,6 +1274,16 @@ export default function Training() {
           </KeyboardAwareScrollView>
         </View>
       </Modal>
+
+      {/* Share Card Modal */}
+      <ShareCardModal
+        visible={shareOpen}
+        onClose={() => setShareOpen(false)}
+        data={{
+          user_name: user?.name,
+          ...(shareData || {}),
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -1332,14 +1435,12 @@ function SessionLegend() {
 }
 
 function ProgramSummaryCard({
-  program, onCreate, onAccelerate, onTravel, onEndTravel, acceleratingBusy, travelBusy,
+  program, onCreate, onTravel, onEndTravel, travelBusy,
 }: {
   program: TrainingProgram | null;
   onCreate: () => void;
-  onAccelerate?: () => void;
   onTravel?: () => void;
   onEndTravel?: () => void;
-  acceleratingBusy?: boolean;
   travelBusy?: boolean;
 }) {
   if (!program) {
@@ -1394,15 +1495,6 @@ function ProgramSummaryCard({
           </TouchableOpacity>
         ) : (
           <>
-            <TouchableOpacity
-              onPress={onAccelerate}
-              disabled={acceleratingBusy}
-              style={[styles.actionBtn, acceleratingBusy && { opacity: 0.5 }]}
-              testID="summary-accelerate"
-            >
-              <Ionicons name="flash" size={14} color={colors.primary} />
-              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Accélérer</Text>
-            </TouchableOpacity>
             <TouchableOpacity onPress={onCreate} style={styles.actionBtn} testID="summary-new-goals">
               <Ionicons name="refresh" size={14} color={colors.primary} />
               <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Nouveaux objectifs</Text>

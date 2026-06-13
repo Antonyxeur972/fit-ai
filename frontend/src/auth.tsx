@@ -10,6 +10,14 @@ export type AppUser = {
   name: string;
   picture?: string | null;
   onboarded: boolean;
+  silhouette?: { sex: "male" | "female"; level: number } | null;
+  force_metrics?: {
+    at?: string;
+    squat?: number;
+    bench?: number;
+    deadlift?: number;
+    ohp?: number;
+  } | null;
 };
 
 type AuthCtx = {

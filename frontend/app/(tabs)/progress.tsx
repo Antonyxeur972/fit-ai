@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, Dimensions } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
@@ -12,7 +12,6 @@ type Transfo = {
   id: string;
   date: string;
   image_base64: string;
-  ai_feedback?: string;
   weight_kg?: number;
   view?: string;
   created_at: string;
@@ -253,8 +252,14 @@ export default function Progress() {
           </View>
         </Card>
 
-        {/* Transformations */}
-        <SectionTitle title="Photos de transformation" />
+        {/* Private photo gallery */}
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: spacing.sm }}>
+          <SectionTitle title="Galerie privée" />
+          <View style={styles.privacyChip}>
+            <Ionicons name="lock-closed" size={10} color={colors.primary} />
+            <Text style={[typography.small, { color: colors.primary, fontWeight: "700", fontSize: 10 }]}>Privé · sans IA</Text>
+          </View>
+        </View>
         <View style={styles.viewChipsRow} testID="transfo-view-chips">
           {(["front", "back", "side"] as const).map((v) => {
             const isOn = uploadView === v;
@@ -300,7 +305,7 @@ export default function Progress() {
         {uploading && (
           <View style={[styles.uploadingRow]}>
             <ActivityIndicator color={colors.primary} />
-            <Text style={typography.small}>Analyse IA en cours...</Text>
+            <Text style={typography.small}>Envoi en cours...</Text>
           </View>
         )}
 
@@ -314,46 +319,261 @@ export default function Progress() {
                 Documente ta progression
               </Text>
               <Text style={[typography.small, { textAlign: "center", marginTop: 6 }]}>
-                {"Toutes les 2-4 semaines, upload une photo. L'IA suit ton évolution."}
+                {"Toutes les 2-4 semaines, ajoute une photo. Galerie 100 % privée, sans IA."}
               </Text>
             </View>
           </Card>
         ) : (
-          transfos.map((t, idx) => (
-            <Card key={t.id} testID={`transfo-${t.id}`}>
-              <View style={{ flexDirection: "row", gap: spacing.md }}>
-                <Image source={{ uri: `data:image/jpeg;base64,${t.image_base64}` }} style={styles.transfoImg} />
-                <View style={{ flex: 1 }}>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                    <Text style={typography.caption}>
-                      {new Date(t.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })}
-                    </Text>
-                    {t.view && (
-                      <View style={styles.viewBadge}>
-                        <Text style={[typography.small, { fontSize: 10, color: colors.primary, fontWeight: "700" }]}>
-                          {t.view === "front" ? "Face" : t.view === "back" ? "Dos" : "Côté"}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={[typography.body, { fontWeight: "600", marginTop: 2 }]}>
-                    {idx === 0 ? "Dernière photo" : `Photo #${transfos.length - idx}`}
-                  </Text>
-                  {t.weight_kg ? <Text style={typography.small}>{t.weight_kg} kg</Text> : null}
-                  {t.ai_feedback ? (
-                    <Text style={[typography.small, { marginTop: spacing.sm, color: colors.textMain, lineHeight: 18 }]}>
-                      {t.ai_feedback}
-                    </Text>
-                  ) : null}
-                </View>
-              </View>
-            </Card>
-          ))
+          <PhotoGallery
+            transfos={transfos}
+            view={uploadView}
+            onDelete={async (id) => {
+              try {
+                await api(`/transformations/${id}`, { method: "DELETE" });
+                await load();
+              } catch (e) {
+                console.warn("delete transfo", e);
+              }
+            }}
+          />
         )}
 
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+// ---- PhotoGallery: chronological + before/after compare ----
+function PhotoGallery({
+  transfos,
+  view,
+  onDelete,
+}: {
+  transfos: Transfo[];
+  view: "front" | "back" | "side";
+  onDelete: (id: string) => Promise<void>;
+}) {
+  const [mode, setMode] = useState<"grid" | "compare">("grid");
+  const [leftId, setLeftId] = useState<string | null>(null);
+  const [rightId, setRightId] = useState<string | null>(null);
+
+  const filtered = useMemo(
+    () => transfos.filter((t) => !t.view || t.view === view),
+    [transfos, view]
+  );
+
+  const sortedAsc = useMemo(
+    () => filtered.slice().sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
+    [filtered]
+  );
+
+  // Auto-pick: first & last
+  useMemo(() => {
+    if (mode === "compare" && filtered.length >= 2) {
+      if (!leftId) setLeftId(sortedAsc[0].id);
+      if (!rightId) setRightId(sortedAsc[sortedAsc.length - 1].id);
+    }
+  }, [mode, filtered.length, leftId, rightId, sortedAsc]);
+
+  const screenW = Dimensions.get("window").width;
+  const colWidth = (screenW - 16 * 2 - 16) / 2; // 2 cols, padding & gap
+
+  const confirmDelete = (id: string) => {
+    Alert.alert(
+      "Supprimer la photo ?",
+      "Cette action est définitive.",
+      [
+        { text: "Annuler", style: "cancel" },
+        { text: "Supprimer", style: "destructive", onPress: () => onDelete(id) },
+      ]
+    );
+  };
+
+  const renderImg = (t: Transfo, w: number, h: number) => (
+    <Image
+      source={{ uri: `data:image/jpeg;base64,${t.image_base64}` }}
+      style={{ width: w, height: h, borderRadius: radius.md, backgroundColor: colors.border }}
+      resizeMode="cover"
+    />
+  );
+
+  return (
+    <View style={{ gap: spacing.sm }}>
+      {/* Mode toggle */}
+      <View style={styles.galleryModeRow}>
+        {([
+          { v: "grid" as const, label: "Chronologie", icon: "grid-outline" as const },
+          { v: "compare" as const, label: "Avant / Après", icon: "git-compare-outline" as const },
+        ]).map((m) => {
+          const isOn = mode === m.v;
+          return (
+            <TouchableOpacity
+              key={m.v}
+              onPress={() => setMode(m.v)}
+              style={[styles.galleryModeChip, isOn && styles.galleryModeChipOn]}
+              testID={`gallery-mode-${m.v}`}
+            >
+              <Ionicons name={m.icon} size={14} color={isOn ? colors.primary : colors.textSecondary} />
+              <Text
+                style={[
+                  typography.small,
+                  { fontWeight: "700", color: isOn ? colors.primary : colors.textSecondary },
+                ]}
+              >
+                {m.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
+      {mode === "grid" && (
+        <View style={styles.gridWrap}>
+          {sortedAsc.length === 0 ? (
+            <Card>
+              <Text style={typography.small}>
+                Aucune photo « {view === "front" ? "Face" : view === "back" ? "Dos" : "Côté"} » pour l&apos;instant.
+              </Text>
+            </Card>
+          ) : (
+            sortedAsc.slice().reverse().map((t) => (
+              <View key={t.id} style={[styles.gridItem, { width: colWidth }]} testID={`gallery-grid-${t.id}`}>
+                {renderImg(t, colWidth, colWidth * 1.4)}
+                <View style={styles.gridFooter}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[typography.small, { fontWeight: "700", color: colors.textMain }]}>
+                      {new Date(t.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+                    </Text>
+                    {t.weight_kg ? (
+                      <Text style={[typography.small, { fontSize: 11 }]}>{t.weight_kg} kg</Text>
+                    ) : null}
+                  </View>
+                  <TouchableOpacity onPress={() => confirmDelete(t.id)} hitSlop={10} testID={`gallery-delete-${t.id}`}>
+                    <Ionicons name="trash-outline" size={16} color={colors.alert} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))
+          )}
+        </View>
+      )}
+
+      {mode === "compare" && (
+        <Card testID="gallery-compare">
+          {filtered.length < 2 ? (
+            <Text style={[typography.small, { textAlign: "center", paddingVertical: spacing.md }]}>
+              Ajoute au moins 2 photos pour activer le comparatif.
+            </Text>
+          ) : (
+            <>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                <ComparePane
+                  label="Avant"
+                  selectedId={leftId}
+                  options={sortedAsc}
+                  onPick={setLeftId}
+                  renderImg={renderImg}
+                  width={(screenW - 32 - 16 - 16) / 2}
+                />
+                <ComparePane
+                  label="Après"
+                  selectedId={rightId}
+                  options={sortedAsc}
+                  onPick={setRightId}
+                  renderImg={renderImg}
+                  width={(screenW - 32 - 16 - 16) / 2}
+                />
+              </View>
+              <DeltaSummary
+                left={sortedAsc.find((x) => x.id === leftId)}
+                right={sortedAsc.find((x) => x.id === rightId)}
+              />
+            </>
+          )}
+        </Card>
+      )}
+    </View>
+  );
+}
+
+function ComparePane({
+  label,
+  selectedId,
+  options,
+  onPick,
+  renderImg,
+  width,
+}: {
+  label: string;
+  selectedId: string | null;
+  options: Transfo[];
+  onPick: (id: string) => void;
+  renderImg: (t: Transfo, w: number, h: number) => React.ReactNode;
+  width: number;
+}) {
+  const t = options.find((x) => x.id === selectedId) || options[0];
+  if (!t) return null;
+  return (
+    <View style={{ flex: 1, gap: 6 }}>
+      <View style={styles.compareLabelRow}>
+        <Text style={[typography.small, { fontWeight: "800", color: colors.textMain }]}>{label}</Text>
+        <Text style={[typography.small, { fontSize: 10, color: colors.textMuted }]}>
+          {new Date(t.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+        </Text>
+      </View>
+      {renderImg(t, width, width * 1.4)}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4 }}>
+        {options.map((o) => {
+          const on = o.id === t.id;
+          return (
+            <TouchableOpacity
+              key={o.id}
+              onPress={() => onPick(o.id)}
+              style={[styles.thumb, on && styles.thumbOn]}
+              testID={`compare-thumb-${o.id}`}
+            >
+              <Image source={{ uri: `data:image/jpeg;base64,${o.image_base64}` }} style={styles.thumbImg} />
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+function DeltaSummary({ left, right }: { left?: Transfo; right?: Transfo }) {
+  if (!left || !right) return null;
+  const daysApart = Math.abs(
+    Math.round(
+      (new Date(right.created_at).getTime() - new Date(left.created_at).getTime()) /
+        (1000 * 60 * 60 * 24)
+    )
+  );
+  const deltaKg =
+    typeof left.weight_kg === "number" && typeof right.weight_kg === "number"
+      ? right.weight_kg - left.weight_kg
+      : null;
+  return (
+    <View style={styles.deltaRow}>
+      <View style={{ flex: 1 }}>
+        <Text style={typography.caption}>Période</Text>
+        <Text style={[typography.h3, { marginTop: 2 }]}>{daysApart} <Text style={typography.small}>jours</Text></Text>
+      </View>
+      {deltaKg !== null && (
+        <View style={{ alignItems: "flex-end" }}>
+          <Text style={typography.caption}>Variation de poids</Text>
+          <Text
+            style={[
+              typography.h3,
+              { marginTop: 2, color: deltaKg < 0 ? colors.primary : deltaKg > 0 ? "#A85B0F" : colors.textMain },
+            ]}
+          >
+            {deltaKg > 0 ? "+" : ""}{deltaKg.toFixed(1)} <Text style={typography.small}>kg</Text>
+          </Text>
+        </View>
+      )}
+    </View>
   );
 }
 
@@ -376,4 +596,17 @@ const styles = StyleSheet.create({
   viewChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   viewChipOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
   viewBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.full, backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: "#D5EAD8" },
+  // Gallery
+  galleryModeRow: { flexDirection: "row", gap: 6 },
+  galleryModeChip: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  galleryModeChipOn: { borderColor: colors.primary, backgroundColor: colors.primaryPale },
+  gridWrap: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
+  gridItem: { backgroundColor: colors.surface, borderRadius: radius.md, padding: 6, borderWidth: 1, borderColor: colors.border, gap: 4 },
+  gridFooter: { flexDirection: "row", alignItems: "center", paddingHorizontal: 4, paddingBottom: 2 },
+  privacyChip: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: colors.primary },
+  compareLabelRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  thumb: { width: 36, height: 36, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, overflow: "hidden" },
+  thumbOn: { borderColor: colors.primary, borderWidth: 2 },
+  thumbImg: { width: "100%", height: "100%" },
+  deltaRow: { flexDirection: "row", justifyContent: "space-between", marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border },
 });

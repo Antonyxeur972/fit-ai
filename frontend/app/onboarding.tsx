@@ -7,12 +7,15 @@ import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/src/auth";
 import { api } from "@/src/api";
 import { Button, Card } from "@/src/components/UI";
+import { SilhouettePicker } from "@/src/components/SilhouettePicker";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
-type Step = 0 | 1 | 2 | 3;
+type Step = 0 | 1 | 2 | 3 | 4 | 5;
 type Gender = "male" | "female";
 type Goal = "lose" | "maintain" | "gain";
 type ActivityLevel = "sedentary" | "light" | "moderate" | "active" | "very_active";
+
+const STEPS_COUNT = 6;
 
 const GOAL_OPTIONS: { value: Goal; label: string; desc: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { value: "lose", label: "Perdre du gras", desc: "Déficit calorique modéré", icon: "trending-down" },
@@ -40,7 +43,19 @@ export default function Onboarding() {
   const [activity, setActivity] = useState<ActivityLevel>("moderate");
   const [submitting, setSubmitting] = useState(false);
 
-  const next = () => setStep((s) => Math.min(3, (s + 1)) as Step);
+  // Phase 4: Silhouette + 1RM
+  const [silhouetteLevel, setSilhouetteLevel] = useState<number>(3);
+  const [silhouetteSex, setSilhouetteSex] = useState<Gender>(gender);
+
+  const [squatKg, setSquatKg] = useState("");
+  const [squatReps, setSquatReps] = useState("");
+  const [benchKg, setBenchKg] = useState("");
+  const [benchReps, setBenchReps] = useState("");
+  const [deadliftKg, setDeadliftKg] = useState("");
+  const [deadliftReps, setDeadliftReps] = useState("");
+  const [skipForce, setSkipForce] = useState(false);
+
+  const next = () => setStep((s) => Math.min(STEPS_COUNT - 1, (s + 1)) as Step);
   const prev = () => setStep((s) => Math.max(0, (s - 1)) as Step);
 
   const submit = async () => {
@@ -57,7 +72,38 @@ export default function Onboarding() {
           activity_level: activity,
         },
       });
-      // Generate workouts
+      // Save silhouette
+      try {
+        await api("/users/me/silhouette", {
+          method: "PUT",
+          body: { sex: silhouetteSex, level: silhouetteLevel },
+        });
+      } catch {}
+
+      // Save 1RM estimations only if user provided at least one valid value
+      if (!skipForce) {
+        const hasAny =
+          (parseFloat(squatKg) > 0 && parseInt(squatReps, 10) > 0) ||
+          (parseFloat(benchKg) > 0 && parseInt(benchReps, 10) > 0) ||
+          (parseFloat(deadliftKg) > 0 && parseInt(deadliftReps, 10) > 0);
+        if (hasAny) {
+          try {
+            await api("/workouts/estimate-1rm", {
+              method: "POST",
+              body: {
+                squat_kg: parseFloat(squatKg) || null,
+                squat_reps: parseInt(squatReps, 10) || null,
+                bench_kg: parseFloat(benchKg) || null,
+                bench_reps: parseInt(benchReps, 10) || null,
+                deadlift_kg: parseFloat(deadliftKg) || null,
+                deadlift_reps: parseInt(deadliftReps, 10) || null,
+              },
+            });
+          } catch {}
+        }
+      }
+
+      // Generate workouts (legacy week)
       try {
         await api("/workouts/generate", { method: "POST" });
       } catch {}
@@ -73,9 +119,9 @@ export default function Onboarding() {
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]} testID="onboarding-screen">
       <View style={styles.header}>
-        <Text style={typography.caption}>Étape {step + 1} sur 4</Text>
+        <Text style={typography.caption}>Étape {step + 1} sur {STEPS_COUNT}</Text>
         <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${((step + 1) / 4) * 100}%` }]} />
+          <View style={[styles.progressFill, { width: `${((step + 1) / STEPS_COUNT) * 100}%` }]} />
         </View>
       </View>
 
@@ -99,7 +145,10 @@ export default function Onboarding() {
                     key={g}
                     testID={`onboarding-gender-${g}`}
                     style={[styles.choice, gender === g && styles.choiceActive]}
-                    onPress={() => setGender(g)}
+                    onPress={() => {
+                      setGender(g);
+                      setSilhouetteSex(g);
+                    }}
                   >
                     <Ionicons
                       name={g === "male" ? "male" : "female"}
@@ -178,6 +227,52 @@ export default function Onboarding() {
             </View>
           </>
         )}
+
+        {step === 4 && (
+          <>
+            <Text style={styles.title}>Ta silhouette actuelle</Text>
+            <Text style={styles.subtitle}>
+              Choisis le visuel qui ressemble le plus à ton corps aujourd&apos;hui. Ça sert de point de départ.
+            </Text>
+            <Card style={{ marginTop: spacing.lg }}>
+              <SilhouettePicker
+                sex={silhouetteSex}
+                level={silhouetteLevel}
+                onChange={(sx, lv) => {
+                  setSilhouetteSex(sx);
+                  setSilhouetteLevel(lv);
+                }}
+              />
+              <Text style={[typography.small, { marginTop: spacing.md, color: colors.textMuted }]}>
+                Tu pourras toujours la modifier depuis ton profil.
+              </Text>
+            </Card>
+          </>
+        )}
+
+        {step === 5 && (
+          <>
+            <Text style={styles.title}>Tes records (optionnel)</Text>
+            <Text style={styles.subtitle}>
+              Indique ton meilleur effort par exercice (charge × reps). On calcule ton 1RM. Sans ces données, ton profil reste plus pauvre.
+            </Text>
+            <Card style={{ marginTop: spacing.lg, gap: spacing.md }}>
+              <LiftRow label="Squat" wKey={squatKg} rKey={squatReps} setW={setSquatKg} setR={setSquatReps} testID="lift-squat" />
+              <LiftRow label="Développé couché" wKey={benchKg} rKey={benchReps} setW={setBenchKg} setR={setBenchReps} testID="lift-bench" />
+              <LiftRow label="Soulevé de terre" wKey={deadliftKg} rKey={deadliftReps} setW={setDeadliftKg} setR={setDeadliftReps} testID="lift-deadlift" />
+              <TouchableOpacity onPress={() => setSkipForce(!skipForce)} style={styles.skipBtn} testID="lift-skip">
+                <Ionicons
+                  name={skipForce ? "checkbox" : "square-outline"}
+                  size={18}
+                  color={skipForce ? colors.primary : colors.textSecondary}
+                />
+                <Text style={[typography.small, { color: colors.textSecondary }]}>
+                  Je ne connais pas mes records pour l&apos;instant
+                </Text>
+              </TouchableOpacity>
+            </Card>
+          </>
+        )}
       </KeyboardAwareScrollView>
 
       <View style={styles.footer}>
@@ -185,8 +280,8 @@ export default function Onboarding() {
           <Button title="Retour" onPress={prev} variant="secondary" style={{ flex: 1 }} testID="onboarding-back" />
         ) : null}
         <Button
-          title={step === 3 ? "Calculer mes objectifs" : "Continuer"}
-          onPress={step === 3 ? submit : next}
+          title={step === STEPS_COUNT - 1 ? "Terminer & calculer" : "Continuer"}
+          onPress={step === STEPS_COUNT - 1 ? submit : next}
           loading={submitting}
           style={{ flex: step > 0 ? 1.4 : 1 }}
           testID="onboarding-next"
@@ -224,6 +319,61 @@ function NumericField({
         />
         <Text style={styles.inputUnit}>{unit}</Text>
       </View>
+    </View>
+  );
+}
+
+function LiftRow({
+  label,
+  wKey,
+  rKey,
+  setW,
+  setR,
+  testID,
+}: {
+  label: string;
+  wKey: string;
+  rKey: string;
+  setW: (v: string) => void;
+  setR: (v: string) => void;
+  testID: string;
+}) {
+  const w = parseFloat(wKey || "0");
+  const r = parseInt(rKey || "0", 10);
+  const est = w > 0 && r > 0 ? (r === 1 ? Math.round(w * 10) / 10 : Math.round(w * (1 + Math.min(r, 12) / 30) * 10) / 10) : 0;
+  return (
+    <View style={styles.liftRow}>
+      <Text style={[typography.body, { fontWeight: "700", flex: 1 }]}>{label}</Text>
+      <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
+        <View style={styles.liftInputWrap}>
+          <TextInput
+            testID={`${testID}-kg`}
+            value={wKey}
+            onChangeText={(t) => setW(t.replace(/[^0-9.]/g, ""))}
+            keyboardType="decimal-pad"
+            placeholder="kg"
+            placeholderTextColor={colors.textMuted}
+            style={styles.liftInput}
+          />
+        </View>
+        <Text style={[typography.small, { color: colors.textMuted, fontWeight: "700" }]}>×</Text>
+        <View style={styles.liftInputWrap}>
+          <TextInput
+            testID={`${testID}-reps`}
+            value={rKey}
+            onChangeText={(t) => setR(t.replace(/[^0-9]/g, ""))}
+            keyboardType="numeric"
+            placeholder="reps"
+            placeholderTextColor={colors.textMuted}
+            style={styles.liftInput}
+          />
+        </View>
+      </View>
+      {est > 0 ? (
+        <View style={styles.estPill}>
+          <Text style={styles.estTxt}>1RM ≈ {est}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -300,5 +450,38 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: colors.border,
     backgroundColor: colors.surface,
+  },
+  liftRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 6,
+    flexWrap: "wrap",
+  },
+  liftInputWrap: {
+    width: 60,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.sm,
+    backgroundColor: colors.background,
+    paddingHorizontal: 8,
+  },
+  liftInput: { fontSize: 15, paddingVertical: 8, color: colors.textMain, fontWeight: "700" },
+  estPill: {
+    backgroundColor: colors.primaryPale,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    marginLeft: "auto",
+  },
+  estTxt: { color: colors.primary, fontWeight: "800", fontSize: 11 },
+  skipBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 6,
+    marginTop: spacing.sm,
   },
 });
