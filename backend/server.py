@@ -152,6 +152,23 @@ class ManualMealRequest(BaseModel):
     date: Optional[str] = None  # YYYY-MM-DD, defaults to today
 
 
+class AiFoodSearchRequest(BaseModel):
+    query: str
+
+
+class ManualAiMealRequest(BaseModel):
+    name: str
+    category: Optional[str] = "Plats préparés"
+    quantity: float
+    unit: str = "g"  # "g" | "ml" | "unit"
+    kcal_per_unit: float  # per 100g/100ml OR per 1 unit
+    protein_g_per_unit: float
+    carbs_g_per_unit: float
+    fat_g_per_unit: float
+    meal_type: Optional[str] = None
+    date: Optional[str] = None
+
+
 class ActivityIn(BaseModel):
     date: str
     steps: int = 0
@@ -551,6 +568,86 @@ FOOD_LIBRARY: List[Dict[str, Any]] = [
      "kcal": 85, "protein_g": 0.1, "carbs_g": 2.6, "fat_g": 0},
     {"id": "cafe_noir", "name": "Café noir", "category": "Boissons", "unit": "ml", "default_qty": 100,
      "kcal": 2, "protein_g": 0.1, "carbs_g": 0, "fat_g": 0},
+
+    # --- Plats préparés / fast-food ---
+    {"id": "pizza_part", "name": "Pizza (1 part ~120g)", "category": "Plats préparés", "unit": "unit", "default_qty": 1,
+     "kcal": 280, "protein_g": 12, "carbs_g": 35, "fat_g": 10},
+    {"id": "burger_simple", "name": "Burger classique", "category": "Plats préparés", "unit": "unit", "default_qty": 1,
+     "kcal": 500, "protein_g": 25, "carbs_g": 40, "fat_g": 25},
+    {"id": "kebab", "name": "Kebab (sandwich)", "category": "Plats préparés", "unit": "unit", "default_qty": 1,
+     "kcal": 750, "protein_g": 35, "carbs_g": 65, "fat_g": 38},
+    {"id": "sushi_piece", "name": "Sushi maki (1 pièce)", "category": "Plats préparés", "unit": "unit", "default_qty": 6,
+     "kcal": 40, "protein_g": 1.5, "carbs_g": 7, "fat_g": 0.5},
+    {"id": "salade_cesar", "name": "Salade César", "category": "Plats préparés", "unit": "g", "default_qty": 300,
+     "kcal": 180, "protein_g": 10, "carbs_g": 8, "fat_g": 13},
+    {"id": "wrap_poulet", "name": "Wrap poulet", "category": "Plats préparés", "unit": "unit", "default_qty": 1,
+     "kcal": 380, "protein_g": 20, "carbs_g": 35, "fat_g": 17},
+    {"id": "sandwich_jambon", "name": "Sandwich jambon-beurre", "category": "Plats préparés", "unit": "unit", "default_qty": 1,
+     "kcal": 350, "protein_g": 15, "carbs_g": 45, "fat_g": 12},
+    {"id": "lasagnes", "name": "Lasagnes (1 part)", "category": "Plats préparés", "unit": "g", "default_qty": 300,
+     "kcal": 145, "protein_g": 8, "carbs_g": 15, "fat_g": 6},
+    {"id": "frites_mcdo", "name": "Frites (portion ~115g)", "category": "Plats préparés", "unit": "unit", "default_qty": 1,
+     "kcal": 365, "protein_g": 4, "carbs_g": 47, "fat_g": 18},
+    {"id": "nuggets_6", "name": "Nuggets de poulet (6)", "category": "Plats préparés", "unit": "unit", "default_qty": 1,
+     "kcal": 270, "protein_g": 14, "carbs_g": 16, "fat_g": 17},
+
+    # --- Snacks ---
+    {"id": "chips_30", "name": "Chips (sachet ~30g)", "category": "Snacks", "unit": "g", "default_qty": 30,
+     "kcal": 536, "protein_g": 6, "carbs_g": 53, "fat_g": 33},
+    {"id": "popcorn", "name": "Popcorn (nature)", "category": "Snacks", "unit": "g", "default_qty": 30,
+     "kcal": 387, "protein_g": 13, "carbs_g": 78, "fat_g": 4.5},
+    {"id": "biscuits_petit", "name": "Petits beurre / biscuits secs", "category": "Snacks", "unit": "unit", "default_qty": 2,
+     "kcal": 38, "protein_g": 0.6, "carbs_g": 6.5, "fat_g": 1.1},
+    {"id": "mm_30", "name": "M&M's / Skittles (~30g)", "category": "Snacks", "unit": "g", "default_qty": 30,
+     "kcal": 480, "protein_g": 4, "carbs_g": 68, "fat_g": 20},
+    {"id": "barre_cereales", "name": "Barre de céréales (~25g)", "category": "Snacks", "unit": "unit", "default_qty": 1,
+     "kcal": 95, "protein_g": 1.5, "carbs_g": 17, "fat_g": 2.5},
+
+    # --- Glucides étendus ---
+    {"id": "muesli", "name": "Muesli", "category": "Glucides", "unit": "g", "default_qty": 50,
+     "kcal": 370, "protein_g": 10, "carbs_g": 65, "fat_g": 6},
+    {"id": "granola", "name": "Granola", "category": "Glucides", "unit": "g", "default_qty": 50,
+     "kcal": 470, "protein_g": 10, "carbs_g": 60, "fat_g": 20},
+    {"id": "tortilla", "name": "Tortilla / wrap nature", "category": "Glucides", "unit": "unit", "default_qty": 1,
+     "kcal": 150, "protein_g": 4, "carbs_g": 25, "fat_g": 3.5},
+
+    # --- Protéines étendues ---
+    {"id": "crevettes", "name": "Crevettes cuites", "category": "Protéines", "unit": "g", "default_qty": 100,
+     "kcal": 99, "protein_g": 24, "carbs_g": 0.2, "fat_g": 0.3},
+    {"id": "saumon_fume", "name": "Saumon fumé (1 tranche ~30g)", "category": "Protéines", "unit": "tranche", "default_qty": 1,
+     "kcal": 60, "protein_g": 7, "carbs_g": 0, "fat_g": 3.5},
+    {"id": "cabillaud", "name": "Cabillaud (cru)", "category": "Protéines", "unit": "g", "default_qty": 100,
+     "kcal": 76, "protein_g": 18, "carbs_g": 0, "fat_g": 0.7},
+    {"id": "edamame", "name": "Edamame cuit", "category": "Protéines", "unit": "g", "default_qty": 100,
+     "kcal": 121, "protein_g": 12, "carbs_g": 9, "fat_g": 5},
+    {"id": "pois_chiches", "name": "Pois chiches (cuits)", "category": "Protéines", "unit": "g", "default_qty": 100,
+     "kcal": 164, "protein_g": 9, "carbs_g": 27, "fat_g": 2.6},
+
+    # --- Légumes étendus ---
+    {"id": "champignons", "name": "Champignons", "category": "Légumes", "unit": "g", "default_qty": 100,
+     "kcal": 22, "protein_g": 3, "carbs_g": 3.3, "fat_g": 0.3},
+    {"id": "concombre", "name": "Concombre", "category": "Légumes", "unit": "g", "default_qty": 100,
+     "kcal": 15, "protein_g": 0.7, "carbs_g": 3.6, "fat_g": 0.1},
+    {"id": "salade_verte", "name": "Salade verte / laitue", "category": "Légumes", "unit": "g", "default_qty": 100,
+     "kcal": 15, "protein_g": 1.4, "carbs_g": 2.9, "fat_g": 0.2},
+    {"id": "aubergine", "name": "Aubergine", "category": "Légumes", "unit": "g", "default_qty": 100,
+     "kcal": 25, "protein_g": 1, "carbs_g": 6, "fat_g": 0.2},
+    {"id": "chou_fleur", "name": "Chou-fleur", "category": "Légumes", "unit": "g", "default_qty": 100,
+     "kcal": 25, "protein_g": 2, "carbs_g": 5, "fat_g": 0.3},
+    {"id": "oignon", "name": "Oignon", "category": "Légumes", "unit": "g", "default_qty": 100,
+     "kcal": 40, "protein_g": 1.1, "carbs_g": 9.3, "fat_g": 0.1},
+
+    # --- Boissons étendues ---
+    {"id": "eau_gazeuse", "name": "Eau gazeuse / pétillante", "category": "Boissons", "unit": "ml", "default_qty": 500,
+     "kcal": 0, "protein_g": 0, "carbs_g": 0, "fat_g": 0},
+    {"id": "smoothie", "name": "Smoothie fruits", "category": "Boissons", "unit": "ml", "default_qty": 250,
+     "kcal": 60, "protein_g": 1, "carbs_g": 14, "fat_g": 0.4},
+    {"id": "the_vert", "name": "Thé vert", "category": "Boissons", "unit": "ml", "default_qty": 250,
+     "kcal": 1, "protein_g": 0, "carbs_g": 0, "fat_g": 0},
+    {"id": "energy_drink", "name": "Boisson énergisante (Red Bull)", "category": "Boissons", "unit": "ml", "default_qty": 250,
+     "kcal": 45, "protein_g": 0, "carbs_g": 11, "fat_g": 0},
+    {"id": "boisson_proteinee", "name": "Boisson protéinée prête (~330ml)", "category": "Boissons", "unit": "ml", "default_qty": 330,
+     "kcal": 50, "protein_g": 9, "carbs_g": 2, "fat_g": 0.5},
 ]
 
 
@@ -723,6 +820,82 @@ async def analyze_meal_with_claude(image_base64: str) -> Dict[str, Any]:
         "fat_g": int(data.get("fat_g", 0)),
         "notes": str(data.get("notes", "")),
     }
+
+
+async def ai_food_search(query: str) -> List[Dict[str, Any]]:
+    """Use Claude to estimate nutritional values for an unknown food name.
+    Returns 1-3 suggestions: per 100g/100ml/per unit + a standard portion."""
+    if not EMERGENT_LLM_KEY or not query.strip():
+        return []
+    system = (
+        "Tu es un nutritionniste expert. L'utilisateur tape le nom d'un aliment ou d'un plat. "
+        "Tu retournes UNIQUEMENT un JSON valide. Si tu reconnais l'aliment, propose 1 à 3 "
+        "variantes (ex: 'pizza margherita' et 'pizza 4 fromages'). Sois réaliste et précis. "
+        "Le JSON DOIT avoir cette forme exacte :\n"
+        '{"suggestions": ['
+        '  {"name": "nom court en français", '
+        '   "category": "Protéines|Glucides|Légumes|Fruits|Laitiers|Lipides|Sucreries|Boissons|Plats préparés|Snacks|Compléments", '
+        '   "unit": "g|ml|unit", '
+        '   "default_qty": float (portion par défaut), '
+        '   "kcal": float (par 100g/100ml OU par 1 unit), '
+        '   "protein_g": float, "carbs_g": float, "fat_g": float, '
+        '   "portion_label": "ex: 1 part (120g), 1 bol (250ml), 1 fruit (180g)"}'
+        ']}'
+        "\nSi tu ne reconnais pas, retourne {\"suggestions\": []}. Ne devine pas."
+    )
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=new_id("foodai"),
+        system_message=system,
+    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+
+    msg = UserMessage(text=f"Aliment: {query.strip()[:100]}\nRetourne UNIQUEMENT le JSON.")
+    try:
+        response = await chat.send_message(msg)
+    except Exception:
+        log.exception("Claude food search failed")
+        return []
+    data = extract_json(response or "")
+    if not data or not isinstance(data.get("suggestions"), list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for s in data["suggestions"][:3]:
+        try:
+            unit = str(s.get("unit", "g")).lower()
+            if unit not in ("g", "ml", "unit"):
+                unit = "g"
+            out.append({
+                "id": f"ai_{new_id('food')}",
+                "name": str(s.get("name", query))[:80],
+                "category": str(s.get("category", "Plats préparés"))[:30],
+                "unit": unit,
+                "default_qty": float(s.get("default_qty", 100 if unit in ("g", "ml") else 1)),
+                "kcal": float(s.get("kcal", 0)),
+                "protein_g": float(s.get("protein_g", 0)),
+                "carbs_g": float(s.get("carbs_g", 0)),
+                "fat_g": float(s.get("fat_g", 0)),
+                "portion_label": str(s.get("portion_label", ""))[:80],
+                "source": "ai",
+            })
+        except (ValueError, TypeError):
+            continue
+    return out
+
+
+def validate_meal_date(d: Optional[str]) -> str:
+    """Validate that the date is within the last 14 days. Returns YYYY-MM-DD."""
+    if not d:
+        return today_str()
+    try:
+        target = datetime.strptime(d, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(400, "Invalid date format (expected YYYY-MM-DD)")
+    today = now_utc().date()
+    if target > today:
+        raise HTTPException(400, "Date dans le futur non autorisée")
+    if (today - target).days > 14:
+        raise HTTPException(400, "Tu ne peux ajouter qu'aux 14 derniers jours")
+    return d
 
 
 async def analyze_transformation_with_claude(image_base64: str, prev_image_base64: Optional[str] = None) -> str:
@@ -937,8 +1110,8 @@ async def analyze_and_save_meal(
 ):
     user = await get_current_user(authorization)
     analysis = await analyze_meal_with_claude(body.image_base64)
+    target_date = validate_meal_date(body.date)
     created = now_utc()
-    target_date = body.date or today_str()
     meal = {
         "id": new_id("meal"),
         "user_id": user["user_id"],
@@ -1471,9 +1644,9 @@ async def add_manual_meal(
         raise HTTPException(404, "Food not found")
     if body.quantity <= 0:
         raise HTTPException(400, "Quantity must be > 0")
+    target_date = validate_meal_date(body.date)
     macros = compute_food_macros(food, float(body.quantity))
     created = now_utc()
-    target_date = body.date or today_str()
     meal = {
         "id": new_id("meal"),
         "user_id": user["user_id"],
@@ -1493,6 +1666,112 @@ async def add_manual_meal(
     }
     await db.meals.insert_one(meal)
     return strip_id(meal)
+
+
+@api.post("/foods/ai-search")
+async def foods_ai_search(
+    body: AiFoodSearchRequest, authorization: Optional[str] = Header(default=None)
+):
+    """Suggest nutritional values for an unknown food name via Claude."""
+    _ = await get_current_user(authorization)
+    q = body.query.strip()
+    if len(q) < 2:
+        return {"suggestions": []}
+    suggestions = await ai_food_search(q)
+    return {"suggestions": suggestions}
+
+
+@api.post("/meals/manual_ai")
+async def add_manual_ai_meal(
+    body: ManualAiMealRequest, authorization: Optional[str] = Header(default=None)
+):
+    """Save a meal from an AI-suggested food (no FOOD_LIBRARY id)."""
+    user = await get_current_user(authorization)
+    if body.quantity <= 0:
+        raise HTTPException(400, "Quantity must be > 0")
+    target_date = validate_meal_date(body.date)
+    unit = (body.unit or "g").lower()
+    if unit not in ("g", "ml", "unit"):
+        unit = "g"
+    ratio = body.quantity / 100.0 if unit in ("g", "ml") else body.quantity
+    calories = round(body.kcal_per_unit * ratio)
+    protein_g = round(body.protein_g_per_unit * ratio, 1)
+    carbs_g = round(body.carbs_g_per_unit * ratio, 1)
+    fat_g = round(body.fat_g_per_unit * ratio, 1)
+    created = now_utc()
+    meal = {
+        "id": new_id("meal"),
+        "user_id": user["user_id"],
+        "date": target_date,
+        "created_at": created,
+        "meal_type": body.meal_type or auto_meal_type(created),
+        "source": "ai",
+        "ai_food_snapshot": {
+            "name": body.name,
+            "category": body.category,
+            "unit": unit,
+            "kcal_per_unit": body.kcal_per_unit,
+            "protein_g_per_unit": body.protein_g_per_unit,
+            "carbs_g_per_unit": body.carbs_g_per_unit,
+            "fat_g_per_unit": body.fat_g_per_unit,
+        },
+        "quantity": body.quantity,
+        "unit": unit,
+        "name": body.name,
+        "calories": calories,
+        "protein_g": protein_g,
+        "carbs_g": carbs_g,
+        "fat_g": fat_g,
+        "notes": f"Suggestion IA · {body.quantity} {unit}",
+    }
+    await db.meals.insert_one(meal)
+    return strip_id(meal)
+
+
+@api.get("/foods/recent")
+async def foods_recent(authorization: Optional[str] = Header(default=None)):
+    """Return user's most recently used foods (last 30 days, distinct by name)."""
+    user = await get_current_user(authorization)
+    pipeline = [
+        {"$match": {
+            "user_id": user["user_id"],
+            "source": {"$in": ["manual", "ai"]},
+        }},
+        {"$sort": {"created_at": -1}},
+        {"$group": {
+            "_id": "$name",
+            "last_used": {"$first": "$created_at"},
+            "count": {"$sum": 1},
+            "source": {"$first": "$source"},
+            "food_id": {"$first": "$food_id"},
+            "quantity": {"$first": "$quantity"},
+            "unit": {"$first": "$unit"},
+            "calories": {"$first": "$calories"},
+            "protein_g": {"$first": "$protein_g"},
+            "carbs_g": {"$first": "$carbs_g"},
+            "fat_g": {"$first": "$fat_g"},
+            "ai_snapshot": {"$first": "$ai_food_snapshot"},
+        }},
+        {"$sort": {"last_used": -1}},
+        {"$limit": 12},
+    ]
+    items = await db.meals.aggregate(pipeline).to_list(20)
+    out: List[Dict[str, Any]] = []
+    for it in items:
+        out.append({
+            "name": it["_id"],
+            "count": it.get("count", 1),
+            "source": it.get("source"),
+            "food_id": it.get("food_id"),
+            "quantity": it.get("quantity"),
+            "unit": it.get("unit"),
+            "calories": it.get("calories"),
+            "protein_g": it.get("protein_g"),
+            "carbs_g": it.get("carbs_g"),
+            "fat_g": it.get("fat_g"),
+            "ai_snapshot": it.get("ai_snapshot"),
+        })
+    return {"items": out}
 
 
 @api.post("/activity/steps")

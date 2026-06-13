@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 5 (Nutrition AI) testing — 19/19 backend tests PASS. Validated POST /api/foods/ai-search (short query<2 chars → empty, unknown auth → 401, ratatouille → 1-3 Claude suggestions with all 11 required keys + source='ai'), POST /api/meals/manual_ai (persists meal with source='ai' + ai_food_snapshot in Mongo; correct g/100 ratio math; unit='unit' uses raw multiply; date >14d back returns 400; quantity<=0 returns 400; accepts past date within window), GET /api/foods/recent (empty when no meals; distinct-by-name with count aggregation; ai_snapshot field passthrough; limited to 12), POST /api/meals/manual now rejects date>14d back AND future dates with 400 (French message 'Tu ne peux ajouter qu'aux 14 derniers jours'), GET /api/foods/library returns 116 items spanning 11 categories incl. Plats préparés / Snacks / Glucides / Protéines / Légumes / Boissons, GET /api/meals?date=PAST&include_archived=true correctly returns archived meals from past dates (without flag they are filtered out; no _id and no image_base64 leakage). Frontend smoke check on mobile viewport 390x844 with seeded auth (localStorage fit_session_token + DB-seeded user/session/profile, onboarded=true): meals-screen renders, 3 tabs visible & switchable (meals-tab-today/calendar/history), Calendar tab shows monthly grid 'Juin 2026' with weekday header L M M J V S D + ‹/› nav arrows + today (13) green-bordered, manual modal opens with 14 date chips (Auj./Hier/Jeu./Mer./Mar./Lun. + day-number on second line, today chip filled green), AI suggestions section appears below food list when query has 3+ chars ('Suggestions IA' header with sparkle icon + loading spinner). Recent foods row hidden as expected when user has no prior ai/manual meals. Carry-over RN deprecation warnings still present ('shadow* style props are deprecated', 'props.pointerEvents is deprecated') — not blocking but unfixed since iter-4.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "meals.tsx Calendar tab", "issues": ["Days 1-7 of current month appear visually muted/grey in the calendar grid even though they are within the 14-day retro-active window (today=June 13 → May 30 is the cutoff, so June 1-7 should be tappable/enabled). Verify isPast styling versus isDisabled styling; either fix the grey-out or confirm intentional visual separation between current-week and prior-week days."]}
+    ],
+    "react_native_issues": [
+      {"component": "Carry-over from iter-4", "issue": "Console still emits '\"shadow*\" style props are deprecated. Use \"boxShadow\".' and 'props.pointerEvents is deprecated. Use style.pointerEvents' on every render. Search UI.tsx/theme.ts and migrate shadow* → boxShadow; pointerEvents prop → style.pointerEvents."}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration5_nutrition.py",
+    "/app/test_reports/pytest/iteration5_results.xml"
+  ],
+  "action_items": [
+    "Optional: re-check Calendar day enablement for days within the 14-day retro window — currently June 1-7 look greyed even though they are within range. Confirm isPast vs isDisabled styling intentions.",
+    "Carry-over: migrate shadow* style props to boxShadow and pointerEvents prop to style.pointerEvents to clear deprecation warnings (still uncleared since iter-4)."
+  ],
+  "critical_code_review_comments": [
+    "AiFoodSearchRequest.query has no max-length or min-length validator at the Pydantic level — only enforced inside the handler ('< 2 chars → empty'). Consider Field(min_length=0, max_length=100) for defensive validation and to mirror the [:100] slice in ai_food_search.",
+    "ManualAiMealRequest accepts arbitrary `unit` strings, then silently coerces unknown values to 'g' inside the handler. Use Literal['g','ml','unit'] in the schema to reject invalid units with 422 instead of silently corrupting data.",
+    "/api/foods/recent aggregation groups by `$name` only — meals saved with the same name but different units (e.g., '100g of Whey' vs '1 scoop of Whey') will collapse into one entry, using only the first encountered quantity/unit. Consider grouping by (name, unit) or returning per-unit variants.",
+    "server.py is still 2009 lines (FOOD_LIBRARY now 116 items + EXERCISE_LIBRARY) — extract to /app/backend/data/foods.py and /app/backend/data/exercises.py to stay below the 700-line guideline.",
+    "validate_meal_date is duplicated in spirit across /meals/manual, /meals/manual_ai, /meals (analyze), and /activity — already factored into a helper which is good. Ensure all other write endpoints that accept a `date` field route through it (e.g., POST /transformations took an arbitrary `date` in iter-4)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration5_nutrition.py (new — 19 tests, 5 classes covering all 6 nutrition endpoints from the brief)"
+  ],
+  "success_rate": {"backend": "100% (19/19 iter-5 tests)", "frontend": "100% — all 3 tabs render, calendar grid + 14 date chips + AI suggestions section all visible on mobile viewport"},
+  "seed_data_creation": "Backend tests use conftest seed_user (user_test_001 + session test_session_token_abc + autouse meals cleanup per-test). For frontend smoke, additionally set users.onboarded=true and inserted profile (sex=male, weight=75kg, daily_calories=2400) so the app routes past onboarding into (tabs)/meals.tsx. After all tests, called POST /api/meals/cleanup which returned {deleted:0, archived:0} (per-test fixture already cleared).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Frontend auth bypass unchanged: DB-seed user_test_001 (onboarded=true) + session test_session_token_abc + a profile doc, then visit http://localhost:3000, set localStorage['fit_session_token']=JSON.stringify('test_session_token_abc'), reload. Meals tab testIDs: meals-tab-today | meals-tab-calendar | meals-tab-history. Manual modal: manual-date-chips (container) + manual-date-today/manual-date-<YYYY-MM-DD> chips (14 total). AI search section: ai-suggestions-section + ai-food-<id> rows (Claude takes ~3-5s). Recent foods row testID=recent-foods-row only renders if /api/foods/recent returns items. Day-detail modal: day-detail-modal opens on Calendar day tap, with day-detail-add to add and day-meal-delete-<mealId> to remove. Backend cleanup: POST /api/meals/cleanup (lifecycle: archive>7d, delete>14d). All 19 iter-5 backend tests live in /app/backend/tests/test_iteration5_nutrition.py and clean meals before+after each test (autouse fixture).",
+  "rca_of_issue": "No code bugs found. One initial test failure (test_library_items_have_macros) was caused by my test asserting field names `kcal_per_unit/protein_g_per_unit/...` whereas the library actually exposes `kcal/protein_g/carbs_g/fat_g` (per-100g semantics). Test corrected to use the actual library schema and now passes. The library's two different naming conventions — `kcal`/`protein_g` in FOOD_LIBRARY items vs `kcal_per_unit`/`protein_g_per_unit` in ManualAiMealRequest — is intentional but worth a brief code comment to avoid future confusion."
+}

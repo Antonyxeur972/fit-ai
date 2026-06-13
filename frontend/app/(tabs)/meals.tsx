@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
   Modal, RefreshControl, TextInput,
@@ -68,7 +68,43 @@ function autoMealTypeFromHour(): string {
   return "dinner";
 }
 
-type Tab = "today" | "history";
+type Tab = "today" | "history" | "calendar";
+
+type AiSuggestion = {
+  id: string;
+  name: string;
+  category: string;
+  unit: string;
+  default_qty: number;
+  kcal: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  portion_label?: string;
+  source: "ai";
+};
+
+type RecentFood = {
+  name: string;
+  count: number;
+  source: "manual" | "ai";
+  food_id?: string;
+  quantity: number;
+  unit: string;
+  calories: number;
+  protein_g: number;
+  carbs_g: number;
+  fat_g: number;
+  ai_snapshot?: {
+    name: string;
+    category?: string;
+    unit: string;
+    kcal_per_unit: number;
+    protein_g_per_unit: number;
+    carbs_g_per_unit: number;
+    fat_g_per_unit: number;
+  };
+};
 
 export default function Meals() {
   const [tab, setTab] = useState<Tab>("today");
@@ -86,12 +122,23 @@ export default function Meals() {
   const [manualOpen, setManualOpen] = useState(false);
   const [manualSearch, setManualSearch] = useState("");
   const [manualCategory, setManualCategory] = useState<string>("Tout");
-  const [selectedFood, setSelectedFood] = useState<Food | null>(null);
+  const [selectedFood, setSelectedFood] = useState<Food | AiSuggestion | null>(null);
+  const [isSelectedAi, setIsSelectedAi] = useState(false);
   const [manualQty, setManualQty] = useState("");
   const [manualMealType, setManualMealType] = useState<string>("snack");
   const [savingManual, setSavingManual] = useState(false);
   const [manualDate, setManualDate] = useState<string>(""); // empty = today
   const [favorites, setFavorites] = useState<Favorite[]>([]);
+  const [aiSuggestions, setAiSuggestions] = useState<AiSuggestion[]>([]);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [recentFoods, setRecentFoods] = useState<RecentFood[]>([]);
+
+  // Calendar tab state
+  const [calMonth, setCalMonth] = useState<Date>(() => new Date());
+  const [calDays, setCalDays] = useState<Record<string, number>>({}); // date -> meals count
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+  const [selectedDayMeals, setSelectedDayMeals] = useState<Meal[]>([]);
+  const [loadingDay, setLoadingDay] = useState(false);
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -112,12 +159,14 @@ export default function Meals() {
 
   const loadFoods = useCallback(async () => {
     try {
-      const [resp, favs] = await Promise.all([
+      const [resp, favs, recent] = await Promise.all([
         api<{ foods: Food[] }>("/foods/library"),
         api<Favorite[]>("/favorites").catch(() => [] as Favorite[]),
+        api<{ items: RecentFood[] }>("/foods/recent").catch(() => ({ items: [] as RecentFood[] })),
       ]);
       setFoods(resp.foods || []);
       setFavorites(favs || []);
+      setRecentFoods(recent.items || []);
     } catch (e) {
       console.warn("loadFoods", e);
     }
@@ -167,7 +216,7 @@ export default function Meals() {
 
   const dateChips = useMemo(() => {
     const out: { value: string; label: string }[] = [{ value: "", label: "Aujourd'hui" }];
-    for (let i = 1; i <= 6; i++) {
+    for (let i = 1; i <= 13; i++) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const iso = d.toISOString().slice(0, 10);
@@ -178,6 +227,122 @@ export default function Meals() {
     }
     return out;
   }, []);
+
+  // Debounced AI food search when query has no good local match
+  useEffect(() => {
+    if (!manualOpen || selectedFood) {
+      setAiSuggestions([]);
+      return;
+    }
+    const q = manualSearch.trim();
+    if (q.length < 3) {
+      setAiSuggestions([]);
+      return;
+    }
+    const handle = setTimeout(async () => {
+      setAiLoading(true);
+      try {
+        const resp = await api<{ suggestions: AiSuggestion[] }>("/foods/ai-search", {
+          method: "POST",
+          body: { query: q },
+        });
+        setAiSuggestions(resp.suggestions || []);
+      } catch {
+        setAiSuggestions([]);
+      } finally {
+        setAiLoading(false);
+      }
+    }, 600);
+    return () => clearTimeout(handle);
+  }, [manualSearch, manualOpen, selectedFood]);
+
+  const addRecent = async (r: RecentFood) => {
+    setSavingManual(true);
+    try {
+      if (r.source === "manual" && r.food_id) {
+        await api("/meals/manual", {
+          method: "POST",
+          body: {
+            food_id: r.food_id,
+            quantity: r.quantity,
+            meal_type: manualMealType || autoMealTypeFromHour(),
+            date: manualDate || undefined,
+          },
+        });
+      } else if (r.ai_snapshot) {
+        await api("/meals/manual_ai", {
+          method: "POST",
+          body: {
+            name: r.ai_snapshot.name,
+            category: r.ai_snapshot.category,
+            quantity: r.quantity,
+            unit: r.ai_snapshot.unit,
+            kcal_per_unit: r.ai_snapshot.kcal_per_unit,
+            protein_g_per_unit: r.ai_snapshot.protein_g_per_unit,
+            carbs_g_per_unit: r.ai_snapshot.carbs_g_per_unit,
+            fat_g_per_unit: r.ai_snapshot.fat_g_per_unit,
+            meal_type: manualMealType || autoMealTypeFromHour(),
+            date: manualDate || undefined,
+          },
+        });
+      }
+      setManualOpen(false);
+      await load();
+    } finally {
+      setSavingManual(false);
+    }
+  };
+
+  // Calendar tab: load month days with meals
+  const loadCalendarMonth = useCallback(async (anchor: Date) => {
+    const month = anchor.getMonth();
+    const year = anchor.getFullYear();
+    const todayISO = new Date().toISOString().slice(0, 10);
+    const start = new Date(year, month, 1);
+    const end = new Date(year, month + 1, 0);
+    const out: Record<string, number> = {};
+    // Walk from start to min(end, today)
+    const last = end.getTime() < new Date(todayISO).getTime() ? end : new Date(todayISO);
+    const promises: Promise<void>[] = [];
+    for (let d = new Date(start); d <= last; d.setDate(d.getDate() + 1)) {
+      const iso = d.toISOString().slice(0, 10);
+      // 14-day window: only fetch days within last 14 days
+      const diffDays = Math.floor((new Date(todayISO).getTime() - new Date(iso).getTime()) / 86400000);
+      if (diffDays > 14) continue;
+      promises.push(
+        api<Meal[]>(`/meals?date=${iso}&include_archived=true`)
+          .then((list) => { out[iso] = list.length; })
+          .catch(() => {})
+      );
+    }
+    await Promise.all(promises);
+    setCalDays(out);
+  }, []);
+
+  useEffect(() => {
+    if (tab === "calendar") {
+      loadCalendarMonth(calMonth);
+    }
+  }, [tab, calMonth, loadCalendarMonth]);
+
+  const openDay = async (iso: string) => {
+    setSelectedDay(iso);
+    setLoadingDay(true);
+    try {
+      const list = await api<Meal[]>(`/meals?date=${iso}&include_archived=true`);
+      setSelectedDayMeals(list);
+    } finally {
+      setLoadingDay(false);
+    }
+  };
+
+  const removeFromDay = async (id: string) => {
+    try {
+      await api(`/meals/${id}`, { method: "DELETE" });
+      if (selectedDay) await openDay(selectedDay);
+      if (selectedDay) loadCalendarMonth(calMonth);
+    } catch {}
+  };
 
   const pickImage = async (fromCamera: boolean) => {
     setError(null);
@@ -232,11 +397,13 @@ export default function Meals() {
 
   const openManual = async (forDate?: string) => {
     setSelectedFood(null);
+    setIsSelectedAi(false);
     setManualQty("");
     setManualSearch("");
     setManualCategory("Tout");
     setManualMealType(autoMealTypeFromHour());
     setManualDate(forDate || "");
+    setAiSuggestions([]);
     setManualOpen(true);
     await loadFoods();
   };
@@ -247,15 +414,34 @@ export default function Meals() {
     if (!qty || qty <= 0) return;
     setSavingManual(true);
     try {
-      await api("/meals/manual", {
-        method: "POST",
-        body: {
-          food_id: selectedFood.id,
-          quantity: qty,
-          meal_type: manualMealType,
-          date: manualDate || undefined,
-        },
-      });
+      if (isSelectedAi) {
+        const ai = selectedFood as AiSuggestion;
+        await api("/meals/manual_ai", {
+          method: "POST",
+          body: {
+            name: ai.name,
+            category: ai.category,
+            quantity: qty,
+            unit: ai.unit,
+            kcal_per_unit: ai.kcal,
+            protein_g_per_unit: ai.protein_g,
+            carbs_g_per_unit: ai.carbs_g,
+            fat_g_per_unit: ai.fat_g,
+            meal_type: manualMealType,
+            date: manualDate || undefined,
+          },
+        });
+      } else {
+        await api("/meals/manual", {
+          method: "POST",
+          body: {
+            food_id: selectedFood.id,
+            quantity: qty,
+            meal_type: manualMealType,
+            date: manualDate || undefined,
+          },
+        });
+      }
       setManualOpen(false);
       await load();
     } finally {
@@ -338,6 +524,9 @@ export default function Meals() {
         <TouchableOpacity onPress={() => setTab("today")} style={[styles.tabChip, tab === "today" && styles.tabChipActive]} testID="meals-tab-today">
           <Text style={[styles.tabText, tab === "today" && styles.tabTextActive]}>{"Aujourd'hui"}</Text>
         </TouchableOpacity>
+        <TouchableOpacity onPress={() => setTab("calendar")} style={[styles.tabChip, tab === "calendar" && styles.tabChipActive]} testID="meals-tab-calendar">
+          <Text style={[styles.tabText, tab === "calendar" && styles.tabTextActive]}>Calendrier</Text>
+        </TouchableOpacity>
         <TouchableOpacity onPress={() => setTab("history")} style={[styles.tabChip, tab === "history" && styles.tabChipActive]} testID="meals-tab-history">
           <Text style={[styles.tabText, tab === "history" && styles.tabTextActive]}>Historique</Text>
         </TouchableOpacity>
@@ -348,7 +537,7 @@ export default function Meals() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={async () => { setRefreshing(true); await load(); setRefreshing(false); }} />}
         showsVerticalScrollIndicator={false}
       >
-        {tab === "today" ? (
+        {tab === "today" && (
           <>
             <View style={styles.actions}>
               <Button title={analyzing ? "Analyse..." : "Photo"} onPress={() => pickImage(true)} loading={analyzing} icon={<Ionicons name="camera-outline" size={18} color="#fff" />} testID="meals-camera-button" style={{ flex: 1 }} />
@@ -407,7 +596,9 @@ export default function Meals() {
               ))
             )}
           </>
-        ) : (
+        )}
+
+        {tab === "history" && (
           <>
             {hasArchivable > 0 && (
               <View style={styles.archiveBanner} testID="archive-banner">
@@ -449,6 +640,29 @@ export default function Meals() {
           </>
         )}
 
+        {tab === "calendar" && (
+          <>
+            <CalendarMonthView
+              monthDate={calMonth}
+              calDays={calDays}
+              onPrev={() => setCalMonth(addMonths(calMonth, -1))}
+              onNext={() => {
+                const next = addMonths(calMonth, 1);
+                if (next <= new Date()) setCalMonth(next);
+              }}
+              onDayPress={(iso) => openDay(iso)}
+              selectedDay={selectedDay}
+            />
+            <Text style={[typography.small, { color: colors.textMuted, textAlign: "center", marginTop: spacing.xs }]}>
+              Accès rétroactif sur 14 jours · tape un jour pour voir ses repas.
+            </Text>
+            <View style={{ flexDirection: "row", justifyContent: "center", gap: 18, marginTop: spacing.sm }}>
+              <LegendDot color={colors.primary} label="Repas loggés" />
+              <LegendDot color={colors.border} label="Aucun" />
+            </View>
+          </>
+        )}
+
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
 
@@ -467,6 +681,68 @@ export default function Meals() {
               <ModalStat label="Lipides" value={`${lastResult?.fat_g}`} unit="g" />
             </View>
             <Button title="Ok, ajouté" onPress={() => setShowResult(false)} testID="meals-result-close" />
+          </View>
+        </View>
+      </Modal>
+
+      {/* Day detail modal (calendar tap) */}
+      <Modal visible={selectedDay !== null} transparent animationType="slide" onRequestClose={() => setSelectedDay(null)}>
+        <View style={styles.modalBg}>
+          <View style={[styles.modalCard, { maxHeight: "85%" }]} testID="day-detail-modal">
+            <View style={styles.modalHandle} />
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+              <View>
+                <Text style={styles.modalTitle}>
+                  {selectedDay
+                    ? new Date(selectedDay).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
+                    : ""}
+                </Text>
+                <Text style={[typography.small, { textTransform: "capitalize" }]}>
+                  {selectedDayMeals.length} repas · {selectedDayMeals.reduce((s, m) => s + (m.calories || 0), 0)} kcal
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setSelectedDay(null)} testID="day-detail-close">
+                <Ionicons name="close" size={24} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            {loadingDay ? (
+              <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.lg }} />
+            ) : selectedDayMeals.length === 0 ? (
+              <View style={{ alignItems: "center", paddingVertical: spacing.lg }}>
+                <Ionicons name="restaurant-outline" size={32} color={colors.textMuted} />
+                <Text style={[typography.small, { marginTop: 8, color: colors.textMuted }]}>Aucun repas pour ce jour.</Text>
+              </View>
+            ) : (
+              <ScrollView style={{ maxHeight: 380 }}>
+                {selectedDayMeals.map((m) => (
+                  <View key={m.id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border, flexDirection: "row", alignItems: "center" }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[typography.body, { fontWeight: "700" }]}>{m.name}</Text>
+                      <Text style={typography.small}>
+                        {m.meal_type ? `${MEAL_TYPE_LABEL[m.meal_type]} · ` : ""}{m.calories} kcal · P {m.protein_g}g · G {m.carbs_g}g · L {m.fat_g}g
+                      </Text>
+                    </View>
+                    <TouchableOpacity onPress={() => removeFromDay(m.id)} testID={`day-meal-delete-${m.id}`} style={{ padding: 6 }}>
+                      <Ionicons name="trash-outline" size={18} color={colors.alert} />
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+
+            <Button
+              title="Ajouter un aliment à ce jour"
+              variant="ghost"
+              icon={<Ionicons name="add-circle-outline" size={18} color={colors.primary} />}
+              onPress={() => {
+                if (selectedDay) {
+                  setSelectedDay(null);
+                  openManual(selectedDay);
+                }
+              }}
+              testID="day-detail-add"
+            />
           </View>
         </View>
       </Modal>
@@ -496,25 +772,35 @@ export default function Meals() {
 
             {!selectedFood ? (
               <>
-                {/* Date chips: today + last 6 days */}
+                {/* Date selector — 14 days (today + 13 past) */}
+                <Text style={[typography.caption, { marginTop: spacing.sm, marginBottom: 6 }]}>
+                  Date du repas
+                </Text>
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
-                  style={{ marginHorizontal: -spacing.lg, marginTop: spacing.sm }}
-                  contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: 6 }}
+                  style={{ marginHorizontal: -spacing.lg }}
+                  contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: 8 }}
                   testID="manual-date-chips"
                 >
                   {dateChips.map((d) => {
                     const isOn = (manualDate || "") === d.value;
+                    const isToday = d.value === "";
+                    const parts = d.label.split(" ");
+                    const dayLabel = isToday ? "Auj." : (parts[0] || d.label);
+                    const numLabel = isToday ? new Date().getDate().toString() : (parts[1] || "");
                     return (
                       <TouchableOpacity
                         key={d.value || "today"}
                         onPress={() => setManualDate(d.value)}
-                        style={[styles.catChip, isOn && styles.catChipOn]}
+                        style={[styles.dateChip, isOn && styles.dateChipOn]}
                         testID={`manual-date-${d.value || "today"}`}
                       >
-                        <Text style={[styles.catChipText, isOn && { color: colors.primary, fontWeight: "700" }]}>
-                          {d.label}
+                        <Text style={[styles.dateChipDay, isOn && styles.dateChipDayOn]}>
+                          {dayLabel}
+                        </Text>
+                        <Text style={[styles.dateChipNum, isOn && styles.dateChipNumOn]}>
+                          {numLabel}
                         </Text>
                       </TouchableOpacity>
                     );
@@ -586,10 +872,50 @@ export default function Meals() {
                   })}
                 </ScrollView>
 
+                {/* Recent foods row */}
+                {recentFoods.length > 0 && (
+                  <View style={{ marginTop: spacing.sm }}>
+                    <Text style={[typography.caption, { marginBottom: 6 }]}>Mes aliments récents</Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      style={{ marginHorizontal: -spacing.lg }}
+                      contentContainerStyle={{ paddingHorizontal: spacing.lg, gap: 8 }}
+                      testID="recent-foods-row"
+                    >
+                      {recentFoods.map((r, idx) => (
+                        <TouchableOpacity
+                          key={`${r.name}-${idx}`}
+                          onPress={() => addRecent(r)}
+                          style={styles.recentChip}
+                          testID={`recent-${idx}`}
+                        >
+                          <Ionicons name="time-outline" size={12} color={colors.textSecondary} />
+                          <View style={{ maxWidth: 140 }}>
+                            <Text style={[typography.small, { fontWeight: "700", color: colors.textMain }]} numberOfLines={1}>
+                              {r.name}
+                            </Text>
+                            <Text style={[typography.small, { fontSize: 10, color: colors.textMuted }]}>
+                              {r.quantity} {r.unit} · {r.calories} kcal
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
+
                 {/* Food list */}
                 <ScrollView style={{ marginTop: spacing.sm }} contentContainerStyle={{ paddingBottom: spacing.xxl }}>
                   {filteredFoods.length === 0 ? (
-                    <Text style={[typography.small, { textAlign: "center", marginTop: spacing.lg }]}>Aucun aliment trouvé.</Text>
+                    <View style={{ paddingVertical: spacing.md, paddingHorizontal: spacing.sm, alignItems: "center" }}>
+                      <Text style={[typography.small, { textAlign: "center" }]}>Aucun résultat dans la base.</Text>
+                      {manualSearch.trim().length >= 3 && (
+                        <Text style={[typography.small, { textAlign: "center", color: colors.textMuted, marginTop: 4, fontSize: 11 }]}>
+                          {aiLoading ? "L'IA cherche..." : "Tape entrée ou regarde les suggestions IA ci-dessous"}
+                        </Text>
+                      )}
+                    </View>
                   ) : (
                     filteredFoods.map((f) => {
                       const isUnitWeight = f.unit === "g" || f.unit === "ml";
@@ -598,7 +924,7 @@ export default function Meals() {
                       return (
                         <TouchableOpacity
                           key={f.id}
-                          onPress={() => { setSelectedFood(f); setManualQty(String(f.default_qty)); }}
+                          onPress={() => { setSelectedFood(f); setIsSelectedAi(false); setManualQty(String(f.default_qty)); }}
                           style={styles.foodRow}
                           testID={`food-${f.id}`}
                         >
@@ -618,6 +944,56 @@ export default function Meals() {
                         </TouchableOpacity>
                       );
                     })
+                  )}
+
+                  {/* AI Suggestions */}
+                  {(aiLoading || aiSuggestions.length > 0) && manualSearch.trim().length >= 3 && (
+                    <View style={styles.aiSection} testID="ai-suggestions-section">
+                      <View style={styles.aiHeaderRow}>
+                        <Ionicons name="sparkles" size={14} color={colors.primary} />
+                        <Text style={[typography.caption, { color: colors.primary, fontWeight: "700" }]}>
+                          Suggestions IA
+                        </Text>
+                        {aiLoading && <ActivityIndicator size="small" color={colors.primary} />}
+                      </View>
+                      {aiSuggestions.map((s) => {
+                        const isUnitWeight = s.unit === "g" || s.unit === "ml";
+                        const ratio = isUnitWeight ? s.default_qty / 100 : s.default_qty;
+                        const estKcal = Math.round(s.kcal * ratio);
+                        return (
+                          <TouchableOpacity
+                            key={s.id}
+                            onPress={() => { setSelectedFood(s); setIsSelectedAi(true); setManualQty(String(s.default_qty)); }}
+                            style={[styles.foodRow, styles.aiFoodRow]}
+                            testID={`ai-food-${s.id}`}
+                          >
+                            <View style={{ flex: 1 }}>
+                              <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+                                <Text style={[typography.body, { fontWeight: "600" }]} numberOfLines={1}>{s.name}</Text>
+                                <View style={styles.aiBadgeMini}>
+                                  <Text style={[typography.small, { fontSize: 9, color: colors.primary, fontWeight: "800" }]}>IA</Text>
+                                </View>
+                              </View>
+                              <Text style={[typography.small, { color: colors.primary, fontWeight: "700", marginTop: 2 }]}>
+                                ≈ {estKcal} kcal{" "}
+                                <Text style={{ color: colors.textMuted, fontWeight: "500" }}>
+                                  {s.portion_label || `pour ${s.default_qty} ${s.unit}`}
+                                </Text>
+                              </Text>
+                              <Text style={[typography.small, { marginTop: 2, color: colors.textMuted, fontSize: 11 }]}>
+                                {s.category} · P {s.protein_g}g · G {s.carbs_g}g · L {s.fat_g}g
+                              </Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={18} color={colors.primary} />
+                          </TouchableOpacity>
+                        );
+                      })}
+                      {!aiLoading && aiSuggestions.length === 0 && manualSearch.trim().length >= 3 && (
+                        <Text style={[typography.small, { color: colors.textMuted, textAlign: "center", paddingVertical: spacing.sm }]}>
+                          L&apos;IA n&apos;a pas reconnu cet aliment.
+                        </Text>
+                      )}
+                    </View>
                   )}
                 </ScrollView>
               </>
@@ -719,10 +1095,10 @@ export default function Meals() {
                   style={{ marginTop: spacing.md }}
                   testID="manual-save"
                 />
-                <TouchableOpacity onPress={saveFavorite} disabled={!previewMacros} style={styles.favSaveBtn} testID="manual-save-favorite">
+                <TouchableOpacity onPress={saveFavorite} disabled={!previewMacros || isSelectedAi} style={[styles.favSaveBtn, isSelectedAi && { opacity: 0.4 }]} testID="manual-save-favorite">
                   <Ionicons name="star-outline" size={16} color={colors.primary} />
                   <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>
-                    Sauvegarder en favori
+                    {isSelectedAi ? "Favori non dispo pour IA" : "Sauvegarder en favori"}
                   </Text>
                 </TouchableOpacity>
                 <View style={{ height: spacing.lg }} />
@@ -822,6 +1198,142 @@ const localStyles = StyleSheet.create({
   histMealRow: { flexDirection: "row", alignItems: "center", paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.border },
 });
 
+// ----- Calendar helpers / components -----
+
+function addMonths(d: Date, n: number) {
+  const out = new Date(d);
+  out.setMonth(out.getMonth() + n);
+  return out;
+}
+
+const MONTH_LABELS = ["Janv", "Févr", "Mars", "Avril", "Mai", "Juin", "Juil", "Août", "Sept", "Oct", "Nov", "Déc"];
+const WEEKDAY_LABELS = ["L", "M", "M", "J", "V", "S", "D"];
+
+function LegendDot({ color, label }: { color: string; label: string }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: color }} />
+      <Text style={[typography.small, { fontSize: 11, color: colors.textMuted }]}>{label}</Text>
+    </View>
+  );
+}
+
+function CalendarMonthView({
+  monthDate,
+  calDays,
+  onPrev,
+  onNext,
+  onDayPress,
+  selectedDay,
+}: {
+  monthDate: Date;
+  calDays: Record<string, number>;
+  onPrev: () => void;
+  onNext: () => void;
+  onDayPress: (iso: string) => void;
+  selectedDay: string | null;
+}) {
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const firstDay = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const totalDays = lastDay.getDate();
+  // ISO weekday: Mon=1...Sun=7. Convert to grid 0-6 (Mon=0).
+  const firstWeekday = (firstDay.getDay() + 6) % 7;
+  const cells: (number | null)[] = [];
+  for (let i = 0; i < firstWeekday; i++) cells.push(null);
+  for (let d = 1; d <= totalDays; d++) cells.push(d);
+  while (cells.length % 7 !== 0) cells.push(null);
+
+  const todayISO = new Date().toISOString().slice(0, 10);
+  const isFutureMonth = addMonths(monthDate, 1) > new Date();
+
+  return (
+    <View style={calStyles.wrap} testID="calendar-month-view">
+      <View style={calStyles.header}>
+        <TouchableOpacity onPress={onPrev} style={calStyles.navBtn} testID="cal-prev">
+          <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
+        <Text style={[typography.body, { fontWeight: "700", textTransform: "capitalize" }]}>
+          {MONTH_LABELS[month]} {year}
+        </Text>
+        <TouchableOpacity
+          onPress={onNext}
+          disabled={!isFutureMonth ? false : true}
+          style={[calStyles.navBtn, isFutureMonth && { opacity: 0.3 }]}
+          testID="cal-next"
+        >
+          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+        </TouchableOpacity>
+      </View>
+      <View style={calStyles.weekRow}>
+        {WEEKDAY_LABELS.map((d, i) => (
+          <Text key={`${d}-${i}`} style={[typography.small, { fontSize: 11, textAlign: "center", flex: 1, color: colors.textMuted, fontWeight: "700" }]}>
+            {d}
+          </Text>
+        ))}
+      </View>
+      <View style={calStyles.grid}>
+        {cells.map((day, idx) => {
+          if (day === null) return <View key={idx} style={calStyles.cellEmpty} />;
+          const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+          const cnt = calDays[iso] || 0;
+          const isToday = iso === todayISO;
+          const isSel = iso === selectedDay;
+          const isFuture = new Date(iso) > new Date(todayISO);
+          const diffDays = Math.floor((new Date(todayISO).getTime() - new Date(iso).getTime()) / 86400000);
+          const isOutOfWindow = diffDays > 14;
+          const disabled = isFuture || isOutOfWindow;
+          const hasMeals = cnt > 0;
+          return (
+            <TouchableOpacity
+              key={idx}
+              onPress={() => !disabled && onDayPress(iso)}
+              disabled={disabled}
+              style={[
+                calStyles.cell,
+                hasMeals && calStyles.cellHasMeals,
+                isSel && calStyles.cellSelected,
+                isToday && calStyles.cellToday,
+                disabled && calStyles.cellDisabled,
+              ]}
+              testID={`cal-day-${iso}`}
+            >
+              <Text style={[
+                calStyles.cellDay,
+                hasMeals && { color: colors.primary, fontWeight: "800" },
+                isSel && { color: colors.surface },
+                disabled && { color: colors.textMuted, opacity: 0.5 },
+              ]}>
+                {day}
+              </Text>
+              {hasMeals && !isSel && (
+                <View style={[calStyles.cellDot, { backgroundColor: colors.primary }]} />
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
+const calStyles = StyleSheet.create({
+  wrap: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
+  header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
+  navBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: colors.background },
+  weekRow: { flexDirection: "row", marginBottom: 4 },
+  grid: { flexDirection: "row", flexWrap: "wrap" },
+  cell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: "center", justifyContent: "center", padding: 2 },
+  cellEmpty: { width: `${100 / 7}%`, aspectRatio: 1 },
+  cellHasMeals: { },
+  cellSelected: { backgroundColor: colors.primary, borderRadius: radius.md },
+  cellToday: { borderWidth: 2, borderColor: colors.primary, borderRadius: radius.md },
+  cellDisabled: {},
+  cellDay: { fontSize: 14, fontWeight: "600", color: colors.textMain },
+  cellDot: { width: 4, height: 4, borderRadius: 2, marginTop: 2 },
+});
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   header: { padding: spacing.lg, paddingBottom: spacing.sm },
@@ -864,4 +1376,15 @@ const styles = StyleSheet.create({
   mealTypeChipOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
   previewBox: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md, backgroundColor: colors.primaryPale, borderRadius: radius.md, marginTop: spacing.lg, borderWidth: 1, borderColor: "#D5EAD8" },
   favSaveBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: spacing.sm, paddingVertical: 10, borderRadius: radius.full, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.surface },
+  dateChip: { minWidth: 56, paddingVertical: 10, paddingHorizontal: 10, borderRadius: radius.md, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, alignItems: "center", justifyContent: "center", gap: 2 },
+  dateChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  dateChipDay: { fontSize: 11, color: colors.textSecondary, fontWeight: "600", textTransform: "capitalize" },
+  dateChipDayOn: { color: colors.surface },
+  dateChipNum: { fontSize: 17, color: colors.textMain, fontWeight: "800" },
+  dateChipNumOn: { color: colors.surface },
+  recentChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 8, borderRadius: radius.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  aiSection: { marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border },
+  aiHeaderRow: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 4 },
+  aiFoodRow: { backgroundColor: colors.primaryPale, borderRadius: radius.md, paddingHorizontal: spacing.sm, marginBottom: 6, borderBottomWidth: 0 },
+  aiBadgeMini: { paddingHorizontal: 5, paddingVertical: 1, backgroundColor: colors.surface, borderRadius: radius.full, borderWidth: 1, borderColor: colors.primary },
 });
