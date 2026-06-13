@@ -8,14 +8,16 @@ import { useAuth } from "@/src/auth";
 import { api } from "@/src/api";
 import { Button, Card } from "@/src/components/UI";
 import { SilhouettePicker } from "@/src/components/SilhouettePicker";
+import { MascotPicker } from "@/src/components/MascotPicker";
+import { MascotAnimal } from "@/src/components/Mascot";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
-type Step = 0 | 1 | 2 | 3 | 4 | 5;
+type Step = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 type Gender = "male" | "female";
 type Goal = "lose" | "maintain" | "gain";
 type ActivityLevel = "sedentary" | "light" | "moderate" | "active" | "very_active";
 
-const STEPS_COUNT = 6;
+const STEPS_COUNT = 7;
 
 const GOAL_OPTIONS: { value: Goal; label: string; desc: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { value: "lose", label: "Perdre du gras", desc: "Déficit calorique modéré", icon: "trending-down" },
@@ -46,6 +48,9 @@ export default function Onboarding() {
   // Phase 4: Silhouette + 1RM
   const [silhouetteLevel, setSilhouetteLevel] = useState<number>(3);
   const [silhouetteSex, setSilhouetteSex] = useState<Gender>(gender);
+
+  // Phase 5: Mascot
+  const [mascot, setMascot] = useState<MascotAnimal | null>(null);
 
   const [squatKg, setSquatKg] = useState("");
   const [squatReps, setSquatReps] = useState("");
@@ -79,6 +84,16 @@ export default function Onboarding() {
           body: { sex: silhouetteSex, level: silhouetteLevel },
         });
       } catch {}
+
+      // Save mascot (Phase 5)
+      if (mascot) {
+        try {
+          await api("/users/me/mascot", {
+            method: "PUT",
+            body: { animal: mascot },
+          });
+        } catch {}
+      }
 
       // Save 1RM estimations only if user provided at least one valid value
       if (!skipForce) {
@@ -251,6 +266,26 @@ export default function Onboarding() {
         )}
 
         {step === 5 && (
+          <>
+            <Text style={styles.title}>Ta mascotte</Text>
+            <Text style={styles.subtitle}>
+              Choisis ton animal totem. Il évoluera avec toi (chaque pallier de progression).
+            </Text>
+            <Card style={{ marginTop: spacing.lg }}>
+              <MascotPicker
+                selected={mascot}
+                onChange={setMascot}
+                evolution={1}
+                size={84}
+              />
+              <Text style={[typography.small, { marginTop: spacing.md, color: colors.textMuted }]}>
+                Tu pourras la changer depuis ton profil à tout moment.
+              </Text>
+            </Card>
+          </>
+        )}
+
+        {step === 6 && (
           <>
             <Text style={styles.title}>Tes records (optionnel)</Text>
             <Text style={styles.subtitle}>

@@ -1,0 +1,43 @@
+{
+  "summary": "Phase 5 engagement backend fully tested via pytest (30/30 PASS = 100%). All 9 requested feature paths verified end-to-end with DB-level assertions:  (1) PUT /api/users/me/mascot — accepts {lion,tigre,loup,ours,aigle} case-insensitively, 400 on invalid, persists to users.mascot.animal + chosen_at, 401 unauth.  (2) PUT /api/users/me/notif-prefs — caps to 8 reminders (12 sent → 8 stored), clamps hour 99→23/-3→0, minute -5→0/200→59, respects enabled=False, sanitizes days_of_week (de-dup, clamp 0..6, sort), defaults to all 7 days when missing.  (3) GET /api/auth/me — now returns mascot, notif_prefs, silhouette, force_metrics (null when unset).  (4) GET /api/points/summary — empty-state returns level=1/evolution=1/all-zero/recent=[], with 20×100pt seeded events level lands 1..10 and evolution mapping holds (<=3→1, <=7→2, else 3), recent capped at 5, streak_days counts consecutive workout_completed days correctly (3 days seeded → streak=3).  (5) POST /api/workouts/{id}/complete — awards workout_completed (+20) idempotently (2 calls → 1 event), PR detection compares prev max est_1rm per exercise excluding current perf id, awards pr_beaten (+25) only when delta>0.5 (verified 0.2 delta NOT awarded), streak_bonus (+5) granted when yesterday had workout_completed and skipped otherwise.  (6) GET /api/dashboard/day — protein_target_hit (+10) at exactly 95% target, idempotent on second call, not awarded at 80%; calories_on_track (+10) when |consumed-target|/target<=0.07, not awarded at 15% deviation; combo_bonus (+20) fires once when 3+ distinct goal reasons reached same day (key=combo_<date> as specified).  (7) POST /api/challenges/{id}/check-day — awards challenge_day (+15) on non-rest day, no award on rest day.  (8) POST /api/transformations — honors taken_at YYYY-MM-DD, falls back to today on invalid/missing, no ai_feedback returned.  (9) DELETE /api/transformations/{id} still 200 then 404 on re-delete. Idempotency keys verified per spec (user_id, date, reason, key) — second identical award returns 0.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "GET /api/points/summary",
+        "issue": "streak_days continuation logic (`continue` when today has no event) means streak keeps counting past gaps if i==0 today is empty — works correctly per current tests, but the logic only skips i==0; if both today and yesterday are empty, streak returns 0 which is OK, but if today is empty and yesterday+older have events, streak still counts them as one continuous block. This matches the documented spec but worth noting."
+      },
+      {
+        "endpoint": "POST /api/workouts/{id}/complete",
+        "issue": "PR comparison fetches `prev` with .sort('created_at',-1).to_list(50) then computes max — works, but limited to 50 historical perfs. Not a bug for realistic users; documenting for awareness."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration11_phase5.py",
+    "/app/test_reports/pytest/iteration11_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py now 3278 lines — even further over the 700-line guideline. Phase 5 added ~230 LoC inline. Recommend splitting into routers/engagement.py (mascot/notif/points/awards), routers/transformations.py, routers/challenges.py for maintainability.",
+    "The compute_level docstring says 'Threshold = 50 * (level^1.15) cumulative' but implementation uses i**1.25 — minor doc/code drift in /app/backend/server.py:1426 vs 1428.",
+    "evaluate_daily_combos triggers on >=3 distinct goal reasons but if combo already awarded today and a 4th reason fires, award_points is called again with key='combo_<date>' — idempotency guard correctly returns 0. Good defensive coding.",
+    "complete_workout best-effort points: the docstring/comment promises 'if a points DB error occurs, the main endpoint must still respond 200', but award_points calls are NOT wrapped in try/except inside complete_workout (only dashboard_day wraps them). A motor exception inside award_points would 500 the endpoint. Consider wrapping in /app/backend/server.py:3046-3067.",
+    "Mascot 'chosen_at' is stored as isoformat string while silhouette/force_metrics/notif_prefs nest different shapes — types are inconsistent across user-doc engagement fields. Minor."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration11_phase5.py (new, 30 tests, ~430 LoC)"
+  ],
+  "success_rate": {"backend": "100% (30/30)", "frontend": "n/a (not tested per request)"},
+  "seed_data_creation": "Per-test cleanup of points_events, workouts, exercise_perf, challenges, transformations, meals, activity for the test user, plus reset of engagement fields on user doc. Test user user_test_001 + bearer test_session_token_abc reused from conftest. No production data touched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Phase 5 engagement backend is solid. If main agent adds new POINT_RULES reasons or changes combo threshold, just re-run pytest tests/test_iteration11_phase5.py. The only thing NOT covered: error path when MongoDB award_points itself throws (the warning-suppressing try/except only wraps daily points inside dashboard_day, NOT inside complete_workout — see critical_code_review_comments item 4). Consider adding try/except around the 4 award_points calls in complete_workout if defensive 200-response is required by spec.",
+  "rca_of_issue": "n/a — no failures."
+}

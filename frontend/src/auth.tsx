@@ -4,6 +4,8 @@ import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
 import { api, getToken, setToken, clearToken } from "./api";
 
+export type MascotAnimal = "lion" | "tigre" | "loup" | "ours" | "aigle";
+
 export type AppUser = {
   user_id: string;
   email: string;
@@ -17,6 +19,18 @@ export type AppUser = {
     bench?: number;
     deadlift?: number;
     ohp?: number;
+  } | null;
+  mascot?: { animal: MascotAnimal; chosen_at?: string } | null;
+  notif_prefs?: {
+    reminders: Array<{
+      id: string;
+      kind: "workout" | "protein";
+      hour: number;
+      minute: number;
+      enabled: boolean;
+      days_of_week?: number[];
+      label?: string | null;
+    }>;
   } | null;
 };
 

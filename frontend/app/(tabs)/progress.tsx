@@ -1,8 +1,9 @@
-import { useCallback, useMemo, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, Dimensions } from "react-native";
+import { useCallback, useMemo, useRef, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, Dimensions, Animated, PanResponder, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
 import { Card, Button, SectionTitle, WeekBars, LineChart1RM } from "@/src/components/UI";
@@ -40,7 +41,9 @@ export default function Progress() {
   const [perf, setPerf] = useState<PerfPayload>({ items: [], personal_bests: [] });
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadView, setUploadView] = useState<"front" | "back" | "side">("front");
+  // Phase 5: date picker for the photo
+  const [uploadDate, setUploadDate] = useState<Date>(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -53,7 +56,6 @@ export default function Progress() {
       setWeek(w);
       setPerf(p);
       if (!selectedExercise && p.personal_bests.length > 0) {
-        // Pre-select exercise with most data points
         const counts: Record<string, number> = {};
         p.items.forEach((it) => { counts[it.exercise_name] = (counts[it.exercise_name] || 0) + 1; });
         const top = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -77,9 +79,14 @@ export default function Progress() {
     if (result.canceled || !result.assets?.[0]?.base64) return;
     setUploading(true);
     try {
+      // Format date YYYY-MM-DD in local TZ
+      const yyyy = uploadDate.getFullYear();
+      const mm = String(uploadDate.getMonth() + 1).padStart(2, "0");
+      const dd = String(uploadDate.getDate()).padStart(2, "0");
+      const taken_at = `${yyyy}-${mm}-${dd}`;
       await api("/transformations", {
         method: "POST",
-        body: { image_base64: result.assets[0].base64, mime: "image/jpeg", view: uploadView },
+        body: { image_base64: result.assets[0].base64, mime: "image/jpeg", taken_at },
       });
       await load();
     } catch (e) {
@@ -260,29 +267,33 @@ export default function Progress() {
             <Text style={[typography.small, { color: colors.primary, fontWeight: "700", fontSize: 10 }]}>Privé · sans IA</Text>
           </View>
         </View>
-        <View style={styles.viewChipsRow} testID="transfo-view-chips">
-          {(["front", "back", "side"] as const).map((v) => {
-            const isOn = uploadView === v;
-            const label = v === "front" ? "Face" : v === "back" ? "Dos" : "Côté";
-            return (
-              <TouchableOpacity
-                key={v}
-                onPress={() => setUploadView(v)}
-                style={[styles.viewChip, isOn && styles.viewChipOn]}
-                testID={`transfo-view-${v}`}
-              >
-                <Ionicons
-                  name={v === "front" ? "body-outline" : v === "back" ? "accessibility-outline" : "walk-outline"}
-                  size={14}
-                  color={isOn ? colors.primary : colors.textSecondary}
-                />
-                <Text style={[typography.small, { color: isOn ? colors.primary : colors.textSecondary, fontWeight: "700" }]}>
-                  {label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
+
+        {/* Phase 5: Date picker (taken-at) */}
+        <TouchableOpacity
+          onPress={() => setShowDatePicker(true)}
+          style={styles.dateRow}
+          testID="transfo-date-pick"
+        >
+          <Ionicons name="calendar-outline" size={16} color={colors.primary} />
+          <Text style={[typography.body, { color: colors.textMain, fontWeight: "600" }]}>
+            {uploadDate.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
+          </Text>
+          <Text style={[typography.small, { marginLeft: "auto", color: colors.primary, fontWeight: "700" }]}>Modifier</Text>
+        </TouchableOpacity>
+        {showDatePicker && (
+          <DateTimePicker
+            value={uploadDate}
+            mode="date"
+            maximumDate={new Date()}
+            display={Platform.OS === "ios" ? "inline" : "default"}
+            onChange={(event, selected) => {
+              if (Platform.OS !== "ios") setShowDatePicker(false);
+              if (event.type === "dismissed") return;
+              if (selected) setUploadDate(selected);
+            }}
+          />
+        )}
+
         <View style={{ flexDirection: "row", gap: spacing.sm }}>
           <Button
             title="Caméra"
@@ -326,7 +337,6 @@ export default function Progress() {
         ) : (
           <PhotoGallery
             transfos={transfos}
-            view={uploadView}
             onDelete={async (id) => {
               try {
                 await api(`/transformations/${id}`, { method: "DELETE" });
@@ -347,37 +357,33 @@ export default function Progress() {
 // ---- PhotoGallery: chronological + before/after compare ----
 function PhotoGallery({
   transfos,
-  view,
   onDelete,
 }: {
   transfos: Transfo[];
-  view: "front" | "back" | "side";
   onDelete: (id: string) => Promise<void>;
 }) {
   const [mode, setMode] = useState<"grid" | "compare">("grid");
   const [leftId, setLeftId] = useState<string | null>(null);
   const [rightId, setRightId] = useState<string | null>(null);
 
-  const filtered = useMemo(
-    () => transfos.filter((t) => !t.view || t.view === view),
-    [transfos, view]
-  );
-
   const sortedAsc = useMemo(
-    () => filtered.slice().sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()),
-    [filtered]
+    () => transfos.slice().sort(
+      (a, b) =>
+        new Date(a.date || a.created_at).getTime() -
+        new Date(b.date || b.created_at).getTime(),
+    ),
+    [transfos]
   );
 
-  // Auto-pick: first & last
   useMemo(() => {
-    if (mode === "compare" && filtered.length >= 2) {
+    if (mode === "compare" && transfos.length >= 2) {
       if (!leftId) setLeftId(sortedAsc[0].id);
       if (!rightId) setRightId(sortedAsc[sortedAsc.length - 1].id);
     }
-  }, [mode, filtered.length, leftId, rightId, sortedAsc]);
+  }, [mode, transfos.length, leftId, rightId, sortedAsc]);
 
   const screenW = Dimensions.get("window").width;
-  const colWidth = (screenW - 16 * 2 - 16) / 2; // 2 cols, padding & gap
+  const colWidth = (screenW - 16 * 2 - 16) / 2;
 
   const confirmDelete = (id: string) => {
     Alert.alert(
@@ -390,17 +396,13 @@ function PhotoGallery({
     );
   };
 
-  const renderImg = (t: Transfo, w: number, h: number) => (
-    <Image
-      source={{ uri: `data:image/jpeg;base64,${t.image_base64}` }}
-      style={{ width: w, height: h, borderRadius: radius.md, backgroundColor: colors.border }}
-      resizeMode="cover"
-    />
-  );
+  const formatDate = (t: Transfo) => {
+    const d = new Date(t.date || t.created_at);
+    return d.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "2-digit" });
+  };
 
   return (
     <View style={{ gap: spacing.sm }}>
-      {/* Mode toggle */}
       <View style={styles.galleryModeRow}>
         {([
           { v: "grid" as const, label: "Chronologie", icon: "grid-outline" as const },
@@ -415,12 +417,7 @@ function PhotoGallery({
               testID={`gallery-mode-${m.v}`}
             >
               <Ionicons name={m.icon} size={14} color={isOn ? colors.primary : colors.textSecondary} />
-              <Text
-                style={[
-                  typography.small,
-                  { fontWeight: "700", color: isOn ? colors.primary : colors.textSecondary },
-                ]}
-              >
+              <Text style={[typography.small, { fontWeight: "700", color: isOn ? colors.primary : colors.textSecondary }]}>
                 {m.label}
               </Text>
             </TouchableOpacity>
@@ -430,38 +427,30 @@ function PhotoGallery({
 
       {mode === "grid" && (
         <View style={styles.gridWrap}>
-          {sortedAsc.length === 0 ? (
-            <Card>
-              <Text style={typography.small}>
-                Aucune photo « {view === "front" ? "Face" : view === "back" ? "Dos" : "Côté"} » pour l&apos;instant.
-              </Text>
-            </Card>
-          ) : (
-            sortedAsc.slice().reverse().map((t) => (
-              <View key={t.id} style={[styles.gridItem, { width: colWidth }]} testID={`gallery-grid-${t.id}`}>
-                {renderImg(t, colWidth, colWidth * 1.4)}
-                <View style={styles.gridFooter}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[typography.small, { fontWeight: "700", color: colors.textMain }]}>
-                      {new Date(t.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
-                    </Text>
-                    {t.weight_kg ? (
-                      <Text style={[typography.small, { fontSize: 11 }]}>{t.weight_kg} kg</Text>
-                    ) : null}
-                  </View>
-                  <TouchableOpacity onPress={() => confirmDelete(t.id)} hitSlop={10} testID={`gallery-delete-${t.id}`}>
-                    <Ionicons name="trash-outline" size={16} color={colors.alert} />
-                  </TouchableOpacity>
+          {sortedAsc.slice().reverse().map((t) => (
+            <View key={t.id} style={[styles.gridItem, { width: colWidth }]} testID={`gallery-grid-${t.id}`}>
+              <SwipeRevealPhoto base64={t.image_base64} width={colWidth - 12} height={(colWidth - 12) * 1.45} />
+              <View style={styles.gridFooter}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[typography.small, { fontWeight: "700", color: colors.textMain }]}>
+                    {formatDate(t)}
+                  </Text>
+                  {t.weight_kg ? (
+                    <Text style={[typography.small, { fontSize: 11 }]}>{t.weight_kg} kg</Text>
+                  ) : null}
                 </View>
+                <TouchableOpacity onPress={() => confirmDelete(t.id)} hitSlop={10} testID={`gallery-delete-${t.id}`}>
+                  <Ionicons name="trash-outline" size={16} color={colors.alert} />
+                </TouchableOpacity>
               </View>
-            ))
-          )}
+            </View>
+          ))}
         </View>
       )}
 
       {mode === "compare" && (
         <Card testID="gallery-compare">
-          {filtered.length < 2 ? (
+          {transfos.length < 2 ? (
             <Text style={[typography.small, { textAlign: "center", paddingVertical: spacing.md }]}>
               Ajoute au moins 2 photos pour activer le comparatif.
             </Text>
@@ -473,7 +462,6 @@ function PhotoGallery({
                   selectedId={leftId}
                   options={sortedAsc}
                   onPick={setLeftId}
-                  renderImg={renderImg}
                   width={(screenW - 32 - 16 - 16) / 2}
                 />
                 <ComparePane
@@ -481,7 +469,6 @@ function PhotoGallery({
                   selectedId={rightId}
                   options={sortedAsc}
                   onPick={setRightId}
-                  renderImg={renderImg}
                   width={(screenW - 32 - 16 - 16) / 2}
                 />
               </View>
@@ -497,32 +484,93 @@ function PhotoGallery({
   );
 }
 
+// Swipe-to-reveal: an opaque green tile sits OVER the image. User drags horizontally to reveal.
+function SwipeRevealPhoto({ base64, width, height }: { base64: string; width: number; height: number }) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const [revealed, setRevealed] = useState(false);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dx) > 4 && Math.abs(g.dx) > Math.abs(g.dy),
+      onPanResponderMove: (_, g) => {
+        // Only allow dragging right -> reveal
+        const v = Math.max(0, Math.min(width, g.dx));
+        translateX.setValue(v);
+      },
+      onPanResponderRelease: (_, g) => {
+        const target = g.dx > width * 0.5 ? width : 0;
+        Animated.spring(translateX, { toValue: target, useNativeDriver: true, friction: 8 }).start(() => {
+          setRevealed(target === width);
+        });
+      },
+    })
+  ).current;
+
+  const reset = () => {
+    Animated.spring(translateX, { toValue: 0, useNativeDriver: true, friction: 8 }).start(() => setRevealed(false));
+  };
+
+  return (
+    <View style={{ width, height, borderRadius: radius.md, overflow: "hidden", backgroundColor: colors.border }}>
+      <Image
+        source={{ uri: `data:image/jpeg;base64,${base64}` }}
+        style={{ width, height }}
+        resizeMode="cover"
+      />
+      <Animated.View
+        {...panResponder.panHandlers}
+        style={[
+          StyleSheet.absoluteFillObject,
+          {
+            backgroundColor: colors.primary,
+            transform: [{ translateX }],
+            justifyContent: "center",
+            alignItems: "center",
+          },
+        ]}
+      >
+        <Ionicons name="lock-closed" size={28} color="#fff" />
+        <Text style={{ color: "#fff", fontWeight: "800", marginTop: 8, fontSize: 12 }}>SWIPE</Text>
+        <View style={{ flexDirection: "row", alignItems: "center", marginTop: 6, gap: 4 }}>
+          <Ionicons name="chevron-forward" size={14} color="rgba(255,255,255,0.6)" />
+          <Ionicons name="chevron-forward" size={16} color="#fff" />
+        </View>
+      </Animated.View>
+      {revealed && (
+        <TouchableOpacity onPress={reset} style={styles.hideBtn}>
+          <Ionicons name="eye-off-outline" size={14} color="#fff" />
+          <Text style={{ color: "#fff", fontSize: 10, fontWeight: "800" }}>Masquer</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
 function ComparePane({
   label,
   selectedId,
   options,
   onPick,
-  renderImg,
   width,
 }: {
   label: string;
   selectedId: string | null;
   options: Transfo[];
   onPick: (id: string) => void;
-  renderImg: (t: Transfo, w: number, h: number) => React.ReactNode;
   width: number;
 }) {
   const t = options.find((x) => x.id === selectedId) || options[0];
   if (!t) return null;
+  const dateStr = new Date(t.date || t.created_at).toLocaleDateString("fr-FR", {
+    day: "numeric", month: "short",
+  });
   return (
     <View style={{ flex: 1, gap: 6 }}>
       <View style={styles.compareLabelRow}>
         <Text style={[typography.small, { fontWeight: "800", color: colors.textMain }]}>{label}</Text>
-        <Text style={[typography.small, { fontSize: 10, color: colors.textMuted }]}>
-          {new Date(t.created_at).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
-        </Text>
+        <Text style={[typography.small, { fontSize: 10, color: colors.textMuted }]}>{dateStr}</Text>
       </View>
-      {renderImg(t, width, width * 1.4)}
+      <SwipeRevealPhoto base64={t.image_base64} width={width} height={width * 1.4} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4 }}>
         {options.map((o) => {
           const on = o.id === t.id;
@@ -533,7 +581,10 @@ function ComparePane({
               style={[styles.thumb, on && styles.thumbOn]}
               testID={`compare-thumb-${o.id}`}
             >
-              <Image source={{ uri: `data:image/jpeg;base64,${o.image_base64}` }} style={styles.thumbImg} />
+              {/* small dot indicator only — thumb stays hidden */}
+              <View style={styles.thumbHidden}>
+                <Ionicons name="image-outline" size={16} color={on ? "#fff" : colors.primary} />
+              </View>
             </TouchableOpacity>
           );
         })}
@@ -598,6 +649,36 @@ const styles = StyleSheet.create({
   viewBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.full, backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: "#D5EAD8" },
   // Gallery
   galleryModeRow: { flexDirection: "row", gap: 6 },
+  dateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: radius.md,
+  },
+  hideBtn: {
+    position: "absolute",
+    top: 6,
+    right: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: radius.full,
+  },
+  thumbHidden: {
+    width: "100%",
+    height: "100%",
+    backgroundColor: colors.primaryPale,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   galleryModeChip: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   galleryModeChipOn: { borderColor: colors.primary, backgroundColor: colors.primaryPale },
   gridWrap: { flexDirection: "row", flexWrap: "wrap", gap: 16 },

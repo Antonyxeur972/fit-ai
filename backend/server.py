@@ -211,7 +211,8 @@ class TransformationIn(BaseModel):
     image_base64: str
     mime: str = "image/jpeg"
     weight_kg: Optional[float] = None
-    view: Optional[str] = "front"  # "front" | "back" | "side"
+    view: Optional[str] = "front"  # legacy field, no longer rendered
+    taken_at: Optional[str] = None  # YYYY-MM-DD (user-chosen date)
 
 
 class DuplicateMealRequest(BaseModel):
@@ -266,6 +267,24 @@ class Estimate1RMRequest(BaseModel):
     deadlift_reps: Optional[int] = None
     ohp_kg: Optional[float] = None  # développé militaire
     ohp_reps: Optional[int] = None
+
+
+class MascotRequest(BaseModel):
+    animal: str  # lion | tigre | loup | ours | aigle
+
+
+class NotifReminder(BaseModel):
+    id: Optional[str] = None
+    kind: str  # "workout" | "protein"
+    hour: int = 19
+    minute: int = 0
+    enabled: bool = True
+    days_of_week: Optional[List[int]] = None  # 0=Mon..6=Sun, None=all days
+    label: Optional[str] = None
+
+
+class NotifPrefsRequest(BaseModel):
+    reminders: List[NotifReminder]
 
 
 class ChallengeStartRequest(BaseModel):
@@ -1342,7 +1361,165 @@ async def auth_me(authorization: Optional[str] = Header(default=None)):
         "onboarded": bool(user.get("onboarded", False)),
         "silhouette": user.get("silhouette"),
         "force_metrics": user.get("force_metrics"),
+        "mascot": user.get("mascot"),
+        "notif_prefs": user.get("notif_prefs"),
     }
+
+
+@api.put("/users/me/mascot")
+async def update_mascot(
+    body: MascotRequest, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    animal = (body.animal or "").lower()
+    valid = {"lion", "tigre", "loup", "ours", "aigle"}
+    if animal not in valid:
+        raise HTTPException(400, "Animal invalide")
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"mascot": {"animal": animal, "chosen_at": now_utc().isoformat()}}},
+    )
+    return {"mascot": {"animal": animal}}
+
+
+@api.put("/users/me/notif-prefs")
+async def update_notif_prefs(
+    body: NotifPrefsRequest, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    cleaned: List[Dict[str, Any]] = []
+    for r in body.reminders[:8]:  # cap at 8 reminders
+        kind = r.kind if r.kind in ("workout", "protein") else "workout"
+        hour = max(0, min(23, int(r.hour)))
+        minute = max(0, min(59, int(r.minute)))
+        days = r.days_of_week or list(range(7))
+        days = sorted({max(0, min(6, int(d))) for d in days})
+        cleaned.append({
+            "id": r.id or new_id("notif"),
+            "kind": kind,
+            "hour": hour,
+            "minute": minute,
+            "enabled": bool(r.enabled),
+            "days_of_week": days,
+            "label": r.label,
+        })
+    await db.users.update_one(
+        {"user_id": user["user_id"]}, {"$set": {"notif_prefs": {"reminders": cleaned}}}
+    )
+    return {"notif_prefs": {"reminders": cleaned}}
+
+
+# ---- POINTS / LEVELS ----
+
+POINT_RULES = {
+    "workout_completed": 20,
+    "protein_target_hit": 10,
+    "calories_on_track": 10,
+    "challenge_day": 15,
+    "pr_beaten": 25,
+    "streak_bonus": 5,
+    "combo_bonus": 20,  # 3+ goals in same day
+}
+
+
+def compute_level(total: int) -> Dict[str, int]:
+    """Levels 1..10. Threshold = 50 * (level^1.15) cumulative.
+    Returns dict with level, points_in_level, next_threshold, evolution(1..3)."""
+    thresholds = [int(50 * ((i) ** 1.25)) for i in range(1, 11)]  # cumulative steps
+    cum = 0
+    pts = max(0, total)
+    lvl = 1
+    next_t = thresholds[0]
+    for i, step in enumerate(thresholds):
+        if pts >= cum + step:
+            cum += step
+            lvl = i + 2 if i + 1 < len(thresholds) else 10
+        else:
+            next_t = cum + step
+            break
+    lvl = min(10, lvl)
+    evolution = 1 if lvl <= 3 else (2 if lvl <= 7 else 3)
+    return {
+        "level": lvl,
+        "points_total": pts,
+        "points_in_level": pts - cum,
+        "level_span": (next_t - cum) if lvl < 10 else 0,
+        "evolution": evolution,
+    }
+
+
+async def award_points(user_id: str, reason: str, qty: Optional[int] = None, meta: Optional[Dict[str, Any]] = None) -> int:
+    """Insert a points event and return the awarded amount. Idempotent per (user, date, reason, meta.key)."""
+    base = qty if qty is not None else POINT_RULES.get(reason, 0)
+    if base <= 0:
+        return 0
+    d = today_str()
+    key = (meta or {}).get("key") or reason
+    existing = await db.points_events.find_one(
+        {"user_id": user_id, "date": d, "reason": reason, "key": key}
+    )
+    if existing:
+        return 0
+    doc = {
+        "id": new_id("pt"),
+        "user_id": user_id,
+        "date": d,
+        "reason": reason,
+        "key": key,
+        "amount": base,
+        "meta": meta or {},
+        "created_at": now_utc(),
+    }
+    await db.points_events.insert_one(doc)
+    return base
+
+
+async def evaluate_daily_combos(user_id: str) -> None:
+    """If user has hit 3+ goal reasons today, award combo bonus once."""
+    d = today_str()
+    reasons = await db.points_events.distinct(
+        "reason", {"user_id": user_id, "date": d, "reason": {"$ne": "combo_bonus"}}
+    )
+    if len([r for r in reasons if r in ("workout_completed", "protein_target_hit", "calories_on_track", "challenge_day", "pr_beaten")]) >= 3:
+        await award_points(user_id, "combo_bonus", meta={"key": "combo_" + d})
+
+
+@api.get("/points/summary")
+async def points_summary(authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    today = today_str()
+    pipeline_total = [
+        {"$match": {"user_id": user["user_id"]}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]
+    pipeline_today = [
+        {"$match": {"user_id": user["user_id"], "date": today}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]
+    cur_t = db.points_events.aggregate(pipeline_total)
+    cur_d = db.points_events.aggregate(pipeline_today)
+    total_doc = await cur_t.to_list(1)
+    today_doc = await cur_d.to_list(1)
+    total = int(total_doc[0]["total"]) if total_doc else 0
+    points_today = int(today_doc[0]["total"]) if today_doc else 0
+    # Last 5 events
+    recent = await db.points_events.find(
+        {"user_id": user["user_id"]}, {"_id": 0}
+    ).sort("created_at", -1).limit(5).to_list(5)
+    # Streak: consecutive days with at least one workout_completed
+    streak = 0
+    cur_date = datetime.strptime(today, "%Y-%m-%d").date()
+    for i in range(0, 60):
+        d = (cur_date - timedelta(days=i)).isoformat()
+        ev = await db.points_events.find_one({"user_id": user["user_id"], "date": d, "reason": "workout_completed"})
+        if ev:
+            streak += 1
+        else:
+            if i == 0:
+                continue  # today not yet completed shouldn't break the streak
+            break
+    lvl = compute_level(total)
+    return {**lvl, "points_today": points_today, "recent": recent, "streak_days": streak}
 
 
 @api.put("/users/me/silhouette")
@@ -2004,6 +2181,13 @@ async def challenge_check_day(
             "source": "challenge",
         }
         await db.workouts.insert_one(wk_doc)
+    # ---- POINTS: challenge day ----
+    if not day.get("is_rest"):
+        await award_points(
+            user["user_id"], "challenge_day",
+            meta={"key": f"ch_{challenge_id}_{body.day_index}"}
+        )
+        await evaluate_daily_combos(user["user_id"])
     if completed_count >= sum(1 for d in days if not d.get("is_rest")):
         await db.challenges.update_one(
             {"id": challenge_id},
@@ -2858,6 +3042,29 @@ async def complete_workout(workout_id: str, authorization: Optional[str] = Heade
     )
     if res.matched_count == 0:
         raise HTTPException(404, "Workout not found")
+    # ---- POINTS: workout completed ----
+    await award_points(user["user_id"], "workout_completed", meta={"key": f"wk_{workout_id}"})
+    # Detect PRs from exercise_perf created for this workout
+    perfs = await db.exercise_perf.find(
+        {"user_id": user["user_id"], "workout_id": workout_id}, {"_id": 0}
+    ).to_list(50)
+    for p in perfs:
+        ex = p.get("exercise_name")
+        cur = float(p.get("est_1rm", 0))
+        if not ex or cur <= 0:
+            continue
+        prev = await db.exercise_perf.find(
+            {"user_id": user["user_id"], "exercise_name": ex, "id": {"$ne": p.get("id")}}, {"_id": 0, "est_1rm": 1}
+        ).sort("created_at", -1).to_list(50)
+        prev_max = max((float(x.get("est_1rm", 0)) for x in prev), default=0)
+        if cur > prev_max + 0.5:
+            await award_points(user["user_id"], "pr_beaten", meta={"key": f"pr_{workout_id}_{ex}"})
+    # Streak bonus
+    yest = (datetime.strptime(today_str(), "%Y-%m-%d").date() - timedelta(days=1)).isoformat()
+    streaked = await db.points_events.find_one({"user_id": user["user_id"], "date": yest, "reason": "workout_completed"})
+    if streaked:
+        await award_points(user["user_id"], "streak_bonus", meta={"key": f"streak_{today_str()}"})
+    await evaluate_daily_combos(user["user_id"])
     return {"ok": True}
 
 
@@ -2866,10 +3073,18 @@ async def complete_workout(workout_id: str, authorization: Optional[str] = Heade
 async def add_transformation(body: TransformationIn, authorization: Optional[str] = Header(default=None)):
     user = await get_current_user(authorization)
     # PHASE 4: no AI analysis on body photos. Private gallery only.
+    # PHASE 5: user can choose taken_at date.
+    chosen_date = today_str()
+    if body.taken_at:
+        try:
+            datetime.strptime(body.taken_at, "%Y-%m-%d")
+            chosen_date = body.taken_at
+        except ValueError:
+            pass
     doc = {
         "id": new_id("transfo"),
         "user_id": user["user_id"],
-        "date": today_str(),
+        "date": chosen_date,
         "created_at": now_utc(),
         "image_base64": body.image_base64[:300000],
         "weight_kg": body.weight_kg,
@@ -2944,6 +3159,18 @@ async def dashboard_day(
     burned_total = bmr + steps_kcal + cardio_kcal + workout_kcal
 
     target = int(profile.get("daily_calories", 2000))
+    protein_target = int(profile.get("protein_g", 0))
+    # ---- POINTS: protein target / calories on track (only for today, idempotent) ----
+    if d == today_str():
+        try:
+            if protein_target > 0 and protein >= protein_target * 0.95:
+                if await award_points(user["user_id"], "protein_target_hit", meta={"key": f"prot_{d}"}):
+                    await evaluate_daily_combos(user["user_id"])
+            if target > 0 and abs(consumed - target) / target <= 0.07:
+                if await award_points(user["user_id"], "calories_on_track", meta={"key": f"cal_{d}"}):
+                    await evaluate_daily_combos(user["user_id"])
+        except Exception as e:
+            logger.warning(f"award daily points: {e}")
     return {
         "date": d,
         "target_calories": target,

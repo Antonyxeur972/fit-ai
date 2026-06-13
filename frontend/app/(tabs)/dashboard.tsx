@@ -8,6 +8,10 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { Card, ProgressRing, MacroBar, SectionTitle, Stat, Button } from "@/src/components/UI";
+import { ShareCardModal } from "@/src/components/ShareCardModal";
+import { Mascot } from "@/src/components/Mascot";
+import { StrengthSymbol } from "@/src/components/StrengthSymbol";
+import { quoteForToday } from "@/src/lib/motivation";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type DashboardData = {
@@ -39,15 +43,28 @@ export default function Dashboard() {
   const [stepsModal, setStepsModal] = useState(false);
   const [stepsInput, setStepsInput] = useState("");
   const [savingSteps, setSavingSteps] = useState(false);
+  // Phase 5: points / share
+  const [points, setPoints] = useState<{
+    level: number;
+    points_total: number;
+    points_in_level: number;
+    level_span: number;
+    evolution: 1 | 2 | 3;
+    points_today: number;
+    streak_days: number;
+  } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [d, wm] = await Promise.all([
+      const [d, wm, ps] = await Promise.all([
         api<DashboardData>("/dashboard/day"),
         api<WeekMacros>("/dashboard/week-macros").catch(() => null),
+        api<any>("/points/summary").catch(() => null),
       ]);
       setData(d);
       setWeekMacros(wm);
+      setPoints(ps);
     } catch (e) {
       console.warn("dashboard load", e);
     }
@@ -103,10 +120,51 @@ export default function Dashboard() {
             <Text style={typography.caption}>{today}</Text>
             <Text style={styles.hello}>Salut {user?.name?.split(" ")[0]}</Text>
           </View>
-          <View style={styles.avatar}>
-            <Ionicons name="leaf" size={20} color={colors.primary} />
-          </View>
+          {user?.mascot?.animal ? (
+            <Mascot
+              animal={user.mascot.animal}
+              evolution={(points?.evolution || 1) as 1 | 2 | 3}
+              size={48}
+              color={colors.primary}
+            />
+          ) : (
+            <View style={styles.avatar}>
+              <Ionicons name="leaf" size={20} color={colors.primary} />
+            </View>
+          )}
         </View>
+
+        {/* Phase 5: Quote + Strength + Share */}
+        <Card style={styles.heroCard} testID="dashboard-hero-card">
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
+            <StrengthSymbol
+              size={62}
+              evolution={(points?.evolution || 1) as 1 | 2 | 3}
+              strength={points && points.level_span > 0 ? Math.min(1, points.points_in_level / points.level_span) : 0.3}
+            />
+            <View style={{ flex: 1 }}>
+              <Text style={[typography.caption, { color: colors.primary, letterSpacing: 1.2, fontWeight: "800" }]}>
+                {points?.streak_days && points.streak_days > 1 ? `STREAK · ${points.streak_days}J` : "FORCE"}
+              </Text>
+              <Text style={[typography.body, { fontWeight: "600", marginTop: 2, color: colors.textMain, lineHeight: 20 }]}>
+                {quoteForToday(data.workout?.completed ? "post_workout" : "pre_workout")}
+              </Text>
+              {points && points.points_today > 0 ? (
+                <Text style={[typography.small, { marginTop: 4, color: colors.primary, fontWeight: "800" }]}>
+                  +{points.points_today} pts aujourd&apos;hui
+                </Text>
+              ) : null}
+            </View>
+          </View>
+          <Button
+            title="Partager ma performance"
+            variant="primary"
+            onPress={() => setShareOpen(true)}
+            icon={<Ionicons name="share-social-outline" size={16} color="#fff" />}
+            testID="dashboard-share-button"
+            style={{ marginTop: spacing.md }}
+          />
+        </Card>
 
         {/* Calorie ring */}
         <Card style={{ alignItems: "center", paddingVertical: spacing.xl }} testID="dashboard-calorie-card">
@@ -301,6 +359,22 @@ export default function Dashboard() {
           </KeyboardAwareScrollView>
         </View>
       </Modal>
+
+      {/* Phase 5: ShareCardModal */}
+      <ShareCardModal
+        visible={shareOpen}
+        onClose={() => setShareOpen(false)}
+        data={{
+          focus: data.workout?.focus
+            ? `${data.workout.focus}${data.workout.completed ? "" : " · à faire"}`
+            : "Training du jour",
+          duration_min: data.workout?.duration_min,
+          mascot: user?.mascot ? { animal: user.mascot.animal, evolution: (points?.evolution || 1) as 1 | 2 | 3 } : null,
+          strength_evolution: (points?.evolution || 1) as 1 | 2 | 3,
+          strength_value: points && points.level_span > 0 ? Math.min(1, points.points_in_level / points.level_span) : 0.3,
+          points_today: points?.points_today || 0,
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -340,6 +414,7 @@ const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.md },
+  heroCard: { backgroundColor: colors.surface, gap: 0 },
   hello: { fontSize: 26, fontWeight: "700", color: colors.textMain, letterSpacing: -0.4, marginTop: 2 },
   avatar: {
     width: 44, height: 44, borderRadius: radius.full,

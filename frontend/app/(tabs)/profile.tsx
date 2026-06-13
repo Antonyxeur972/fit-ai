@@ -1,15 +1,20 @@
-import { useCallback, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, TextInput, Modal } from "react-native";
+import { useCallback, useEffect, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, TextInput, Modal, Switch, Platform } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import Svg, { Path, Circle, Defs, LinearGradient, Stop } from "react-native-svg";
 import { useAuth } from "@/src/auth";
 import { api } from "@/src/api";
 import { Card, SectionTitle, Stat, Button } from "@/src/components/UI";
 import { Silhouette, SILHOUETTE_LABELS } from "@/src/components/Silhouette";
 import { SilhouettePicker } from "@/src/components/SilhouettePicker";
+import { Mascot, MascotAnimal, MASCOT_LABELS } from "@/src/components/Mascot";
+import { MascotPicker } from "@/src/components/MascotPicker";
+import { StrengthSymbol } from "@/src/components/StrengthSymbol";
+import { scheduleReminders, Reminder } from "@/src/lib/notifications";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type Profile = {
@@ -67,31 +72,56 @@ export default function ProfileTab() {
   const [dlReps, setDlReps] = useState("");
   const [savingForce, setSavingForce] = useState(false);
 
+  // Phase 5: Mascot modal
+  const [mascotModal, setMascotModal] = useState(false);
+  const [pickedMascot, setPickedMascot] = useState<MascotAnimal | null>(null);
+  const [savingMascot, setSavingMascot] = useState(false);
+
+  // Phase 5: Notification reminders
+  const [notifModal, setNotifModal] = useState(false);
+  const [reminders, setReminders] = useState<Reminder[]>([]);
+  const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
+  const [savingReminders, setSavingReminders] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+
+  // Phase 5: Points
+  const [points, setPoints] = useState<{
+    level: number; points_total: number; points_in_level: number; level_span: number; evolution: 1 | 2 | 3; points_today: number; streak_days: number;
+  } | null>(null);
+
   const load = useCallback(async () => {
     try {
-      const [p, c, transfos] = await Promise.all([
+      const [p, c, transfos, ps] = await Promise.all([
         api<Profile>("/profile"),
         api<BodyComp>("/body/composition").catch(() => ({ available: false } as BodyComp)),
         api<TransfoLite[]>("/transformations").catch(() => [] as TransfoLite[]),
+        api<any>("/points/summary").catch(() => null),
       ]);
       setProfile(p);
       setWaist(String(p.waist_cm || ""));
       setNeck(String(p.neck_cm || ""));
       setHips(String(p.hips_cm || ""));
       setComposition(c);
+      setPoints(ps);
       const views = { front: false, back: false };
       transfos.forEach((t) => {
         const v = (t.view || "front").toLowerCase();
         if (v === "front" || v === "side") views.front = true;
         if (v === "back") views.back = true;
       });
-      // Default: show front if no photos uploaded yet
       if (!views.front && !views.back) views.front = true;
       setTransfoViews(views);
     } catch {}
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // Sync reminders local state from user notif_prefs
+  useEffect(() => {
+    if (user?.notif_prefs?.reminders) {
+      setReminders(user.notif_prefs.reminders);
+    }
+  }, [user?.notif_prefs]);
 
   // sync silhouette modal seed values with currently-stored user data
   const openSilhouette = () => {
@@ -142,6 +172,62 @@ export default function ProfileTab() {
       setSavingForce(false);
     }
   };
+
+  // Phase 5: mascot save
+  const openMascot = () => {
+    setPickedMascot((user?.mascot?.animal as MascotAnimal) || null);
+    setMascotModal(true);
+  };
+  const saveMascot = async () => {
+    if (!pickedMascot) return;
+    setSavingMascot(true);
+    try {
+      await api("/users/me/mascot", { method: "PUT", body: { animal: pickedMascot } });
+      await refreshUser();
+      setMascotModal(false);
+    } finally {
+      setSavingMascot(false);
+    }
+  };
+
+  // Phase 5: notification reminders
+  const addReminder = (kind: "workout" | "protein") => {
+    const id = `tmp_${Date.now()}`;
+    setReminders((arr) => [
+      ...arr,
+      {
+        id, kind, hour: kind === "protein" ? 21 : 19, minute: kind === "protein" ? 30 : 0,
+        enabled: true, days_of_week: [0, 1, 2, 3, 4, 5, 6], label: null,
+      },
+    ]);
+  };
+  const updateReminder = (id: string, patch: Partial<Reminder>) => {
+    setReminders((arr) => arr.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  };
+  const removeReminder = (id: string) => {
+    setReminders((arr) => arr.filter((r) => r.id !== id));
+  };
+  const saveReminders = async () => {
+    setSavingReminders(true);
+    try {
+      await api("/users/me/notif-prefs", {
+        method: "PUT",
+        body: { reminders },
+      });
+      await refreshUser();
+      try {
+        await scheduleReminders(reminders as Reminder[]);
+      } catch (e) {
+        console.warn("scheduleReminders", e);
+      }
+      setNotifModal(false);
+    } finally {
+      setSavingReminders(false);
+    }
+  };
+
+  const evolution: 1 | 2 | 3 = (points?.evolution || 1) as 1 | 2 | 3;
+  const strengthVal = points && points.level_span > 0 ? Math.min(1, points.points_in_level / points.level_span) : 0.3;
 
   const saveName = async () => {
     const n = nameInput.trim();
@@ -197,6 +283,72 @@ export default function ProfileTab() {
             <Text style={typography.small}>{user?.email}</Text>
           </View>
         </View>
+
+        {/* Phase 5: Mascot + Strength symbol */}
+        <Card testID="mascot-card">
+          <SectionTitle title="Ta mascotte" action={
+            <TouchableOpacity onPress={openMascot} testID="edit-mascot">
+              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>
+                {user?.mascot ? "Changer" : "Choisir"}
+              </Text>
+            </TouchableOpacity>
+          } />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.sm }}>
+            {user?.mascot?.animal ? (
+              <Mascot animal={user.mascot.animal} evolution={evolution} size={88} color={colors.primary} strokeWidth={2} />
+            ) : (
+              <View style={[styles.mascotPlaceholder]}>
+                <Ionicons name="paw-outline" size={32} color={colors.primary} />
+              </View>
+            )}
+            <View style={{ flex: 1 }}>
+              <Text style={typography.h3}>
+                {user?.mascot?.animal ? MASCOT_LABELS[user.mascot.animal as MascotAnimal] : "Pas encore choisie"}
+              </Text>
+              <Text style={[typography.small, { marginTop: 2 }]}>
+                Elle évolue avec ta force, sans afficher un niveau chiffré.
+              </Text>
+            </View>
+            <StrengthSymbol size={56} evolution={evolution} strength={strengthVal} />
+          </View>
+          {points && points.points_today > 0 ? (
+            <Text style={[typography.small, { marginTop: spacing.md, color: colors.primary, fontWeight: "800" }]}>
+              +{points.points_today} pts aujourd&apos;hui · streak {points.streak_days}j
+            </Text>
+          ) : null}
+        </Card>
+
+        {/* Phase 5: Notifications */}
+        <Card testID="notif-card">
+          <SectionTitle title="Rappels & notifs" action={
+            <TouchableOpacity onPress={() => setNotifModal(true)} testID="edit-notifs">
+              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>
+                Gérer
+              </Text>
+            </TouchableOpacity>
+          } />
+          {reminders.length === 0 ? (
+            <Text style={[typography.small, { marginTop: spacing.sm, color: colors.textMuted }]}>
+              Aucun rappel programmé. Crée tes propres horaires pour séance et check protéines.
+            </Text>
+          ) : (
+            <View style={{ marginTop: spacing.sm, gap: 8 }}>
+              {reminders.map((r) => (
+                <View key={r.id} style={styles.notifRow}>
+                  <Ionicons name={r.kind === "workout" ? "barbell-outline" : "nutrition-outline"} size={16} color={r.enabled ? colors.primary : colors.textMuted} />
+                  <Text style={[typography.body, { flex: 1, color: r.enabled ? colors.textMain : colors.textMuted }]}>
+                    {r.kind === "workout" ? "Séance" : "Check protéines"} · {String(r.hour).padStart(2, "0")}:{String(r.minute).padStart(2, "0")}
+                  </Text>
+                  <View style={[styles.notifPill, { backgroundColor: r.enabled ? colors.primary : colors.border }]}>
+                    <Text style={{ color: r.enabled ? "#fff" : colors.textMuted, fontSize: 10, fontWeight: "800" }}>
+                      {r.enabled ? "ON" : "OFF"}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
+        </Card>
 
         {/* Silhouette + 1RM card (Phase 4) */}
         <Card testID="silhouette-card">
@@ -475,6 +627,99 @@ export default function ProfileTab() {
           </View>
         </View>
       </Modal>
+      {/* Phase 5: Mascot modal */}
+      <Modal visible={mascotModal} transparent animationType="slide" onRequestClose={() => setMascotModal(false)}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHandle} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={styles.modalTitle}>Choisis ta mascotte</Text>
+              <TouchableOpacity onPress={() => setMascotModal(false)} testID="mascot-modal-close">
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <View style={{ marginTop: spacing.md }}>
+              <MascotPicker selected={pickedMascot} onChange={setPickedMascot} evolution={evolution} size={80} />
+            </View>
+            <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg }}>
+              <Button title="Annuler" variant="secondary" onPress={() => setMascotModal(false)} style={{ flex: 1 }} testID="mascot-cancel" />
+              <Button title="Enregistrer" onPress={saveMascot} loading={savingMascot} style={{ flex: 1.4 }} testID="mascot-save" disabled={!pickedMascot} />
+            </View>
+            <View style={{ height: spacing.md }} />
+          </View>
+        </View>
+      </Modal>
+
+      {/* Phase 5: Notifications modal */}
+      <Modal visible={notifModal} transparent animationType="slide" onRequestClose={() => setNotifModal(false)}>
+        <View style={styles.modalBg}>
+          <View style={[styles.modalCard, { maxHeight: "92%" }]}>
+            <View style={styles.modalHandle} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={styles.modalTitle}>Mes rappels</Text>
+              <TouchableOpacity onPress={() => setNotifModal(false)} testID="notif-modal-close">
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <Text style={[typography.small, { marginTop: 4 }]}>
+              Ajoute autant de rappels que tu veux. Aucune notif n&apos;est envoyée sans ta validation.
+            </Text>
+            <ScrollView style={{ maxHeight: 400, marginTop: spacing.md }} contentContainerStyle={{ gap: 8 }}>
+              {reminders.map((r) => (
+                <View key={r.id} style={styles.reminderRow}>
+                  <Ionicons name={r.kind === "workout" ? "barbell-outline" : "nutrition-outline"} size={16} color={colors.primary} />
+                  <TouchableOpacity
+                    onPress={() => { setEditingReminder(r); setShowTimePicker(true); }}
+                    style={styles.reminderTime}
+                    testID={`reminder-time-${r.id}`}
+                  >
+                    <Text style={[typography.h3, { fontSize: 18 }]}>
+                      {String(r.hour).padStart(2, "0")}:{String(r.minute).padStart(2, "0")}
+                    </Text>
+                  </TouchableOpacity>
+                  <Text style={[typography.small, { flex: 1 }]} numberOfLines={1}>
+                    {r.kind === "workout" ? "Séance" : "Protéines"}
+                  </Text>
+                  <Switch
+                    value={r.enabled}
+                    onValueChange={(v) => updateReminder(r.id, { enabled: v })}
+                    trackColor={{ true: colors.primary, false: colors.border }}
+                    thumbColor="#fff"
+                    testID={`reminder-toggle-${r.id}`}
+                  />
+                  <TouchableOpacity onPress={() => removeReminder(r.id)} hitSlop={10} testID={`reminder-remove-${r.id}`}>
+                    <Ionicons name="trash-outline" size={16} color={colors.alert} />
+                  </TouchableOpacity>
+                </View>
+              ))}
+              <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                <Button title="+ Rappel séance" onPress={() => addReminder("workout")} variant="secondary" style={{ flex: 1 }} testID="reminder-add-workout" />
+                <Button title="+ Check protéines" onPress={() => addReminder("protein")} variant="secondary" style={{ flex: 1 }} testID="reminder-add-protein" />
+              </View>
+            </ScrollView>
+            <Button title="Enregistrer" onPress={saveReminders} loading={savingReminders} style={{ marginTop: spacing.lg }} testID="reminders-save" />
+            <View style={{ height: spacing.md }} />
+          </View>
+        </View>
+        {showTimePicker && editingReminder && (
+          <DateTimePicker
+            value={(() => { const d = new Date(); d.setHours(editingReminder.hour); d.setMinutes(editingReminder.minute); return d; })()}
+            mode="time"
+            is24Hour
+            display={Platform.OS === "ios" ? "spinner" : "default"}
+            onChange={(event, selected) => {
+              if (Platform.OS !== "ios") setShowTimePicker(false);
+              if (event.type === "dismissed") { setEditingReminder(null); return; }
+              if (selected) {
+                updateReminder(editingReminder.id, { hour: selected.getHours(), minute: selected.getMinutes() });
+              }
+              if (Platform.OS === "ios") setShowTimePicker(false);
+              setEditingReminder(null);
+            }}
+          />
+        )}
+      </Modal>
+
       {/* Silhouette modal */}
       <Modal visible={silhouetteModal} transparent animationType="slide" onRequestClose={() => setSilhouetteModal(false)}>
         <View style={styles.modalBg}>
@@ -666,4 +911,27 @@ const styles = StyleSheet.create({
   modalHandle: { width: 40, height: 4, backgroundColor: colors.border, borderRadius: 4, alignSelf: "center", marginBottom: spacing.md },
   modalTitle: { fontSize: 22, fontWeight: "700", color: colors.textMain },
   input: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textMain, marginTop: 6 },
+  mascotPlaceholder: {
+    width: 88, height: 88, borderRadius: radius.full,
+    backgroundColor: colors.primaryPale, borderWidth: 1.5, borderColor: colors.primary,
+    alignItems: "center", justifyContent: "center",
+  },
+  notifRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 8, paddingHorizontal: 10,
+    backgroundColor: colors.background, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  notifPill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full },
+  reminderRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    paddingVertical: 8, paddingHorizontal: 12,
+    backgroundColor: colors.background, borderRadius: radius.md,
+    borderWidth: 1, borderColor: colors.border,
+  },
+  reminderTime: {
+    paddingHorizontal: 10, paddingVertical: 4,
+    backgroundColor: colors.primaryPale, borderRadius: radius.sm,
+    borderWidth: 1, borderColor: colors.primary,
+  },
 });

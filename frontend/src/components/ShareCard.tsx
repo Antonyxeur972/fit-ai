@@ -1,26 +1,34 @@
 import { forwardRef } from "react";
 import { View, Text, StyleSheet, Image, Dimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import { Ionicons } from "@expo/vector-icons";
+import Svg, { Path, Defs, Pattern, Rect, Circle } from "react-native-svg";
+import { Mascot, MascotAnimal } from "./Mascot";
+import { StrengthSymbol } from "./StrengthSymbol";
 
 export type ShareCardData = {
-  user_name?: string;
-  date?: string; // e.g. "13 juin 2026"
-  focus?: string; // e.g. "Push · Force"
+  date?: string;
+  focus?: string;
   duration_min?: number;
-  total_volume_kg?: number; // sum of weight × reps × sets
-  exercises_count?: number;
-  prs?: { exercise: string; est_1rm: number; delta_kg?: number }[];
-  best_set?: { exercise: string; weight_kg: number; reps: number };
-  background_image_base64?: string | null; // optional photo background
+  points_today?: number;
+  show_points?: boolean;
+  mascot?: { animal: MascotAnimal; evolution?: 1 | 2 | 3 } | null;
+  background_image_base64?: string | null;
+  background_video_thumb_base64?: string | null;
+  strength_evolution?: 1 | 2 | 3;
+  strength_value?: number; // 0..1
 };
 
 const { width: SCREEN_W } = Dimensions.get("window");
 
 /**
- * Vertical 9:16 story-format card for sharing a workout summary.
- * Cream / dark premium design — pure data, zero motivational fluff.
- * The wrapper view is `collapsable={false}` so react-native-view-shot can capture it.
+ * Phase 5 redesign:
+ *  - Vertical 9:16 story
+ *  - White + green identity, no dark veil
+ *  - "Training du jour" + FIT AI brand
+ *  - NO user name shown
+ *  - Mascot (line-art) + Strength symbol + duration + 💪 emoji
+ *  - Points (optional)
+ *  - Photo / video thumbnail as soft background WITHOUT any grey veil
  */
 export const ShareCard = forwardRef<View, { data: ShareCardData; width?: number }>(
   ({ data, width = Math.min(360, SCREEN_W - 32) }, ref) => {
@@ -31,121 +39,126 @@ export const ShareCard = forwardRef<View, { data: ShareCardData; width?: number 
       month: "long",
       year: "numeric",
     });
+    const bg = data.background_image_base64 || data.background_video_thumb_base64;
+    const evolution = data.mascot?.evolution || data.strength_evolution || 1;
 
     return (
       <View ref={ref} collapsable={false} style={[styles.card, { width, height }]}>
-        {/* Background: photo + dark overlay, or pure dark */}
-        {data.background_image_base64 ? (
+        {/* Background image: NO dark veil. Use a soft white-to-green tint instead so text stays readable. */}
+        {bg ? (
           <>
             <Image
-              source={{ uri: `data:image/jpeg;base64,${data.background_image_base64}` }}
+              source={{ uri: `data:image/jpeg;base64,${bg}` }}
               style={StyleSheet.absoluteFill}
               resizeMode="cover"
             />
+            {/* Subtle white-green wash so text readable but image clearly visible */}
             <LinearGradient
-              colors={["rgba(15,18,16,0.55)", "rgba(15,18,16,0.85)", "rgba(15,18,16,0.97)"]}
+              colors={["rgba(255,255,255,0.45)", "rgba(255,255,255,0.0)", "rgba(74,222,128,0.18)"]}
+              locations={[0, 0.45, 1]}
               style={StyleSheet.absoluteFill}
             />
           </>
         ) : (
           <LinearGradient
-            colors={["#16201A", "#0B0F0C"]}
+            colors={["#FFFFFF", "#EAF7EF", "#D6EFDC"]}
             style={StyleSheet.absoluteFill}
           />
         )}
 
-        {/* Subtle green accent line */}
-        <View style={styles.accentBar} />
+        {/* Decorative pattern lines */}
+        <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+          <Defs>
+            <Pattern id="dots" x="0" y="0" width="16" height="16" patternUnits="userSpaceOnUse">
+              <Circle cx="2" cy="2" r="1" fill="#2D7C3E" opacity="0.08" />
+            </Pattern>
+          </Defs>
+          <Rect width="100%" height="100%" fill="url(#dots)" />
+        </Svg>
 
         {/* Header */}
-        <View style={styles.header}>
+        <View style={styles.headerRow}>
           <View style={styles.brandRow}>
             <View style={styles.brandDot} />
             <Text style={styles.brand}>FIT AI</Text>
           </View>
-          <Text style={styles.date}>{dateStr.toUpperCase()}</Text>
+          <View style={styles.dateBox}>
+            <Text style={styles.date}>{dateStr.toUpperCase()}</Text>
+          </View>
         </View>
 
-        {/* Title block */}
+        {/* Big "Training du jour" title */}
         <View style={styles.titleBlock}>
-          {data.user_name ? (
-            <Text style={styles.helloLabel}>{data.user_name.split(" ")[0].toUpperCase()}</Text>
-          ) : null}
-          <Text style={styles.focus}>{data.focus || "Séance terminée"}</Text>
-          <View style={styles.divider} />
-        </View>
-
-        {/* Hero stats */}
-        <View style={styles.heroRow}>
-          {typeof data.total_volume_kg === "number" && data.total_volume_kg > 0 && (
-            <View style={styles.heroItem}>
-              <Text style={styles.heroValue}>
-                {data.total_volume_kg >= 1000
-                  ? `${(data.total_volume_kg / 1000).toFixed(1)}t`
-                  : `${Math.round(data.total_volume_kg)}`}
-              </Text>
-              <Text style={styles.heroLabel}>
-                {data.total_volume_kg >= 1000 ? "Tonnes levées" : "Kg levés"}
-              </Text>
-            </View>
-          )}
-          {typeof data.duration_min === "number" && data.duration_min > 0 && (
-            <View style={styles.heroItem}>
-              <Text style={styles.heroValue}>{data.duration_min}</Text>
-              <Text style={styles.heroLabel}>Minutes</Text>
-            </View>
-          )}
-          {typeof data.exercises_count === "number" && data.exercises_count > 0 && (
-            <View style={styles.heroItem}>
-              <Text style={styles.heroValue}>{data.exercises_count}</Text>
-              <Text style={styles.heroLabel}>Exercices</Text>
-            </View>
-          )}
-        </View>
-
-        {/* PRs */}
-        {data.prs && data.prs.length > 0 && (
-          <View style={styles.prsBlock}>
-            <View style={styles.prHeader}>
-              <Ionicons name="flash" size={14} color="#4ADE80" />
-              <Text style={styles.prHeaderText}>RECORDS DU JOUR</Text>
-            </View>
-            {data.prs.slice(0, 3).map((p, idx) => (
-              <View key={`${p.exercise}-${idx}`} style={styles.prRow}>
-                <Text style={styles.prName} numberOfLines={1}>
-                  {p.exercise}
-                </Text>
-                <Text style={styles.prValue}>
-                  {p.est_1rm.toFixed(0)}
-                  <Text style={styles.prUnit}> kg</Text>
-                </Text>
-                {typeof p.delta_kg === "number" && p.delta_kg > 0 ? (
-                  <View style={styles.deltaPill}>
-                    <Text style={styles.deltaText}>+{p.delta_kg.toFixed(1)}</Text>
-                  </View>
-                ) : null}
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Best set fallback */}
-        {(!data.prs || data.prs.length === 0) && data.best_set && (
-          <View style={styles.prsBlock}>
-            <View style={styles.prHeader}>
-              <Ionicons name="barbell" size={14} color="#4ADE80" />
-              <Text style={styles.prHeaderText}>MEILLEURE SÉRIE</Text>
-            </View>
-            <Text style={styles.bestSetName} numberOfLines={1}>{data.best_set.exercise}</Text>
-            <Text style={styles.bestSetVal}>
-              {data.best_set.weight_kg} kg <Text style={styles.heroLabel}>×</Text> {data.best_set.reps}
+          <Text style={styles.titleSmall}>TRAINING DU JOUR</Text>
+          {!!data.focus && (
+            <Text style={styles.focus} numberOfLines={2}>
+              {data.focus}
             </Text>
-          </View>
-        )}
+          )}
+          <View style={styles.titleBar} />
+        </View>
 
-        {/* Footer */}
+        {/* Mascot + Strength symbol — central artwork */}
+        <View style={styles.mascotRow}>
+          <View style={styles.mascotCircle}>
+            {data.mascot?.animal ? (
+              <Mascot
+                animal={data.mascot.animal}
+                evolution={evolution}
+                size={140}
+                color="#0F3F1B"
+                strokeWidth={2.4}
+              />
+            ) : (
+              <Mascot animal="lion" evolution={1} size={140} color="#0F3F1B" strokeWidth={2.4} />
+            )}
+          </View>
+          <View style={styles.strengthSlot}>
+            <StrengthSymbol
+              size={64}
+              evolution={evolution}
+              strength={data.strength_value ?? 0.5}
+              color="#2D7C3E"
+            />
+          </View>
+        </View>
+
+        {/* Duration + points row */}
+        <View style={styles.statsRow}>
+          {typeof data.duration_min === "number" && data.duration_min > 0 && (
+            <View style={styles.statChip}>
+              <Text style={styles.statEmoji}>⏱️</Text>
+              <View>
+                <Text style={styles.statValue}>{data.duration_min} min</Text>
+                <Text style={styles.statLabel}>Durée séance</Text>
+              </View>
+            </View>
+          )}
+          <View style={styles.statChip}>
+            <Text style={styles.statEmoji}>💪</Text>
+            <View>
+              <Text style={styles.statValue}>Séance OK</Text>
+              <Text style={styles.statLabel}>Terminée</Text>
+            </View>
+          </View>
+          {data.show_points && typeof data.points_today === "number" && data.points_today > 0 && (
+            <View style={[styles.statChip, styles.pointsChip]}>
+              <Text style={styles.statEmoji}>✨</Text>
+              <View>
+                <Text style={[styles.statValue, { color: "#fff" }]}>+{data.points_today} pts</Text>
+                <Text style={[styles.statLabel, { color: "rgba(255,255,255,0.85)" }]}>Aujourd&apos;hui</Text>
+              </View>
+            </View>
+          )}
+        </View>
+
+        {/* Watermark / footer */}
         <View style={styles.footer}>
-          <Text style={styles.footerTagline}>Performance · pas de fluff.</Text>
+          <View style={styles.watermarkRow}>
+            <View style={styles.brandDotSmall} />
+            <Text style={styles.watermark}>FIT AI</Text>
+          </View>
+          <Text style={styles.footerTagline}>Performance. Pas de fluff.</Text>
         </View>
       </View>
     );
@@ -155,129 +168,82 @@ ShareCard.displayName = "ShareCard";
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: "#0B0F0C",
-    borderRadius: 24,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 28,
     overflow: "hidden",
-    padding: 24,
+    padding: 22,
     justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "rgba(45,124,62,0.18)",
   },
-  accentBar: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 4,
-    backgroundColor: "#4ADE80",
-  },
-  header: {
+  headerRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    zIndex: 5,
   },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  brandDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: "#4ADE80",
+  brandDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#2D7C3E" },
+  brandDotSmall: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#2D7C3E" },
+  brand: { color: "#0F3F1B", fontSize: 16, fontWeight: "900", letterSpacing: 2 },
+  dateBox: {
+    backgroundColor: "rgba(255,255,255,0.85)",
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
+    borderColor: "rgba(45,124,62,0.18)",
   },
-  brand: {
-    color: "#FAFAF8",
-    fontSize: 14,
-    fontWeight: "900",
-    letterSpacing: 2,
-  },
-  date: {
-    color: "#A6B0A8",
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 1.5,
-  },
-  titleBlock: { marginTop: 8 },
-  helloLabel: {
-    color: "#A6B0A8",
-    fontSize: 11,
-    fontWeight: "800",
-    letterSpacing: 2.5,
-    marginBottom: 6,
-  },
+  date: { color: "#2D7C3E", fontSize: 9.5, fontWeight: "800", letterSpacing: 1.5 },
+  titleBlock: { gap: 6, zIndex: 5 },
+  titleSmall: { color: "#2D7C3E", fontSize: 11, fontWeight: "900", letterSpacing: 3 },
   focus: {
-    color: "#FAFAF8",
-    fontSize: 32,
-    fontWeight: "800",
-    lineHeight: 36,
-    letterSpacing: -0.8,
-  },
-  divider: {
-    width: 36,
-    height: 3,
-    backgroundColor: "#4ADE80",
-    marginTop: 12,
-    borderRadius: 2,
-  },
-  heroRow: {
-    flexDirection: "row",
-    gap: 12,
-    paddingVertical: 12,
-  },
-  heroItem: { flex: 1 },
-  heroValue: {
-    color: "#FAFAF8",
-    fontSize: 32,
-    fontWeight: "800",
+    color: "#0F3F1B",
+    fontSize: 30,
+    fontWeight: "900",
     letterSpacing: -1,
     lineHeight: 34,
   },
-  heroLabel: {
-    color: "#7A8A7E",
-    fontSize: 10,
-    fontWeight: "700",
-    letterSpacing: 1.5,
-    marginTop: 2,
-    textTransform: "uppercase",
+  titleBar: { width: 36, height: 4, backgroundColor: "#4ADE80", borderRadius: 2, marginTop: 4 },
+  mascotRow: { alignItems: "center", zIndex: 4, gap: 8 },
+  mascotCircle: {
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: "rgba(255,255,255,0.7)",
+    borderWidth: 2,
+    borderColor: "rgba(45,124,62,0.45)",
+    alignItems: "center",
+    justifyContent: "center",
   },
-  prsBlock: {
-    backgroundColor: "rgba(74, 222, 128, 0.07)",
-    borderWidth: 1,
-    borderColor: "rgba(74, 222, 128, 0.25)",
-    borderRadius: 14,
-    padding: 14,
-    gap: 6,
-  },
-  prHeader: { flexDirection: "row", alignItems: "center", gap: 6 },
-  prHeaderText: {
-    color: "#4ADE80",
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 2,
-  },
-  prRow: {
+  strengthSlot: { marginTop: -16 },
+  statsRow: { flexDirection: "row", gap: 8, flexWrap: "wrap", zIndex: 5 },
+  statChip: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: "rgba(255,255,255,0.92)",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(45,124,62,0.22)",
+    flexGrow: 1,
+    minWidth: 110,
   },
-  prName: { color: "#D9E0DA", fontSize: 14, fontWeight: "600", flex: 1 },
-  prValue: { color: "#FAFAF8", fontSize: 20, fontWeight: "800" },
-  prUnit: { fontSize: 11, color: "#7A8A7E", fontWeight: "700" },
-  deltaPill: {
-    backgroundColor: "#4ADE80",
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  deltaText: { color: "#0B0F0C", fontSize: 10, fontWeight: "800" },
-  bestSetName: { color: "#D9E0DA", fontSize: 14, fontWeight: "600" },
-  bestSetVal: { color: "#FAFAF8", fontSize: 28, fontWeight: "800", letterSpacing: -0.6 },
+  pointsChip: { backgroundColor: "#2D7C3E", borderColor: "#2D7C3E" },
+  statEmoji: { fontSize: 22 },
+  statValue: { fontSize: 15, fontWeight: "900", color: "#0F3F1B" },
+  statLabel: { fontSize: 9.5, fontWeight: "700", color: "#5A6B5E", letterSpacing: 0.5, textTransform: "uppercase" },
   footer: {
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+    zIndex: 5,
   },
-  footerTagline: {
-    color: "#A6B0A8",
-    fontSize: 11,
-    fontWeight: "600",
-    letterSpacing: 0.5,
-  },
+  watermarkRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  watermark: { color: "#0F3F1B", fontSize: 12, fontWeight: "900", letterSpacing: 2 },
+  footerTagline: { color: "#2D7C3E", fontSize: 10, fontWeight: "700", letterSpacing: 0.5 },
 });
 
 export default ShareCard;

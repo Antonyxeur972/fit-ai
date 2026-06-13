@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Modal,
   View,
@@ -9,12 +9,15 @@ import {
   Alert,
   ActivityIndicator,
   Platform,
+  Switch,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { captureRef } from "react-native-view-shot";
 import * as MediaLibrary from "expo-media-library";
 import * as Sharing from "expo-sharing";
 import * as ImagePicker from "expo-image-picker";
+import * as VideoThumbnails from "expo-video-thumbnails";
+import * as FileSystem from "expo-file-system/legacy";
 import { ShareCard, ShareCardData } from "./ShareCard";
 import { colors, spacing, radius, typography } from "../theme";
 
@@ -31,9 +34,22 @@ export function ShareCardModal({
   const [bgPhoto, setBgPhoto] = useState<string | null | undefined>(
     data.background_image_base64
   );
-  const [busy, setBusy] = useState<"save" | "share" | null>(null);
+  const [bgVideoUri, setBgVideoUri] = useState<string | null>(null);
+  const [bgVideoThumb, setBgVideoThumb] = useState<string | null>(null);
+  const [showPoints, setShowPoints] = useState<boolean>(!!data.show_points);
+  const [busy, setBusy] = useState<"save" | "share" | "shareVideo" | null>(null);
 
-  const pickBackground = async () => {
+  // Reset when reopening
+  useEffect(() => {
+    if (visible) {
+      setBgPhoto(data.background_image_base64 || null);
+      setBgVideoUri(null);
+      setBgVideoThumb(null);
+      setShowPoints(!!data.show_points);
+    }
+  }, [visible, data.background_image_base64, data.show_points]);
+
+  const pickBackground = async (mode: "image" | "video") => {
     try {
       const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!perm.granted) {
@@ -41,20 +57,48 @@ export function ShareCardModal({
         return;
       }
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        quality: 0.5,
-        base64: true,
-        allowsEditing: true,
-        aspect: [9, 16],
+        mediaTypes:
+          mode === "image"
+            ? ImagePicker.MediaTypeOptions.Images
+            : ImagePicker.MediaTypeOptions.Videos,
+        quality: 0.6,
+        base64: mode === "image",
+        allowsEditing: mode === "image",
+        aspect: mode === "image" ? [9, 16] : undefined,
+        videoMaxDuration: 60,
       });
-      if (result.canceled || !result.assets?.[0]?.base64) return;
-      setBgPhoto(result.assets[0].base64);
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      if (mode === "image") {
+        setBgVideoUri(null);
+        setBgVideoThumb(null);
+        setBgPhoto(asset.base64 || null);
+      } else {
+        setBgPhoto(null);
+        setBgVideoUri(asset.uri);
+        // Extract a thumbnail to render inside the card
+        try {
+          const { uri: thumbUri } = await VideoThumbnails.getThumbnailAsync(asset.uri, {
+            time: 500,
+            quality: 0.7,
+          });
+          // Read the thumb as base64 for the captured composite
+          const base64 = await FileSystem.readAsStringAsync(thumbUri, { encoding: FileSystem.EncodingType.Base64 });
+          setBgVideoThumb(base64);
+        } catch (e) {
+          console.warn("video thumb", e);
+        }
+      }
     } catch (e) {
       console.warn("pickBackground", e);
     }
   };
 
-  const removeBackground = () => setBgPhoto(null);
+  const removeBackground = () => {
+    setBgPhoto(null);
+    setBgVideoUri(null);
+    setBgVideoThumb(null);
+  };
 
   const captureCard = async (): Promise<string | null> => {
     if (!cardRef.current) return null;
@@ -80,19 +124,13 @@ export function ShareCardModal({
         return;
       }
       if (Platform.OS === "web") {
-        // Open in new tab — web fallback
-        if (typeof window !== "undefined") {
-          window.open(uri, "_blank");
-        }
+        if (typeof window !== "undefined") window.open(uri, "_blank");
         Alert.alert("Image générée", "L'aperçu est ouvert dans un nouvel onglet.");
         return;
       }
       const perm = await MediaLibrary.requestPermissionsAsync();
       if (!perm.granted) {
-        Alert.alert(
-          "Photos",
-          "Autorise l'accès à tes photos pour enregistrer la story."
-        );
+        Alert.alert("Photos", "Autorise l'accès à tes photos pour enregistrer la story.");
         return;
       }
       await MediaLibrary.saveToLibraryAsync(uri);
@@ -105,7 +143,7 @@ export function ShareCardModal({
     }
   };
 
-  const shareNow = async () => {
+  const shareImage = async () => {
     setBusy("share");
     try {
       const uri = await captureCard();
@@ -124,10 +162,39 @@ export function ShareCardModal({
         UTI: "public.jpeg",
       });
     } catch (e) {
-      console.warn("shareNow", e);
+      console.warn("shareImage", e);
     } finally {
       setBusy(null);
     }
+  };
+
+  const shareVideo = async () => {
+    if (!bgVideoUri) return;
+    setBusy("shareVideo");
+    try {
+      const ok = await Sharing.isAvailableAsync();
+      if (!ok) {
+        Alert.alert("Partage indisponible", "Le partage natif n'est pas disponible.");
+        return;
+      }
+      await Sharing.shareAsync(bgVideoUri, {
+        dialogTitle: "Partager ma vidéo (FIT AI)",
+        mimeType: "video/mp4",
+        UTI: "public.movie",
+      });
+    } catch (e) {
+      console.warn("shareVideo", e);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Compose the final data shown in the card
+  const cardData: ShareCardData = {
+    ...data,
+    show_points: showPoints,
+    background_image_base64: bgPhoto || null,
+    background_video_thumb_base64: bgVideoThumb,
   };
 
   return (
@@ -144,33 +211,55 @@ export function ShareCardModal({
 
           <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
             <View style={styles.cardWrap}>
-              <ShareCard
-                ref={cardRef}
-                data={{ ...data, background_image_base64: bgPhoto || null }}
+              <ShareCard ref={cardRef} data={cardData} />
+            </View>
+
+            <View style={styles.optRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={typography.body}>Afficher mes points du jour</Text>
+                <Text style={[typography.small, { color: colors.textMuted }]}>
+                  {data.points_today ? `+${data.points_today} pts gagnés aujourd'hui` : "Aucun point gagné aujourd'hui."}
+                </Text>
+              </View>
+              <Switch
+                value={showPoints}
+                onValueChange={setShowPoints}
+                disabled={!data.points_today}
+                trackColor={{ true: colors.primary, false: colors.border }}
+                thumbColor={"#fff"}
+                testID="share-points-toggle"
               />
             </View>
 
             <View style={styles.bgRow}>
               <TouchableOpacity
-                onPress={pickBackground}
+                onPress={() => pickBackground("image")}
                 style={styles.bgBtn}
-                testID="share-bg-pick"
+                testID="share-bg-image"
               >
-                <Ionicons
-                  name={bgPhoto ? "refresh" : "image-outline"}
-                  size={16}
-                  color={colors.primary}
-                />
-                <Text style={styles.bgBtnText}>
-                  {bgPhoto ? "Changer la photo" : "Ajouter une photo de fond"}
-                </Text>
+                <Ionicons name="image-outline" size={16} color={colors.primary} />
+                <Text style={styles.bgBtnText}>Photo de fond</Text>
               </TouchableOpacity>
-              {bgPhoto ? (
-                <TouchableOpacity onPress={removeBackground} testID="share-bg-remove">
-                  <Ionicons name="trash-outline" size={18} color={colors.alert} />
+              <TouchableOpacity
+                onPress={() => pickBackground("video")}
+                style={styles.bgBtn}
+                testID="share-bg-video"
+              >
+                <Ionicons name="videocam-outline" size={16} color={colors.primary} />
+                <Text style={styles.bgBtnText}>Vidéo</Text>
+              </TouchableOpacity>
+              {(bgPhoto || bgVideoUri) ? (
+                <TouchableOpacity onPress={removeBackground} style={styles.bgBtnGhost} testID="share-bg-remove">
+                  <Ionicons name="trash-outline" size={16} color={colors.alert} />
                 </TouchableOpacity>
               ) : null}
             </View>
+
+            {bgVideoUri ? (
+              <Text style={[typography.small, { color: colors.textMuted, marginTop: -spacing.sm }]}>
+                Vidéo sélectionnée — l&apos;aperçu utilise la 1ère frame. Tu peux partager la vidéo originale (avec filigrane visuel sur l&apos;aperçu image) ou l&apos;image composite.
+              </Text>
+            ) : null}
 
             <View style={styles.actions}>
               <TouchableOpacity
@@ -187,7 +276,7 @@ export function ShareCardModal({
                 <Text style={styles.actionTxtSecondary}>Enregistrer</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                onPress={shareNow}
+                onPress={shareImage}
                 style={[styles.actionBtn, styles.actionPrimary]}
                 disabled={busy !== null}
                 testID="share-now"
@@ -197,11 +286,28 @@ export function ShareCardModal({
                 ) : (
                   <Ionicons name="share-social-outline" size={18} color="#fff" />
                 )}
-                <Text style={styles.actionTxtPrimary}>Partager</Text>
+                <Text style={styles.actionTxtPrimary}>Partager l&apos;image</Text>
               </TouchableOpacity>
             </View>
+
+            {bgVideoUri ? (
+              <TouchableOpacity
+                onPress={shareVideo}
+                style={[styles.actionBtn, styles.actionVideo]}
+                disabled={busy !== null}
+                testID="share-video"
+              >
+                {busy === "shareVideo" ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Ionicons name="videocam" size={18} color="#fff" />
+                )}
+                <Text style={styles.actionTxtPrimary}>Partager la vidéo originale</Text>
+              </TouchableOpacity>
+            ) : null}
+
             <Text style={styles.disclaimer}>
-              Format vertical 9:16, optimisé pour Stories Instagram, WhatsApp, etc.
+              Format 9:16 (Stories Instagram, WhatsApp…). Fond blanc / vert FIT AI.
             </Text>
             <View style={{ height: spacing.xl }} />
           </ScrollView>
@@ -238,13 +344,14 @@ const styles = StyleSheet.create({
   title: { ...typography.h3, fontWeight: "700" },
   scroll: { paddingBottom: spacing.lg },
   cardWrap: { alignItems: "center", marginBottom: spacing.lg },
-  bgRow: {
+  optRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
+    gap: spacing.sm,
+    paddingHorizontal: 4,
     marginBottom: spacing.md,
   },
+  bgRow: { flexDirection: "row", gap: spacing.sm, marginBottom: spacing.md, flexWrap: "wrap" },
   bgBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -256,10 +363,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.primary,
   },
+  bgBtnGhost: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: colors.surface,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.alert,
+  },
   bgBtnText: { color: colors.primary, fontWeight: "700", fontSize: 13 },
   actions: { flexDirection: "row", gap: spacing.sm },
   actionBtn: {
-    flex: 1,
     paddingVertical: 14,
     borderRadius: radius.md,
     flexDirection: "row",
@@ -268,11 +382,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   actionSecondary: {
+    flex: 1,
     backgroundColor: colors.surface,
     borderWidth: 1.5,
     borderColor: colors.primary,
   },
-  actionPrimary: { backgroundColor: colors.primary },
+  actionPrimary: { flex: 1.4, backgroundColor: colors.primary },
+  actionVideo: { backgroundColor: "#0F3F1B", marginTop: spacing.sm },
   actionTxtSecondary: { color: colors.primary, fontWeight: "700", fontSize: 15 },
   actionTxtPrimary: { color: "#fff", fontWeight: "800", fontSize: 15 },
   disclaimer: {

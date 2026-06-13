@@ -72,6 +72,32 @@ const REST_DEFAULTS: Record<string, number> = {
   endurance: 45,
 };
 
+// Phase 5 — C4: red-highlight AI-recommended exercises per session type.
+// Heuristic based on standard strength science: big compounds for Force,
+// explosive/plyo for Puissance, hypertrophy compounds + isolations for Volume.
+const RECO_KEYWORDS: Record<string, string[]> = {
+  force: [
+    "squat", "soulevé", "deadlift", "développé couché", "bench", "rowing barre",
+    "tractions lestées", "développé militaire barre", "front squat", "rdl",
+  ],
+  puissance: [
+    "épaulé", "arraché", "power clean", "snatch", "saut", "plyo", "kettlebell swing",
+    "push press", "med ball", "burpee", "explosif", "jumping",
+  ],
+  volume: [
+    "développé couché", "développé incliné", "développé haltères", "tractions",
+    "rowing", "leg press", "hack squat", "curl", "extension", "écarté",
+    "élévations", "leg curl", "leg extension", "poulie",
+  ],
+};
+
+export function isRecommendedFor(exerciseName: string, sessionType?: string): boolean {
+  if (!exerciseName || !sessionType) return false;
+  const lower = exerciseName.toLowerCase();
+  const keys = RECO_KEYWORDS[sessionType.toLowerCase()] || [];
+  return keys.some((k) => lower.includes(k));
+}
+
 export default function Training() {
   const { user } = useAuth();
   const today = new Date().toISOString().slice(0, 10);
@@ -174,55 +200,28 @@ export default function Training() {
 
   const completeWorkout = async (id: string) => {
     await api(`/workouts/${id}/complete`, { method: "POST" });
-    // Build share card data from session perfs (best PR per exercise)
+    // Build share card data
     try {
       const w = week.find((x) => x.id === id);
-      const perfs = await api<{ items: Perf[]; personal_bests: Perf[] }>(`/perf/recent?limit=200`);
-      const sessionPerfs = perfs.items.filter((p) => (p as any).workout_id === id);
       const focus = w?.focus || w?.title || "Séance";
       const sType = (w?.session_type || "").toString();
       const sLabel = sType ? ` · ${sType.charAt(0).toUpperCase() + sType.slice(1)}` : "";
-      // Volume = sum(weight * reps * sets) from this session
-      const total_volume_kg = sessionPerfs.reduce(
-        (s, p) => s + (p.weight_kg || 0) * (p.reps || 0) * (p.sets || 1),
-        0
-      );
-      // PRs = max est_1rm per exercise in this session
-      const bestByEx: Record<string, Perf> = {};
-      for (const p of sessionPerfs) {
-        if (!bestByEx[p.exercise_name] || bestByEx[p.exercise_name].est_1rm < p.est_1rm) {
-          bestByEx[p.exercise_name] = p;
-        }
-      }
-      // Compute delta vs previous best
-      const prs = Object.values(bestByEx).map((p) => {
-        const prev = perfs.items
-          .filter(
-            (x) =>
-              x.exercise_name === p.exercise_name &&
-              (x as any).workout_id !== id &&
-              new Date(x.created_at).getTime() < new Date(p.created_at).getTime()
-          )
-          .reduce((mx, x) => Math.max(mx, x.est_1rm || 0), 0);
-        return {
-          exercise: p.exercise_name,
-          est_1rm: p.est_1rm,
-          delta_kg: prev > 0 ? Math.max(0, +(p.est_1rm - prev).toFixed(1)) : undefined,
-        };
-      }).sort((a, b) => b.est_1rm - a.est_1rm);
-      // Best set fallback
-      const bestSet = sessionPerfs.sort(
-        (a, b) => (b.weight_kg * b.reps) - (a.weight_kg * a.reps)
-      )[0];
+      // Phase 5: fetch points/strength to enrich the share card
+      let evolution: 1 | 2 | 3 = 1;
+      let strength_value = 0.4;
+      let points_today = 0;
+      try {
+        const ps = await api<{ evolution: 1 | 2 | 3; points_in_level: number; level_span: number; points_today: number }>("/points/summary");
+        evolution = (ps.evolution as 1 | 2 | 3) || 1;
+        strength_value = ps.level_span > 0 ? Math.min(1, ps.points_in_level / ps.level_span) : 0.5;
+        points_today = ps.points_today || 0;
+      } catch {}
       setShareData({
         focus: `${focus}${sLabel}`,
         duration_min: w?.duration_min,
-        total_volume_kg: total_volume_kg > 0 ? total_volume_kg : undefined,
-        exercises_count: w?.exercises?.filter((e) => e.checked !== false).length || 0,
-        prs: prs.length ? prs : undefined,
-        best_set: !prs.length && bestSet
-          ? { exercise: bestSet.exercise_name, weight_kg: bestSet.weight_kg, reps: bestSet.reps }
-          : undefined,
+        evolution,
+        strength_value,
+        points_today,
       });
       setShareOpen(true);
     } catch (e) {
@@ -653,18 +652,29 @@ export default function Training() {
                 <Text style={typography.small}>{todayWorkout.duration_min} min · {todayExercises.length} exercices</Text>
               </View>
             </View>
-            {todayExercises.map((ex, i) => (
-              <TouchableOpacity key={`${ex.name}-${i}`} style={styles.exerciseRow} onPress={() => openPerf(todayWorkout, ex)} testID={`exercise-${i}`} activeOpacity={0.7}>
-                <View style={styles.exerciseNum}>
-                  <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>{i + 1}</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[typography.body, { fontWeight: "600" }]}>{ex.name}</Text>
-                  <Text style={typography.small}>{ex.sets} × {ex.reps} · repos {ex.rest_s}s</Text>
-                </View>
-                <Ionicons name="add-circle-outline" size={22} color={colors.primary} />
-              </TouchableOpacity>
-            ))}
+            {todayExercises.map((ex, i) => {
+              const reco = isRecommendedFor(ex.name, todayWorkout?.session_type);
+              return (
+                <TouchableOpacity key={`${ex.name}-${i}`} style={styles.exerciseRow} onPress={() => openPerf(todayWorkout, ex)} testID={`exercise-${i}`} activeOpacity={0.7}>
+                  <View style={[styles.exerciseNum, reco && { backgroundColor: "#FBDDDB" }]}>
+                    <Text style={[typography.small, { color: reco ? "#A12A22" : colors.primary, fontWeight: "700" }]}>{i + 1}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      <Text style={[typography.body, { fontWeight: "600", color: reco ? "#A12A22" : colors.textMain }]}>{ex.name}</Text>
+                      {reco && (
+                        <View style={styles.recoBadge}>
+                          <Ionicons name="flame" size={9} color="#A12A22" />
+                          <Text style={styles.recoBadgeTxt}>RECO IA</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={typography.small}>{ex.sets} × {ex.reps} · repos {ex.rest_s}s</Text>
+                  </View>
+                  <Ionicons name="add-circle-outline" size={22} color={reco ? "#A12A22" : colors.primary} />
+                </TouchableOpacity>
+              );
+            })}
             <Button
               title={todayWorkout.completed ? "Séance terminée ✓" : "Marquer comme terminée"}
               variant={todayWorkout.completed ? "secondary" : "primary"}
@@ -675,40 +685,28 @@ export default function Training() {
             />
             {todayWorkout.completed && (
               <Button
-                title="Partager mes perfs"
+                title="Partager ma performance"
                 variant="primary"
                 onPress={async () => {
-                  // Rebuild share data from history
                   try {
-                    const perfs = await api<{ items: Perf[] }>(`/perf/recent?limit=200`);
-                    const sessionPerfs = perfs.items.filter((p) => (p as any).workout_id === todayWorkout.id);
                     const focus = todayWorkout.focus || todayWorkout.title || "Séance";
                     const sType = (todayWorkout.session_type || "").toString();
                     const sLabel = sType ? ` · ${sType.charAt(0).toUpperCase() + sType.slice(1)}` : "";
-                    const total_volume_kg = sessionPerfs.reduce(
-                      (s, p) => s + (p.weight_kg || 0) * (p.reps || 0) * (p.sets || 1), 0,
-                    );
-                    const bestByEx: Record<string, Perf> = {};
-                    for (const p of sessionPerfs) {
-                      if (!bestByEx[p.exercise_name] || bestByEx[p.exercise_name].est_1rm < p.est_1rm) {
-                        bestByEx[p.exercise_name] = p;
-                      }
-                    }
-                    const prs = Object.values(bestByEx).map((p) => ({
-                      exercise: p.exercise_name, est_1rm: p.est_1rm,
-                    })).sort((a, b) => b.est_1rm - a.est_1rm);
-                    const bestSet = sessionPerfs.sort(
-                      (a, b) => (b.weight_kg * b.reps) - (a.weight_kg * a.reps),
-                    )[0];
+                    let evolution: 1 | 2 | 3 = 1;
+                    let strength_value = 0.4;
+                    let points_today = 0;
+                    try {
+                      const ps = await api<{ evolution: 1 | 2 | 3; points_in_level: number; level_span: number; points_today: number }>("/points/summary");
+                      evolution = (ps.evolution as 1 | 2 | 3) || 1;
+                      strength_value = ps.level_span > 0 ? Math.min(1, ps.points_in_level / ps.level_span) : 0.5;
+                      points_today = ps.points_today || 0;
+                    } catch {}
                     setShareData({
                       focus: `${focus}${sLabel}`,
                       duration_min: todayWorkout.duration_min,
-                      total_volume_kg: total_volume_kg > 0 ? total_volume_kg : undefined,
-                      exercises_count: todayWorkout.exercises.filter((e) => e.checked !== false).length,
-                      prs: prs.length ? prs : undefined,
-                      best_set: !prs.length && bestSet
-                        ? { exercise: bestSet.exercise_name, weight_kg: bestSet.weight_kg, reps: bestSet.reps }
-                        : undefined,
+                      evolution,
+                      strength_value,
+                      points_today,
                     });
                     setShareOpen(true);
                   } catch (e) {
@@ -1169,19 +1167,30 @@ export default function Training() {
                   {list.map((ex) => {
                     const inWk = editWorkout?.exercises.find((e) => e.name === ex.name);
                     const isOn = !!inWk && inWk.checked !== false;
+                    const reco = isRecommendedFor(ex.name, editWorkout?.session_type);
                     return (
                       <TouchableOpacity
                         key={ex.id}
                         onPress={() => toggleExerciseInEditor(ex.name)}
-                        style={[styles.exCheck, isOn && styles.exCheckOn]}
+                        style={[styles.exCheck, isOn && styles.exCheckOn, reco && !isOn && styles.exCheckReco]}
                         testID={`editor-ex-${ex.id}`}
                         activeOpacity={0.7}
                       >
-                        <View style={[styles.checkbox, isOn && styles.checkboxOn]}>
+                        <View style={[styles.checkbox, isOn && styles.checkboxOn, reco && !isOn && { borderColor: "#A12A22" }]}>
                           {isOn && <Ionicons name="checkmark" size={14} color="#fff" />}
                         </View>
                         <View style={{ flex: 1 }}>
-                          <Text style={[typography.body, { fontWeight: isOn ? "700" : "500" }]}>{ex.name}</Text>
+                          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            <Text style={[typography.body, { fontWeight: isOn ? "700" : reco ? "700" : "500", color: reco ? "#A12A22" : colors.textMain }]}>
+                              {ex.name}
+                            </Text>
+                            {reco && (
+                              <View style={styles.recoBadge}>
+                                <Ionicons name="flame" size={9} color="#A12A22" />
+                                <Text style={styles.recoBadgeTxt}>RECO IA</Text>
+                              </View>
+                            )}
+                          </View>
                           <Text style={typography.small}>{ex.equipment}</Text>
                         </View>
                       </TouchableOpacity>
@@ -1280,7 +1289,13 @@ export default function Training() {
         visible={shareOpen}
         onClose={() => setShareOpen(false)}
         data={{
-          user_name: user?.name,
+          mascot: user?.mascot ? {
+            animal: user.mascot.animal,
+            evolution: shareData?.evolution || 1,
+          } : null,
+          strength_evolution: shareData?.evolution || 1,
+          strength_value: shareData?.strength_value || 0.5,
+          points_today: shareData?.points_today || 0,
           ...(shareData || {}),
         }}
       />
@@ -1334,6 +1349,9 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
   focusBadge: { width: 44, height: 44, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center", marginRight: spacing.md },
   exerciseRow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
+  recoBadge: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: "#FBDDDB", borderRadius: radius.full, borderWidth: 1, borderColor: "#E58880" },
+  recoBadgeTxt: { fontSize: 9, fontWeight: "900", color: "#A12A22", letterSpacing: 0.5 },
+  exCheckReco: { borderColor: "#E58880", backgroundColor: "#FFF6F5" },
   exerciseNum: { width: 32, height: 32, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center", marginRight: spacing.md },
   weekRow: { flexDirection: "row", alignItems: "center", backgroundColor: colors.surface, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },
   weekRowToday: { borderColor: colors.primary, backgroundColor: colors.primaryPale },

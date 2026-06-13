@@ -119,7 +119,211 @@ user_problem_statement: |
      ET partager.
 
 backend:
-  - task: "PUT /users/me/silhouette (save sex+level 1..5)"
+  - task: "Phase 5: PUT /users/me/mascot"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Validates animal in {lion,tigre,loup,ours,aigle} and saves to users.mascot."
+  - task: "Phase 5: PUT /users/me/notif-prefs"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Accepts list of reminders, caps at 8, clamps hour/minute/days, persists to users.notif_prefs."
+  - task: "Phase 5: GET /points/summary"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Aggregates total points + today's points. Computes level (1..10) from cumulative threshold, evolution (1..3), streak in days, recent 5 events."
+  - task: "Phase 5: auto-award points on workout/meal/challenge"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "/workouts/{id}/complete awards workout_completed + detects PRs from exercise_perf + streak bonus. /challenges/check-day awards challenge_day. /dashboard/day awards protein_target_hit and calories_on_track when daily totals are within thresholds. All idempotent per (user,date,reason,key). Combo bonus triggers at 3+ goals/day."
+  - task: "Phase 5: POST /transformations accepts taken_at + Phase 4 carry-overs (no AI, DELETE)"
+    implemented: true
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "User can set the photo date via taken_at (YYYY-MM-DD)."
+
+frontend:
+  - task: "Phase 5: Mascot SVG library + picker (5 animals × 3 evolution stages)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/Mascot.tsx, MascotPicker.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Stylized line-art SVGs, no fill. Picker is horizontal scroll with active highlight."
+  - task: "Phase 5: Strength symbol (no level number visible)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/StrengthSymbol.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Shield + ring that thickens with strength and adds laurels at evolution 3. Never displays a numeric level."
+  - task: "Phase 5: Motivation phrases (fixed bank, contextual)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/lib/motivation.ts"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "30+ phrases en français, no AI calls. Rotates daily via day-of-year seed."
+  - task: "Phase 5: Notifications scheduler (expo-notifications, local, multiple times)"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/lib/notifications.ts"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Weekly triggers per day-of-week + hour/minute. Cancels all and reschedules on save."
+  - task: "Phase 5: Onboarding step 5 — mascot picker"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/onboarding.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Onboarding now has 7 steps. Mascot is between silhouette and 1RM."
+  - task: "Phase 5: Profile mascot card + notif rappels card + force/strength widget"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(tabs)/profile.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Two new cards above silhouette. Mascot modal + Notif modal (add/remove/toggle, native time picker). Strength symbol shown but no level number visible."
+  - task: "Phase 5: Dashboard hero card with mascot + strength + share + quote"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(tabs)/dashboard.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "New hero card at top of Aujourd'hui: strength symbol + motivational quote (fixed bank) + Partager ma performance button. Avatar in header switches to user's mascot."
+  - task: "Phase 5: Share Card refonte W/G + mascot + video support"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/src/components/ShareCard.tsx, ShareCardModal.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Card refonte: white/green dotted background, FIT AI brand, no user name, large mascot (line-art), strength symbol, duration, 💪 'Séance OK', optional +pts toggle. Photo bg no longer has grey veil. Video bg supported: extracts first frame thumbnail via expo-video-thumbnails for the composite image, and a separate 'Partager la vidéo originale' action shares the raw mp4 via expo-sharing."
+  - task: "Phase 5: C4 — Red highlight for AI-recommended exercises"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(tabs)/training.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Replaced green dot. isRecommendedFor() uses keywords per session type (Force/Puissance/Volume). Today exercises + editor library both show a red 'RECO IA' badge with flame icon."
+  - task: "Phase 5: C6 — Private gallery swipe-to-reveal + date picker + no labels"
+    implemented: true
+    working: "NA"
+    file: "/app/frontend/app/(tabs)/progress.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Removed front/back/side chips. Added DateTimePicker for taken_at. Each thumbnail is now a green opaque tile that the user has to drag horizontally to reveal. Compare panes also use SwipeRevealPhoto for both sides."
+  - task: "Phase 5: C5 — Workout source unification (dashboard ↔ calendar)"
+    implemented: false
+    working: "NA"
+    file: "/app/backend/server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+      - working: "NA"
+        agent: "main"
+        comment: "Both /workouts/today and /dashboard/day and /workouts/calendar already query the same workouts collection by date. Visual desync was due to legacy generated week vs new Phase 2bis program. Documenting as monitor: if user reports another desync, derive today's workout from program structure instead."
+
+metadata:
+  created_by: "main_agent"
+  version: "1.0"
+  test_sequence: 11
+  run_ui: true
+
+test_plan:
+  current_focus:
+    - "PUT /users/me/mascot validates animals + saves"
+    - "PUT /users/me/notif-prefs persists multiple reminders, clamps values"
+    - "GET /points/summary computes level/evolution/streak"
+    - "Auto-award on /workouts/{id}/complete (workout_completed + PR + streak)"
+    - "Auto-award protein/calorie targets in /dashboard/day"
+    - "POST /transformations honors taken_at"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
+
+agent_communication:
+  - agent: "main"
+    message: |
+      Phase 5 implemented. Heavy frontend additions (Mascot SVG ×15, Strength symbol, Notifs,
+      Share Card refonte, Swipe gallery, Red reco badges, Dashboard hero, Onboarding step 5).
+      Backend extended: mascot, notif_prefs, points/levels with auto-award hooks, transformation
+      taken_at. TypeScript clean, frontend bundles successfully. Need backend test priority list
+      validation. The /transformations endpoint now stores the user-provided date.
     implemented: true
     working: true
     file: "/app/backend/server.py"
