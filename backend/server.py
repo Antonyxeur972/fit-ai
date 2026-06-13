@@ -228,6 +228,23 @@ class RecipeFromIngredientsRequest(BaseModel):
     goal: Optional[str] = None  # "cutting" | "bulking" | "maintenance" | None
 
 
+class ProgramCreateRequest(BaseModel):
+    weeks: int  # 4-24
+    frequency: int  # 3 | 5 | 7
+    split: str  # "ppl" | "fullbody" | "split"
+    goal_label: Optional[str] = "Hypertrophie"
+    cycle_pattern: Optional[List[str]] = None  # default ["volume", "volume", "force", "puissance"]
+
+
+class ProgramDayUpdate(BaseModel):
+    focus: Optional[str] = None
+    exercises: List[Dict[str, Any]]  # list of {name, sets, reps, rest_s, category?}
+
+
+class AiExerciseRequest(BaseModel):
+    description: str
+
+
 class WorkoutSession(BaseModel):
     id: str
     user_id: str
@@ -775,6 +792,85 @@ def generate_week_plan(profile: dict, session_type: str = "volume") -> List[Dict
             }
         )
     return plan
+
+
+# --- Program (multi-week) generation ---
+# Curated blueprints per focus name.
+FOCUS_BLUEPRINTS: Dict[str, List[str]] = {
+    "Push": ["Développé couché barre", "Développé incliné haltères", "Dips lestés (penché avant)", "Élévations latérales", "Extensions triceps poulie"],
+    "Pull": ["Tractions pronation", "Rowing barre (Yates / Pendlay)", "Tirage horizontal poulie", "Curl barre", "Curl marteau"],
+    "Legs": ["Squat barre arrière", "Soulevé de terre roumain", "Presse à cuisses", "Fentes avant haltères", "Mollets debout machine"],
+    "FullBody": ["Squat barre arrière", "Développé couché barre", "Rowing barre (Yates / Pendlay)", "Développé militaire barre", "Crunchs"],
+    "Pectoraux": ["Développé couché barre", "Développé incliné haltères", "Écarté couché haltères", "Pec-deck (butterfly)", "Pompes"],
+    "Dos": ["Tractions pronation", "Soulevé de terre barre", "Rowing barre (Yates / Pendlay)", "Tirage vertical poulie", "Shrugs (trapèzes)"],
+    "Épaules": ["Développé militaire barre", "Élévations latérales", "Élévations frontales", "Oiseau (rear delt fly)", "Rotations externes"],
+    "Bras": ["Curl barre", "Curl marteau", "Extensions triceps poulie", "Dips triceps", "Curl pupitre"],
+    "Jambes": ["Squat barre arrière", "Soulevé de terre roumain", "Fentes avant haltères", "Leg curl machine", "Mollets debout machine"],
+    "Core": ["Crunchs", "Russian twist", "Leg raises", "Planche", "Planche latérale"],
+    "Cardio": ["Marche rapide", "Course intermittente", "Burpees", "Mountain climbers"],
+    "Repos actif": ["Marche rapide", "Mobilité hanche / épaule"],
+}
+
+
+def _focus_sequence(frequency: int, split: str) -> List[str]:
+    sp = (split or "ppl").lower()
+    if sp == "fullbody":
+        if frequency == 3:
+            return ["FullBody", "FullBody", "FullBody"]
+        if frequency == 5:
+            return ["FullBody"] * 5
+        return ["FullBody"] * 6 + ["Cardio"]
+    if sp == "split":
+        if frequency == 3:
+            return ["Push", "Pull", "Legs"]
+        if frequency == 5:
+            return ["Pectoraux", "Dos", "Épaules", "Bras", "Jambes"]
+        return ["Pectoraux", "Dos", "Épaules", "Bras", "Jambes", "Core", "Cardio"]
+    # PPL default
+    if frequency == 3:
+        return ["Push", "Pull", "Legs"]
+    if frequency == 5:
+        return ["Push", "Pull", "Legs", "Push", "Pull"]
+    return ["Push", "Pull", "Legs", "Push", "Pull", "Legs", "Repos actif"]
+
+
+def _build_day_exercises(focus: str, session_type: str) -> List[Dict[str, Any]]:
+    st = SESSION_TYPES.get(session_type, SESSION_TYPES["volume"])
+    sets = st["sets"]
+    reps = st["reps"]
+    rest_s = st["rest_s"]
+    names = FOCUS_BLUEPRINTS.get(focus, FOCUS_BLUEPRINTS["FullBody"])
+    return [
+        {"name": n, "sets": sets, "reps": reps, "rest_s": rest_s, "checked": True}
+        for n in names
+    ]
+
+
+DEFAULT_PROGRAM_CYCLE: List[str] = ["volume", "volume", "force", "puissance"]
+
+
+def generate_program_structure(
+    weeks: int,
+    frequency: int,
+    split: str,
+    cycle_pattern: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    weeks = max(1, min(int(weeks), 24))
+    frequency = frequency if frequency in (3, 5, 7) else 3
+    pattern = [p for p in (cycle_pattern or DEFAULT_PROGRAM_CYCLE) if p in SESSION_TYPES] or DEFAULT_PROGRAM_CYCLE
+    focus_seq = _focus_sequence(frequency, split)
+    out: List[Dict[str, Any]] = []
+    for w in range(weeks):
+        st = pattern[w % len(pattern)]
+        days = []
+        for d_idx, focus in enumerate(focus_seq):
+            days.append({
+                "day_index": d_idx,
+                "focus": focus,
+                "exercises": _build_day_exercises(focus, st),
+            })
+        out.append({"week_index": w + 1, "session_type": st, "days": days})
+    return out
 
 
 # --- LLM utils ---
@@ -1332,6 +1428,188 @@ async def get_activity(date: str, authorization: Optional[str] = Header(default=
 
 
 # --- WORKOUTS ---
+async def ai_generate_exercise(description: str) -> Optional[Dict[str, Any]]:
+    """Use Claude to generate a structured exercise from a free-text description."""
+    if not EMERGENT_LLM_KEY or not description.strip():
+        return None
+    system = (
+        "Tu es coach de musculation. À partir d'une description courte d'un exercice, retourne "
+        "UNIQUEMENT un JSON :\n"
+        '{"name": "Nom court en français", '
+        '"category": "Pectoraux|Dos|Épaules|Bras|Jambes|Core|Cardio|Mobilité", '
+        '"equipment": "Poids du corps|Haltères|Barre|Machine|Poulie|Élastique|Kettlebell|Autre", '
+        '"muscles_targeted": ["muscle1", "muscle2"], '
+        '"recommended_reps": "ex: 8-12", '
+        '"recommended_rest_s": int }'
+        "\nSi l'exercice n'a pas de sens, retourne {\"name\":\"\"}."
+    )
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=new_id("exai"),
+        system_message=system,
+    ).with_model("anthropic", "claude-sonnet-4-5-20250929")
+    msg = UserMessage(text=f"Description : {description.strip()[:200]}\nRetourne UNIQUEMENT le JSON.")
+    try:
+        response = await chat.send_message(msg)
+    except Exception:
+        log.exception("Claude exercise gen failed")
+        return None
+    data = extract_json(response or "")
+    if not data or not str(data.get("name", "")).strip():
+        return None
+    return {
+        "id": f"ai_{new_id('ex')}",
+        "name": str(data.get("name", ""))[:80],
+        "category": str(data.get("category", "Mobilité"))[:30],
+        "equipment": str(data.get("equipment", "Poids du corps"))[:60],
+        "muscles_targeted": [str(m)[:40] for m in (data.get("muscles_targeted") or [])[:6]],
+        "recommended_reps": str(data.get("recommended_reps", "10-12"))[:20],
+        "recommended_rest_s": int(data.get("recommended_rest_s", 60)),
+        "source": "ai",
+    }
+
+
+@api.post("/exercises/ai-add")
+async def add_exercise_via_ai(
+    body: AiExerciseRequest, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    if len((body.description or "").strip()) < 3:
+        raise HTTPException(400, "Description trop courte")
+    ex = await ai_generate_exercise(body.description)
+    if not ex:
+        raise HTTPException(422, "L'IA n'a pas pu identifier cet exercice")
+    doc = {**ex, "user_id": user["user_id"], "created_at": now_utc()}
+    await db.user_exercises.insert_one(doc)
+    return strip_id(doc)
+
+
+@api.get("/program/current")
+async def program_current(authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    prog = await db.programs.find_one(
+        {"user_id": user["user_id"], "active": True},
+        {"_id": 0},
+        sort=[("created_at", -1)],
+    )
+    if not prog:
+        return {"program": None}
+    # current week computation based on started_at
+    if prog.get("started_at"):
+        try:
+            started = prog["started_at"]
+            if isinstance(started, str):
+                started = datetime.fromisoformat(started.replace("Z", "+00:00"))
+            if isinstance(started, datetime) and started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            days_in = (now_utc() - started).days if isinstance(started, datetime) else 0
+            current_week = min(prog["weeks_total"], max(1, days_in // 7 + 1))
+            prog["current_week"] = current_week
+        except (ValueError, KeyError, TypeError):
+            prog["current_week"] = prog.get("current_week", 1)
+    return {"program": prog}
+
+
+@api.post("/program/create")
+async def program_create(
+    body: ProgramCreateRequest, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    weeks = max(4, min(int(body.weeks), 24))
+    frequency = body.frequency if body.frequency in (3, 5, 7) else 3
+    split = body.split if body.split in ("ppl", "fullbody", "split") else "ppl"
+    pattern = body.cycle_pattern if body.cycle_pattern else None
+    structure = generate_program_structure(weeks, frequency, split, pattern)
+    # Deactivate previous active programs
+    await db.programs.update_many(
+        {"user_id": user["user_id"], "active": True},
+        {"$set": {"active": False, "deactivated_at": now_utc()}},
+    )
+    program_id = new_id("prog")
+    doc = {
+        "id": program_id,
+        "user_id": user["user_id"],
+        "name": f"{(body.goal_label or 'Hypertrophie')} · {split.upper()} {frequency}j",
+        "goal_label": body.goal_label or "Hypertrophie",
+        "weeks_total": weeks,
+        "frequency": frequency,
+        "split": split,
+        "cycle_pattern": [w["session_type"] for w in structure[:4]],
+        "started_at": now_utc(),
+        "active": True,
+        "current_week": 1,
+        "weeks": structure,
+        "created_at": now_utc(),
+    }
+    await db.programs.insert_one(doc)
+    return strip_id(doc)
+
+
+@api.put("/program/{program_id}/week/{week_index}/day/{day_index}")
+async def program_update_day(
+    program_id: str,
+    week_index: int,
+    day_index: int,
+    body: ProgramDayUpdate,
+    authorization: Optional[str] = Header(default=None),
+):
+    user = await get_current_user(authorization)
+    prog = await db.programs.find_one(
+        {"id": program_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not prog:
+        raise HTTPException(404, "Program not found")
+    weeks = prog.get("weeks") or []
+    target_w = next((w for w in weeks if w.get("week_index") == week_index), None)
+    if not target_w:
+        raise HTTPException(404, "Week not found")
+    days = target_w.get("days") or []
+    target_d = next((d for d in days if d.get("day_index") == day_index), None)
+    if target_d is None:
+        raise HTTPException(404, "Day not found")
+    # Normalize new exercises
+    new_exs: List[Dict[str, Any]] = []
+    for e in body.exercises or []:
+        new_exs.append({
+            "name": str(e.get("name", "")).strip(),
+            "sets": int(e.get("sets", 3)),
+            "reps": str(e.get("reps", "10")),
+            "rest_s": int(e.get("rest_s", 60)),
+            "checked": bool(e.get("checked", True)),
+            "category": str(e.get("category", "")),
+        })
+    target_d["exercises"] = new_exs
+    if body.focus:
+        target_d["focus"] = body.focus
+    await db.programs.update_one(
+        {"id": program_id, "user_id": user["user_id"]},
+        {"$set": {"weeks": weeks}},
+    )
+    return target_d
+
+
+@api.delete("/program/{program_id}")
+async def program_archive(
+    program_id: str, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    res = await db.programs.update_one(
+        {"id": program_id, "user_id": user["user_id"]},
+        {"$set": {"active": False, "deactivated_at": now_utc()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Program not found")
+    return {"ok": True}
+
+
+@api.get("/exercises/user-added")
+async def list_user_exercises(authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    cur = db.user_exercises.find({"user_id": user["user_id"]}, {"_id": 0}).sort("created_at", -1).limit(50)
+    items = await cur.to_list(100)
+    return {"items": items}
+
+
 @api.post("/workouts/generate")
 async def generate_workouts(
     session_type: str = "volume", authorization: Optional[str] = Header(default=None)
@@ -2263,6 +2541,8 @@ async def startup_event():
     await db.exercise_perf.create_index([("user_id", 1), ("exercise_name", 1)])
     await db.daily_compliance.create_index([("user_id", 1), ("date", 1)], unique=True)
     await db.favorites.create_index([("user_id", 1), ("created_at", -1)])
+    await db.programs.create_index([("user_id", 1), ("active", 1)])
+    await db.user_exercises.create_index([("user_id", 1), ("created_at", -1)])
     log.info("Indexes ready")
 
 

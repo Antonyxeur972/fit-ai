@@ -38,6 +38,30 @@ type CalendarDay = {
   id: string; session_type: string; completed: boolean; focus: string; exercises_count: number;
 };
 
+type ProgramDay = {
+  day_index: number;
+  focus: string;
+  exercises: Exercise[];
+};
+type ProgramWeek = {
+  week_index: number;
+  session_type: string;
+  days: ProgramDay[];
+};
+type TrainingProgram = {
+  id: string;
+  name: string;
+  goal_label: string;
+  weeks_total: number;
+  frequency: number;
+  split: "ppl" | "fullbody" | "split";
+  cycle_pattern: string[];
+  started_at: string;
+  active: boolean;
+  current_week: number;
+  weeks: ProgramWeek[];
+};
+
 // Rest timer defaults per session_type
 const REST_DEFAULTS: Record<string, number> = {
   force: 240,      // 4 min
@@ -84,12 +108,28 @@ export default function Training() {
   const [restRunning, setRestRunning] = useState(false);
   const [restPerExercise, setRestPerExercise] = useState<Record<string, number>>({});
 
+  // Program state
+  const [program, setProgram] = useState<TrainingProgram | null>(null);
+  const [expandedWeek, setExpandedWeek] = useState<number | null>(null);
+  const [programSetupOpen, setProgramSetupOpen] = useState(false);
+  const [setupWeeks, setSetupWeeks] = useState(8);
+  const [setupFreq, setSetupFreq] = useState<3 | 5 | 7>(5);
+  const [setupSplit, setSetupSplit] = useState<"ppl" | "fullbody" | "split">("ppl");
+  const [setupGoal, setSetupGoal] = useState("Hypertrophie");
+  const [creatingProgram, setCreatingProgram] = useState(false);
+
+  // AI exercise add
+  const [aiExModalOpen, setAiExModalOpen] = useState(false);
+  const [aiExInput, setAiExInput] = useState("");
+  const [aiExLoading, setAiExLoading] = useState(false);
+
   const load = useCallback(async () => {
     try {
-      const [w, a, lib] = await Promise.all([
+      const [w, a, lib, prog] = await Promise.all([
         api<Workout[]>("/workouts/week"),
         api<Activity>(`/activity?date=${today}`),
         api<{ exercises: LibExercise[]; session_types: SessionTypes }>("/exercises/library"),
+        api<{ program: TrainingProgram | null }>("/program/current").catch(() => ({ program: null })),
       ]);
       setWeek(w);
       setActivity(a);
@@ -98,10 +138,14 @@ export default function Training() {
       setCardioType(a.cardio_type || "");
       setLibrary(lib.exercises);
       setSessionTypes(lib.session_types);
+      setProgram(prog.program || null);
+      if (prog.program && expandedWeek === null) {
+        setExpandedWeek(prog.program.current_week);
+      }
     } catch (e) {
       console.warn("training load", e);
     }
-  }, [today]);
+  }, [today, expandedWeek]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -264,6 +308,62 @@ export default function Training() {
     setEditorOpen(true);
   };
 
+  const openProgramDayEditor = (prog: TrainingProgram, weekIndex: number, dayIndex: number) => {
+    const w = prog.weeks.find((x) => x.week_index === weekIndex);
+    const d = w?.days.find((x) => x.day_index === dayIndex);
+    if (!w || !d) return;
+    // Reuse the existing workout editor by simulating a Workout structure with extra meta.
+    setEditWorkout({
+      id: `prog:${prog.id}:${weekIndex}:${dayIndex}`,
+      date: "",
+      title: `Sem. ${weekIndex} · ${d.focus}`,
+      focus: d.focus,
+      duration_min: 45,
+      exercises: d.exercises.map((e) => ({ ...e, checked: e.checked !== false })),
+      completed: false,
+      session_type: w.session_type,
+    });
+    setEditorOpen(true);
+  };
+
+  const createProgram = async () => {
+    setCreatingProgram(true);
+    try {
+      const created = await api<TrainingProgram>("/program/create", {
+        method: "POST",
+        body: { weeks: setupWeeks, frequency: setupFreq, split: setupSplit, goal_label: setupGoal },
+      });
+      setProgram(created);
+      setExpandedWeek(1);
+      setProgramSetupOpen(false);
+    } catch {} finally {
+      setCreatingProgram(false);
+    }
+  };
+
+  const addAiExercise = async () => {
+    if (!aiExInput.trim() || !editWorkout) return;
+    setAiExLoading(true);
+    try {
+      const ex = await api<{ name: string; category: string; recommended_reps: string; recommended_rest_s: number }>("/exercises/ai-add", {
+        method: "POST",
+        body: { description: aiExInput.trim() },
+      });
+      setEditWorkout({
+        ...editWorkout,
+        exercises: [
+          ...editWorkout.exercises,
+          { name: ex.name, sets: 3, reps: ex.recommended_reps || "10-12", rest_s: ex.recommended_rest_s || 60, checked: true },
+        ],
+      });
+      setAiExInput("");
+      setAiExModalOpen(false);
+    } catch {
+    } finally {
+      setAiExLoading(false);
+    }
+  };
+
   const applySessionTypeToEditor = (key: SessionKey) => {
     if (!editWorkout) return;
     const st = sessionTypes[key];
@@ -305,13 +405,22 @@ export default function Training() {
   const saveEditor = async () => {
     if (!editWorkout) return;
     const filtered = editWorkout.exercises.filter((e) => e.checked !== false);
-    await api(`/workouts/${editWorkout.id}`, {
-      method: "PUT",
-      body: {
-        session_type: editWorkout.session_type,
-        exercises: filtered,
-      },
-    });
+    // Special path: editing a program day (id format: prog:<programId>:<weekIndex>:<dayIndex>)
+    if (editWorkout.id.startsWith("prog:")) {
+      const [, programId, wIdx, dIdx] = editWorkout.id.split(":");
+      await api(`/program/${programId}/week/${wIdx}/day/${dIdx}`, {
+        method: "PUT",
+        body: { focus: editWorkout.focus, exercises: filtered },
+      });
+    } else {
+      await api(`/workouts/${editWorkout.id}`, {
+        method: "PUT",
+        body: {
+          session_type: editWorkout.session_type,
+          exercises: filtered,
+        },
+      });
+    }
     setEditorOpen(false);
     setEditWorkout(null);
     await load();
@@ -401,6 +510,12 @@ export default function Training() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {tab === "today" && (
           <>
+        {/* Program summary card */}
+        <ProgramSummaryCard
+          program={program}
+          onCreate={() => setProgramSetupOpen(true)}
+        />
+
         {/* Activity card */}
         <Card testID="activity-card">
           <SectionTitle title="Activité du jour" action={
@@ -460,46 +575,43 @@ export default function Training() {
               style={{ marginTop: spacing.md }}
             />
           </Card>
-        ) : (
+        ) : !program ? (
           <Card>
-            <SectionTitle title="Aucune séance" />
-            <Text style={typography.small}>Choisis ton type de séance et génère ton plan.</Text>
-            <SessionTypeSelector value={generateType} onChange={setGenerateType} sessionTypes={sessionTypes} />
-            <Button title="Générer mon programme" onPress={generate} loading={generating} style={{ marginTop: spacing.md }} testID="generate-button" />
+            <SectionTitle title="Pas encore de programme" />
+            <Text style={[typography.small, { marginBottom: spacing.md }]}>
+              Configure ton programme : durée, fréquence et organisation des séances.
+            </Text>
+            <Button
+              title="Créer mon programme"
+              onPress={() => setProgramSetupOpen(true)}
+              testID="create-program-button"
+              icon={<Ionicons name="add-circle-outline" size={18} color="#fff" />}
+            />
           </Card>
-        )}
+        ) : null}
 
-        {/* Generate options always visible */}
-        {todayWorkout && (
-          <Card testID="generate-card">
-            <SectionTitle title="Régénérer la semaine" />
-            <SessionTypeSelector value={generateType} onChange={setGenerateType} sessionTypes={sessionTypes} />
-            <Button title="Régénérer 7 jours" variant="ghost" onPress={generate} loading={generating} style={{ marginTop: spacing.md }} testID="regenerate-button" />
-          </Card>
-        )}
-
-        {/* Week plan */}
-        <SectionTitle title="Cette semaine" />
-        <View style={{ gap: spacing.sm }}>
-          {week.length === 0 ? (
-            <Text style={typography.small}>Pas encore de programme.</Text>
-          ) : week.map((w) => {
-            const exCount = w.exercises.filter((e) => e.checked !== false).length;
-            return (
-              <TouchableOpacity key={w.id} style={[styles.weekRow, w.date === today && styles.weekRowToday]} onPress={() => openEditor(w)} testID={`week-${w.date}`} activeOpacity={0.7}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[typography.caption]}>
-                    {new Date(w.date).toLocaleDateString("fr-FR", { weekday: "long" })}
-                  </Text>
-                  <Text style={[typography.body, { fontWeight: "600", marginTop: 2 }]}>{w.focus}</Text>
-                  <Text style={typography.small}>{w.duration_min} min · {exCount} exercices</Text>
-                </View>
-                <TypeChip type={(w.session_type as SessionKey) || "volume"} compact />
-                <View style={[styles.statusDot, { backgroundColor: w.completed ? colors.primary : colors.border, marginLeft: 8 }]} />
+        {/* My Program (weeks) */}
+        {program && (
+          <View testID="my-program-section">
+            <SectionTitle title="Mon programme" action={
+              <TouchableOpacity onPress={() => setProgramSetupOpen(true)} testID="reset-program">
+                <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Refaire</Text>
               </TouchableOpacity>
-            );
-          })}
-        </View>
+            } />
+            <View style={{ gap: spacing.sm }}>
+              {(program.weeks || []).map((w) => (
+                <ProgramWeekCard
+                  key={w.week_index}
+                  week={w}
+                  isExpanded={expandedWeek === w.week_index}
+                  isCurrent={program.current_week === w.week_index}
+                  onToggle={() => setExpandedWeek(expandedWeek === w.week_index ? null : w.week_index)}
+                  onEditDay={(dayIndex) => openProgramDayEditor(program, w.week_index, dayIndex)}
+                />
+              ))}
+            </View>
+          </View>
+        )}
 
         <View style={{ height: spacing.xxl }} />
           </>
@@ -664,6 +776,143 @@ export default function Training() {
       </Modal>
 
       {/* Workout editor modal */}
+      {/* Program setup modal */}
+      <Modal visible={programSetupOpen} transparent animationType="slide" onRequestClose={() => setProgramSetupOpen(false)}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalCard} testID="program-setup-modal">
+            <View style={styles.modalHandle} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={styles.modalTitle}>Crée ton programme</Text>
+              <TouchableOpacity onPress={() => setProgramSetupOpen(false)} testID="program-setup-close">
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 540 }} keyboardShouldPersistTaps="handled">
+              <Text style={[typography.caption, { marginTop: spacing.md }]}>Objectif</Text>
+              <View style={styles.setupOptionRow}>
+                {["Hypertrophie", "Force", "Perte de gras"].map((g) => (
+                  <TouchableOpacity
+                    key={g}
+                    onPress={() => setSetupGoal(g)}
+                    style={[styles.setupOption, setupGoal === g && styles.setupOptionOn]}
+                    testID={`setup-goal-${g}`}
+                  >
+                    <Text style={[styles.setupOptionLabel, setupGoal === g && styles.setupOptionLabelOn]}>{g}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={[typography.caption, { marginTop: spacing.md }]}>Fréquence (jours / semaine)</Text>
+              <View style={styles.setupOptionRow}>
+                {([3, 5, 7] as const).map((f) => (
+                  <TouchableOpacity
+                    key={f}
+                    onPress={() => setSetupFreq(f)}
+                    style={[styles.setupOption, setupFreq === f && styles.setupOptionOn]}
+                    testID={`setup-freq-${f}`}
+                  >
+                    <Text style={[styles.setupOptionLabel, setupFreq === f && styles.setupOptionLabelOn]}>{f}j</Text>
+                    <Text style={styles.setupOptionSub}>
+                      {f === 3 ? "Light" : f === 5 ? "Optimal" : "Intensif"}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={[typography.caption, { marginTop: spacing.md }]}>Organisation des séances</Text>
+              <View style={styles.setupOptionRow}>
+                {([
+                  { v: "ppl" as const, label: "PPL", sub: "Push / Pull / Legs" },
+                  { v: "fullbody" as const, label: "Full body", sub: "Tout le corps" },
+                  { v: "split" as const, label: "Split", sub: "1 groupe / séance" },
+                ]).map((o) => (
+                  <TouchableOpacity
+                    key={o.v}
+                    onPress={() => setSetupSplit(o.v)}
+                    style={[styles.setupOption, setupSplit === o.v && styles.setupOptionOn]}
+                    testID={`setup-split-${o.v}`}
+                  >
+                    <Text style={[styles.setupOptionLabel, setupSplit === o.v && styles.setupOptionLabelOn]}>{o.label}</Text>
+                    <Text style={styles.setupOptionSub}>{o.sub}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={[typography.caption, { marginTop: spacing.md }]}>Durée du programme</Text>
+              <View style={styles.setupOptionRow}>
+                {[4, 8, 12, 16, 24].map((w) => (
+                  <TouchableOpacity
+                    key={w}
+                    onPress={() => setSetupWeeks(w)}
+                    style={[styles.setupOption, setupWeeks === w && styles.setupOptionOn, { minWidth: 60 }]}
+                    testID={`setup-weeks-${w}`}
+                  >
+                    <Text style={[styles.setupOptionLabel, setupWeeks === w && styles.setupOptionLabelOn]}>{w} sem.</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </ScrollView>
+
+            <Button
+              title={creatingProgram ? "Création..." : `Créer mon programme (${setupWeeks} sem.)`}
+              onPress={createProgram}
+              loading={creatingProgram}
+              icon={<Ionicons name="rocket" size={16} color="#fff" />}
+              style={{ marginTop: spacing.lg }}
+              testID="program-setup-create"
+            />
+          </View>
+        </View>
+      </Modal>
+
+      {/* AI exercise modal */}
+      <Modal visible={aiExModalOpen} transparent animationType="fade" onRequestClose={() => setAiExModalOpen(false)}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalCard} testID="ai-exercise-modal">
+            <View style={styles.modalHandle} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle}>Ajouter un exercice via IA</Text>
+                <Text style={[typography.small, { color: colors.textMuted }]}>
+                  Décris l&apos;exercice (ex: &laquo; farmer carry haltères &raquo;).
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setAiExModalOpen(false)} testID="ai-ex-close">
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              value={aiExInput}
+              onChangeText={setAiExInput}
+              placeholder="Description de l'exercice"
+              placeholderTextColor={colors.textMuted}
+              style={{
+                marginTop: spacing.md,
+                padding: spacing.md,
+                fontSize: 15,
+                borderWidth: 1,
+                borderColor: colors.border,
+                borderRadius: radius.md,
+                backgroundColor: colors.background,
+                color: colors.textMain,
+              }}
+              testID="ai-ex-input"
+              autoCorrect={false}
+            />
+            <Button
+              title={aiExLoading ? "L'IA réfléchit..." : "Ajouter via IA"}
+              onPress={addAiExercise}
+              loading={aiExLoading}
+              disabled={!aiExInput.trim() || aiExLoading}
+              icon={<Ionicons name="sparkles" size={16} color="#fff" />}
+              style={{ marginTop: spacing.md }}
+              testID="ai-ex-add"
+            />
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={editorOpen} transparent animationType="slide" onRequestClose={() => setEditorOpen(false)}>
         <View style={styles.modalBg}>
           <View style={[styles.modalCard, { maxHeight: "92%" }]}>
@@ -694,6 +943,16 @@ export default function Training() {
             </View>
 
             <ScrollView style={{ marginTop: spacing.md }} contentContainerStyle={{ paddingBottom: spacing.lg }}>
+              <TouchableOpacity
+                onPress={() => { setAiExInput(""); setAiExModalOpen(true); }}
+                style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 10, paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primaryPale, marginBottom: spacing.md }}
+                testID="editor-add-ai"
+              >
+                <Ionicons name="sparkles" size={16} color={colors.primary} />
+                <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>
+                  Mon exercice n&apos;est pas listé · Ajouter via IA
+                </Text>
+              </TouchableOpacity>
               {Object.entries(libByCategory).map(([cat, list]) => (
                 <View key={cat} style={{ marginBottom: spacing.md }}>
                   <Text style={[typography.caption, { marginBottom: 8 }]}>{cat}</Text>
@@ -912,6 +1171,20 @@ const styles = StyleSheet.create({
   legendRow: { flexDirection: "row", gap: 12, flexWrap: "wrap", justifyContent: "center", marginVertical: spacing.sm },
   legendItem: { flexDirection: "row", alignItems: "center", gap: 4 },
   legendDot: { width: 10, height: 10, borderRadius: 5 },
+  // Program
+  progressBar: { height: 4, backgroundColor: colors.background, borderRadius: 2, overflow: "hidden", marginTop: spacing.sm },
+  progressFill: { height: "100%", backgroundColor: colors.primary, borderRadius: 2 },
+  currentBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full },
+  weekTypePill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.full, borderWidth: 1 },
+  programDayRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
+  programDayNum: { width: 32, height: 32, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: colors.primaryPale },
+  // Setup modal
+  setupOptionRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
+  setupOption: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.md, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, flex: 1, minWidth: 90, alignItems: "center" },
+  setupOptionOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
+  setupOptionLabel: { fontSize: 14, fontWeight: "700", color: colors.textSecondary },
+  setupOptionLabelOn: { color: colors.primary },
+  setupOptionSub: { fontSize: 10, color: colors.textMuted, marginTop: 2 },
 });
 
 // ----- Helpers / sub-components -----
@@ -937,6 +1210,104 @@ function SessionLegend() {
         </View>
       ))}
     </View>
+  );
+}
+
+function ProgramSummaryCard({ program, onCreate }: { program: TrainingProgram | null; onCreate: () => void }) {
+  if (!program) {
+    return (
+      <Card testID="program-summary-empty">
+        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+          <View style={[styles.focusBadge, { backgroundColor: colors.primaryPale }]}>
+            <Ionicons name="rocket-outline" size={20} color={colors.primary} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[typography.body, { fontWeight: "700" }]}>Objectif & programme</Text>
+            <Text style={typography.small}>Aucun programme défini. Crée le tien en 30s.</Text>
+          </View>
+          <TouchableOpacity onPress={onCreate} style={[styles.editBtn, { borderColor: colors.primary }]} testID="summary-create">
+            <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Créer</Text>
+          </TouchableOpacity>
+        </View>
+      </Card>
+    );
+  }
+  return (
+    <Card testID="program-summary-card" style={{ borderColor: colors.primary, borderWidth: 1.5 }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+        <View style={[styles.focusBadge, { backgroundColor: colors.primaryPale }]}>
+          <Ionicons name="rocket" size={20} color={colors.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[typography.caption, { color: colors.primary, fontWeight: "700" }]}>Objectif & programme</Text>
+          <Text style={[typography.body, { fontWeight: "700" }]}>{program.goal_label} · {program.split.toUpperCase()} {program.frequency}j</Text>
+          <Text style={[typography.small, { marginTop: 2 }]}>
+            Semaine <Text style={{ fontWeight: "800", color: colors.primary }}>{program.current_week}/{program.weeks_total}</Text>
+          </Text>
+        </View>
+      </View>
+      <View style={styles.progressBar}>
+        <View style={[styles.progressFill, { width: `${Math.min(100, (program.current_week / program.weeks_total) * 100)}%` }]} />
+      </View>
+    </Card>
+  );
+}
+
+function ProgramWeekCard({
+  week, isExpanded, isCurrent, onToggle, onEditDay,
+}: {
+  week: ProgramWeek;
+  isExpanded: boolean;
+  isCurrent: boolean;
+  onToggle: () => void;
+  onEditDay: (dayIndex: number) => void;
+}) {
+  const palette = SESSION_COLOR[week.session_type] || SESSION_COLOR.volume;
+  return (
+    <Card style={{ marginBottom: 0, borderLeftWidth: 4, borderLeftColor: palette.fg }} testID={`program-week-${week.week_index}`}>
+      <TouchableOpacity onPress={onToggle} activeOpacity={0.7}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <Text style={[typography.body, { fontWeight: "700" }]}>Semaine {week.week_index}</Text>
+              {isCurrent && (
+                <View style={[styles.currentBadge, { backgroundColor: colors.primary }]}>
+                  <Text style={[typography.small, { fontSize: 9, color: "#fff", fontWeight: "800" }]}>EN COURS</Text>
+                </View>
+              )}
+            </View>
+            <Text style={typography.small}>{week.days.length} séances · {week.days.map((d) => d.focus).join(" · ")}</Text>
+          </View>
+          <View style={[styles.weekTypePill, { backgroundColor: palette.bg, borderColor: palette.border }]}>
+            <Text style={{ fontSize: 11, fontWeight: "700", color: palette.fg, textTransform: "uppercase" }}>{week.session_type}</Text>
+          </View>
+          <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={18} color={colors.textMuted} />
+        </View>
+      </TouchableOpacity>
+      {isExpanded && (
+        <View style={{ marginTop: spacing.md, gap: 6 }}>
+          {week.days.map((d) => (
+            <TouchableOpacity
+              key={d.day_index}
+              onPress={() => onEditDay(d.day_index)}
+              style={styles.programDayRow}
+              testID={`program-day-${week.week_index}-${d.day_index}`}
+            >
+              <View style={styles.programDayNum}>
+                <Text style={[typography.small, { color: colors.primary, fontWeight: "800" }]}>J{d.day_index + 1}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[typography.body, { fontWeight: "600" }]}>{d.focus}</Text>
+                <Text style={typography.small} numberOfLines={1}>
+                  {d.exercises.length} ex. · {d.exercises.slice(0, 2).map((e) => e.name.split(" ")[0]).join(", ")}…
+                </Text>
+              </View>
+              <Ionicons name="create-outline" size={16} color={colors.textMuted} />
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </Card>
   );
 }
 

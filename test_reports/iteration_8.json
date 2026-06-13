@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 8 — TRAINING phase 2 bis (Program + AI Exercise). Backend: 35/35 pytest tests PASS. POST /api/program/create validated for shape (id, name, goal_label, weeks_total, frequency, split, cycle_pattern, started_at, active, current_week, weeks[].days[].exercises[]), weeks clamp 4↔24, frequency 3/5/7 fallback to 3, split fallback to 'ppl', focus sequences (PPL @3/5/7, Fullbody @3/5/7, Split @5/7 with Core+Cardio), default cycle alternation [volume,volume,force,puissance], and deactivation of prior active program. GET /api/program/current returns null when none, auto-computes current_week, handles offset-naive started_at. PUT /api/program/{id}/week/{w}/day/{d} updates focus + exercises and persists (verified via GET). DELETE /api/program/{id} soft-deactivates → current returns null. POST /api/exercises/ai-add: 200 on valid 'farmer carry haltères', 400 on empty/short, 422 on jabberwocky, persists in user_exercises, 401 without bearer. GET /api/exercises/user-added returns {items: []} sorted desc, no _id leak. Nutrition endpoints untouched. Frontend smoke: training tab loads on mobile viewport (375x667). Empty state: program-summary-empty card visible with 'Créer' button. Setup modal (testID='program-setup-modal') opens with all 4 sections (Objectif: Hypertrophie/Force/Perte de gras chips; Fréquence: 3j/5j/7j with Light/Optimal/Intensif labels; Organisation: PPL/Full body/Split; Durée: 4/8/12/16/24 sem.) and bottom CTA 'Créer mon programme (X sem.)'. Old 'Régénérer la semaine' card REMOVED. Old 'Cette semaine' section title REMOVED. 'Mon programme' section title present. 3 tabs (Aujourd'hui/Calendrier/Historique) still render. No deprecated Expo packages (expo-av/barcode-scanner/background-fetch).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration8_program.py",
+    "/app/test_reports/pytest/iteration8_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py:1518 — POST /program/create silently clamps weeks to [4,24] and silently falls back invalid frequency to 3 / invalid split to 'ppl'. Spec says 'auto-clamp' so behavior is correct, but consider returning 422 for clearly invalid inputs (frequency=4, split='xyz') to help clients debug rather than silent coercion.",
+    "server.py:1537 — cycle_pattern stored on the program doc is hard-truncated to first 4 weeks of generated structure ('cycle_pattern': [w['session_type'] for w in structure[:4]]). With weeks<4 (after clamp this can't happen) this would be short; minor — works because of weeks clamp.",
+    "server.py:1606 — GET /exercises/user-added uses .limit(50) on cursor but .to_list(100). Inconsistent caps; harmless but consolidate to one limit constant.",
+    "server.py:1472 — POST /exercises/ai-add stores doc with raw `_id` then returns strip_id(doc). Confirmed no _id leaked in response. Good.",
+    "Frontend training.tsx is 1389 lines — exceeds 700-line guideline. Consider splitting ProgramWeekCard, setup modal, AI exercise modal, and program summary card into separate files for maintainability."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration8_program.py (new — 35 tests covering program CRUD + AI exercise add)"
+  ],
+  "success_rate": {
+    "backend": "100% (35/35)",
+    "frontend": "smoke-pass (empty state, setup modal, all chips, 3 tabs, deprecated UI removed). Full post-creation flow (summary card populated, Mon programme ProgramWeekCard expand, day editor, AI exercise add inside editor) NOT exercised because the web preview uses Emergent Managed Google Auth and cannot inject the AsyncStorage token via localStorage from the test harness (web AsyncStorage layer reads JSON-encoded values but the auth bootstrap also fetches /auth/me independently). Backend logs confirm POSTs to /api/program/create returning 200 from external IPs (10.208.138.x) — the wiring is verified end-to-end at the network level."
+  },
+  "seed_data_creation": "Tests reuse the conftest-seeded user (user_test_001 / test_session_token_abc). New autouse fixture in test_iteration8_program.py wipes db.programs and db.user_exercises for TEST_USER_ID before and after the module. test_list_user_added pre-seeds two TEST_-prefixed exercises directly into Mongo and they are cleaned up by the suite teardown.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend program + AI exercise endpoints are stable (35/35). The test file is reusable and idempotent. If retesting frontend post-creation flows, the easiest path is either (a) seed a program directly in Mongo for user_test_001 and bypass the create modal, or (b) drive the in-app Google OAuth flow rather than trying to inject AsyncStorage from the test harness — AsyncStorage on web uses JSON.stringify and the AuthProvider also bootstraps via /auth/me so localStorage injection alone is insufficient.",
+  "rca_of_issue": "N/A — no backend failures. Frontend post-create flow was not exercised due to OAuth requirement (not a bug)."
+}
