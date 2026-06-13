@@ -3042,29 +3042,32 @@ async def complete_workout(workout_id: str, authorization: Optional[str] = Heade
     )
     if res.matched_count == 0:
         raise HTTPException(404, "Workout not found")
-    # ---- POINTS: workout completed ----
-    await award_points(user["user_id"], "workout_completed", meta={"key": f"wk_{workout_id}"})
-    # Detect PRs from exercise_perf created for this workout
-    perfs = await db.exercise_perf.find(
-        {"user_id": user["user_id"], "workout_id": workout_id}, {"_id": 0}
-    ).to_list(50)
-    for p in perfs:
-        ex = p.get("exercise_name")
-        cur = float(p.get("est_1rm", 0))
-        if not ex or cur <= 0:
-            continue
-        prev = await db.exercise_perf.find(
-            {"user_id": user["user_id"], "exercise_name": ex, "id": {"$ne": p.get("id")}}, {"_id": 0, "est_1rm": 1}
-        ).sort("created_at", -1).to_list(50)
-        prev_max = max((float(x.get("est_1rm", 0)) for x in prev), default=0)
-        if cur > prev_max + 0.5:
-            await award_points(user["user_id"], "pr_beaten", meta={"key": f"pr_{workout_id}_{ex}"})
-    # Streak bonus
-    yest = (datetime.strptime(today_str(), "%Y-%m-%d").date() - timedelta(days=1)).isoformat()
-    streaked = await db.points_events.find_one({"user_id": user["user_id"], "date": yest, "reason": "workout_completed"})
-    if streaked:
-        await award_points(user["user_id"], "streak_bonus", meta={"key": f"streak_{today_str()}"})
-    await evaluate_daily_combos(user["user_id"])
+    # ---- POINTS: best-effort, never break complete_workout ----
+    try:
+        await award_points(user["user_id"], "workout_completed", meta={"key": f"wk_{workout_id}"})
+        # Detect PRs from exercise_perf created for this workout
+        perfs = await db.exercise_perf.find(
+            {"user_id": user["user_id"], "workout_id": workout_id}, {"_id": 0}
+        ).to_list(50)
+        for p in perfs:
+            ex = p.get("exercise_name")
+            cur = float(p.get("est_1rm", 0))
+            if not ex or cur <= 0:
+                continue
+            prev = await db.exercise_perf.find(
+                {"user_id": user["user_id"], "exercise_name": ex, "id": {"$ne": p.get("id")}}, {"_id": 0, "est_1rm": 1}
+            ).sort("created_at", -1).to_list(50)
+            prev_max = max((float(x.get("est_1rm", 0)) for x in prev), default=0)
+            if cur > prev_max + 0.5:
+                await award_points(user["user_id"], "pr_beaten", meta={"key": f"pr_{workout_id}_{ex}"})
+        # Streak bonus
+        yest = (datetime.strptime(today_str(), "%Y-%m-%d").date() - timedelta(days=1)).isoformat()
+        streaked = await db.points_events.find_one({"user_id": user["user_id"], "date": yest, "reason": "workout_completed"})
+        if streaked:
+            await award_points(user["user_id"], "streak_bonus", meta={"key": f"streak_{today_str()}"})
+        await evaluate_daily_combos(user["user_id"])
+    except Exception as e:
+        logger.warning(f"complete_workout award: {e}")
     return {"ok": True}
 
 
