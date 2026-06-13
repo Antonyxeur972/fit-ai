@@ -47,6 +47,14 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="challenges"
+        options={{
+          title: "Challenges",
+          tabBarIcon: ({ color, size }) => <Ionicons name="flame-outline" size={size} color={color} />,
+          tabBarButtonTestID: "tab-challenges",
+        }}
+      />
+      <Tabs.Screen
         name="progress"
         options={{
           title: "Progression",

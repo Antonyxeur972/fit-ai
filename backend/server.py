@@ -9,7 +9,7 @@ import re
 import logging
 from pathlib import Path
 from datetime import datetime, timezone, timedelta, date as dt_date
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Set
 
 import httpx
 from fastapi import FastAPI, APIRouter, HTTPException, Header, Request
@@ -231,18 +231,33 @@ class RecipeFromIngredientsRequest(BaseModel):
 class ProgramCreateRequest(BaseModel):
     weeks: int  # 4-24
     frequency: int  # 3 | 5 | 7
-    split: str  # "ppl" | "fullbody" | "split"
+    split: str  # "ppl" | "fullbody" | "split" | "home"
     goal_label: Optional[str] = "Hypertrophie"
-    cycle_pattern: Optional[List[str]] = None  # default ["volume", "volume", "force", "puissance"]
+    goal: Optional[str] = None  # "muscle" | "strength" | "fat_loss" | "endurance"
+    cycle_pattern: Optional[List[str]] = None  # legacy
+    block_weeks: Optional[Dict[str, int]] = None  # {"volume": 2, "puissance": 1, "force": 2}
 
 
 class ProgramDayUpdate(BaseModel):
     focus: Optional[str] = None
-    exercises: List[Dict[str, Any]]  # list of {name, sets, reps, rest_s, category?}
+    exercises: List[Dict[str, Any]]
 
 
 class AiExerciseRequest(BaseModel):
     description: str
+
+
+class TravelModeRequest(BaseModel):
+    days: int  # length of trip
+    goal_label: Optional[str] = "Maintien"
+
+
+class ChallengeStartRequest(BaseModel):
+    type: str  # "pushups" | "abs" | "squats"
+
+
+class ChallengeCheckDayRequest(BaseModel):
+    day_index: int  # 0-29
 
 
 class WorkoutSession(BaseModel):
@@ -809,11 +824,45 @@ FOCUS_BLUEPRINTS: Dict[str, List[str]] = {
     "Core": ["Crunchs", "Russian twist", "Leg raises", "Planche", "Planche latérale"],
     "Cardio": ["Marche rapide", "Course intermittente", "Burpees", "Mountain climbers"],
     "Repos actif": ["Marche rapide", "Mobilité hanche / épaule"],
+    # Bodyweight / home variants
+    "HomePush": ["Pompes diamant", "Pompes inclinées (pieds surélevés)", "Pompes archer", "Dips entre 2 chaises", "Pompes pike"],
+    "HomePull": ["Tractions porte (élastique)", "Rowing inversé table", "Curl élastique", "Superman", "Bird-dog"],
+    "HomeLegs": ["Squats sautés", "Fentes alternées", "Squat bulgare (chaise)", "Pont fessier 1 jambe", "Mollets sur marche"],
+    "HomeFullBody": ["Burpees", "Pompes diamant", "Squats sautés", "Mountain climbers", "Planche"],
+    "HomeCore": ["Planche", "Planche latérale", "Mountain climbers", "Russian twist", "Hollow hold"],
+}
+
+# Best ROI / "rentable" exercises per (goal, session_type) — green-dot
+RECOMMENDED_BY_GOAL: Dict[str, Set[str]] = {
+    "muscle": {
+        "Développé couché barre", "Développé incliné haltères", "Squat barre arrière",
+        "Soulevé de terre roumain", "Soulevé de terre barre", "Rowing barre (Yates / Pendlay)",
+        "Tractions pronation", "Développé militaire barre", "Presse à cuisses",
+    },
+    "strength": {
+        "Squat barre arrière", "Soulevé de terre barre", "Développé couché barre",
+        "Développé militaire barre", "Rowing barre (Yates / Pendlay)", "Tractions pronation",
+    },
+    "fat_loss": {
+        "Burpees", "Squats sautés", "Mountain climbers", "Course intermittente",
+        "Squat barre arrière", "Soulevé de terre roumain", "Pompes diamant",
+    },
+    "endurance": {
+        "Course intermittente", "Marche rapide", "Mountain climbers", "Burpees",
+        "Squats sautés", "Pompes diamant",
+    },
 }
 
 
 def _focus_sequence(frequency: int, split: str) -> List[str]:
     sp = (split or "ppl").lower()
+    if sp == "home":
+        # bodyweight only
+        if frequency == 3:
+            return ["HomePush", "HomePull", "HomeLegs"]
+        if frequency == 5:
+            return ["HomePush", "HomePull", "HomeLegs", "HomeCore", "HomeFullBody"]
+        return ["HomePush", "HomePull", "HomeLegs", "HomeCore", "HomeFullBody", "HomeFullBody", "Cardio"]
     if sp == "fullbody":
         if frequency == 3:
             return ["FullBody", "FullBody", "FullBody"]
@@ -826,7 +875,6 @@ def _focus_sequence(frequency: int, split: str) -> List[str]:
         if frequency == 5:
             return ["Pectoraux", "Dos", "Épaules", "Bras", "Jambes"]
         return ["Pectoraux", "Dos", "Épaules", "Bras", "Jambes", "Core", "Cardio"]
-    # PPL default
     if frequency == 3:
         return ["Push", "Pull", "Legs"]
     if frequency == 5:
@@ -834,19 +882,44 @@ def _focus_sequence(frequency: int, split: str) -> List[str]:
     return ["Push", "Pull", "Legs", "Push", "Pull", "Legs", "Repos actif"]
 
 
-def _build_day_exercises(focus: str, session_type: str) -> List[Dict[str, Any]]:
+def _is_recommended(ex_name: str, goal: Optional[str]) -> bool:
+    if not goal:
+        return False
+    return ex_name in RECOMMENDED_BY_GOAL.get(goal, set())
+
+
+def _build_day_exercises(focus: str, session_type: str, goal: Optional[str] = None) -> List[Dict[str, Any]]:
     st = SESSION_TYPES.get(session_type, SESSION_TYPES["volume"])
     sets = st["sets"]
     reps = st["reps"]
     rest_s = st["rest_s"]
     names = FOCUS_BLUEPRINTS.get(focus, FOCUS_BLUEPRINTS["FullBody"])
+    # cap to 5 (≤3 per same muscle handled by curated blueprint variety)
     return [
-        {"name": n, "sets": sets, "reps": reps, "rest_s": rest_s, "checked": True}
-        for n in names
+        {
+            "name": n,
+            "sets": sets,
+            "reps": reps,
+            "rest_s": rest_s,
+            "checked": True,
+            "is_recommended": _is_recommended(n, goal),
+        }
+        for n in names[:5]
     ]
 
 
-DEFAULT_PROGRAM_CYCLE: List[str] = ["volume", "volume", "force", "puissance"]
+# Phase 3: ordered block sequence with configurable durations
+ORDERED_BLOCK_SEQUENCE: List[str] = ["volume", "puissance", "force"]
+
+
+def _expand_block_weeks(block_weeks: Optional[Dict[str, int]]) -> List[str]:
+    bw = block_weeks or {}
+    pattern: List[str] = []
+    for block in ORDERED_BLOCK_SEQUENCE:
+        n = int(bw.get(block, 1))
+        n = max(1, min(n, 3))  # 1-3 weeks per block
+        pattern.extend([block] * n)
+    return pattern  # e.g. [v,v,p,f,f] = 5 weeks per cycle
 
 
 def generate_program_structure(
@@ -854,10 +927,20 @@ def generate_program_structure(
     frequency: int,
     split: str,
     cycle_pattern: Optional[List[str]] = None,
+    block_weeks: Optional[Dict[str, int]] = None,
+    goal: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     weeks = max(1, min(int(weeks), 24))
     frequency = frequency if frequency in (3, 5, 7) else 3
-    pattern = [p for p in (cycle_pattern or DEFAULT_PROGRAM_CYCLE) if p in SESSION_TYPES] or DEFAULT_PROGRAM_CYCLE
+    # Phase 3: block-based pattern takes priority over legacy cycle_pattern
+    if block_weeks is not None:
+        pattern = _expand_block_weeks(block_weeks)
+    elif cycle_pattern:
+        pattern = [p for p in cycle_pattern if p in SESSION_TYPES]
+        if not pattern:
+            pattern = _expand_block_weeks({"volume": 1, "puissance": 1, "force": 1})
+    else:
+        pattern = _expand_block_weeks({"volume": 1, "puissance": 1, "force": 1})
     focus_seq = _focus_sequence(frequency, split)
     out: List[Dict[str, Any]] = []
     for w in range(weeks):
@@ -867,9 +950,78 @@ def generate_program_structure(
             days.append({
                 "day_index": d_idx,
                 "focus": focus,
-                "exercises": _build_day_exercises(focus, st),
+                "exercises": _build_day_exercises(focus, st, goal=goal),
             })
         out.append({"week_index": w + 1, "session_type": st, "days": days})
+    return out
+
+
+# Challenges blueprint — 30-day progression based on level
+CHALLENGE_BLUEPRINTS: Dict[str, Dict[str, Any]] = {
+    "pushups": {
+        "name": "30 jours de pompes",
+        "exercise": "Pompes",
+        "muscle": "Pectoraux",
+        "icon": "fitness",
+        "rest_days": [3, 6, 10, 13, 17, 20, 24, 27],  # Wed/Sat each week
+    },
+    "abs": {
+        "name": "30 jours d'abdos",
+        "exercise": "Crunchs + Planche (mix)",
+        "muscle": "Core",
+        "icon": "shield-checkmark",
+        "rest_days": [3, 7, 10, 14, 17, 21, 24, 28],
+    },
+    "squats": {
+        "name": "30 jours de squats",
+        "exercise": "Squats au poids du corps",
+        "muscle": "Jambes",
+        "icon": "barbell",
+        "rest_days": [3, 6, 10, 13, 17, 20, 24, 27],
+    },
+}
+
+
+def _challenge_volume_for(day_index: int, level: int) -> int:
+    """Volume progressif sur 30 jours. level 1-3 (débutant/intermédiaire/avancé)."""
+    base = {1: 10, 2: 20, 3: 35}.get(level, 15)
+    # Linear progression: day 1 = base, day 30 = base * 4
+    progress = 1.0 + (day_index / 29.0) * 3.0
+    return int(round(base * progress))
+
+
+def _challenge_level_from_profile(profile: Optional[Dict[str, Any]]) -> int:
+    if not profile:
+        return 1
+    act = (profile.get("activity_level") or "").lower()
+    if act in ("very_active", "athlete", "high"):
+        return 3
+    if act in ("moderate", "active"):
+        return 2
+    return 1
+
+
+def _build_challenge_days(ch_type: str, level: int) -> List[Dict[str, Any]]:
+    bp = CHALLENGE_BLUEPRINTS[ch_type]
+    rest_set = set(bp["rest_days"])
+    out: List[Dict[str, Any]] = []
+    for d in range(30):
+        if d in rest_set:
+            out.append({
+                "day_index": d,
+                "is_rest": True,
+                "target_reps": 0,
+                "label": "Repos actif",
+                "completed": False,
+            })
+        else:
+            out.append({
+                "day_index": d,
+                "is_rest": False,
+                "target_reps": _challenge_volume_for(d, level),
+                "label": f"{bp['exercise']}",
+                "completed": False,
+            })
     return out
 
 
@@ -1517,10 +1669,18 @@ async def program_create(
     user = await get_current_user(authorization)
     weeks = max(4, min(int(body.weeks), 24))
     frequency = body.frequency if body.frequency in (3, 5, 7) else 3
-    split = body.split if body.split in ("ppl", "fullbody", "split") else "ppl"
-    pattern = body.cycle_pattern if body.cycle_pattern else None
-    structure = generate_program_structure(weeks, frequency, split, pattern)
-    # Deactivate previous active programs
+    split = body.split if body.split in ("ppl", "fullbody", "split", "home") else "ppl"
+    # Get goal from profile if not provided
+    goal = body.goal
+    if not goal:
+        prof = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+        goal = (prof or {}).get("goal")
+    structure = generate_program_structure(
+        weeks, frequency, split,
+        cycle_pattern=body.cycle_pattern,
+        block_weeks=body.block_weeks,
+        goal=goal,
+    )
     await db.programs.update_many(
         {"user_id": user["user_id"], "active": True},
         {"$set": {"active": False, "deactivated_at": now_utc()}},
@@ -1531,18 +1691,280 @@ async def program_create(
         "user_id": user["user_id"],
         "name": f"{(body.goal_label or 'Hypertrophie')} · {split.upper()} {frequency}j",
         "goal_label": body.goal_label or "Hypertrophie",
+        "goal": goal,
         "weeks_total": weeks,
         "frequency": frequency,
         "split": split,
-        "cycle_pattern": [w["session_type"] for w in structure[:4]],
+        "block_weeks": body.block_weeks or {"volume": 1, "puissance": 1, "force": 1},
+        "cycle_pattern": [w["session_type"] for w in structure[:6]],
         "started_at": now_utc(),
         "active": True,
         "current_week": 1,
         "weeks": structure,
         "created_at": now_utc(),
+        "is_travel": False,
     }
     await db.programs.insert_one(doc)
     return strip_id(doc)
+
+
+@api.post("/program/{program_id}/accelerate")
+async def program_accelerate(
+    program_id: str, authorization: Optional[str] = Header(default=None)
+):
+    """Increase progressively the volume on remaining weeks (+1 set everywhere, +5s rest cap)."""
+    user = await get_current_user(authorization)
+    prog = await db.programs.find_one(
+        {"id": program_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not prog:
+        raise HTTPException(404, "Program not found")
+    current_week = prog.get("current_week", 1)
+    weeks = prog.get("weeks") or []
+    bumped = 0
+    for w in weeks:
+        if w["week_index"] < current_week:
+            continue
+        for d in w.get("days", []):
+            for e in d.get("exercises", []):
+                old_sets = int(e.get("sets", 3))
+                e["sets"] = min(old_sets + 1, 6)
+                bumped += 1
+    prog["accelerated_count"] = int(prog.get("accelerated_count", 0)) + 1
+    await db.programs.update_one(
+        {"id": program_id, "user_id": user["user_id"]},
+        {"$set": {"weeks": weeks, "accelerated_count": prog["accelerated_count"]}},
+    )
+    return {"ok": True, "exercises_bumped": bumped, "accelerated_count": prog["accelerated_count"]}
+
+
+@api.post("/program/travel-mode")
+async def program_travel_mode(
+    body: TravelModeRequest, authorization: Optional[str] = Header(default=None)
+):
+    """Pause current active program, create a temporary bodyweight program for `days`."""
+    user = await get_current_user(authorization)
+    days = max(3, min(int(body.days), 90))
+    # Compute travel weeks (round up)
+    travel_weeks = max(1, (days + 6) // 7)
+    # Pause current active program (do NOT deactivate, just mark paused)
+    current = await db.programs.find_one({"user_id": user["user_id"], "active": True, "is_travel": {"$ne": True}})
+    paused_id = current.get("id") if current else None
+    if current:
+        await db.programs.update_one(
+            {"id": current["id"]},
+            {"$set": {"active": False, "paused_for_travel": True, "paused_at": now_utc()}},
+        )
+    # Also deactivate any pending travel programs
+    await db.programs.update_many(
+        {"user_id": user["user_id"], "active": True, "is_travel": True},
+        {"$set": {"active": False, "deactivated_at": now_utc()}},
+    )
+    prof = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    goal = (prof or {}).get("goal")
+    structure = generate_program_structure(
+        travel_weeks, 3, "home",
+        block_weeks={"volume": 1, "puissance": 1, "force": 1},
+        goal=goal,
+    )
+    program_id = new_id("prog")
+    doc = {
+        "id": program_id,
+        "user_id": user["user_id"],
+        "name": f"En déplacement · {days} jours",
+        "goal_label": body.goal_label or "Maintien",
+        "goal": goal,
+        "weeks_total": travel_weeks,
+        "frequency": 3,
+        "split": "home",
+        "block_weeks": {"volume": 1, "puissance": 1, "force": 1},
+        "cycle_pattern": [w["session_type"] for w in structure[:6]],
+        "started_at": now_utc(),
+        "active": True,
+        "current_week": 1,
+        "weeks": structure,
+        "created_at": now_utc(),
+        "is_travel": True,
+        "travel_days": days,
+        "paused_program_id": paused_id,
+    }
+    await db.programs.insert_one(doc)
+    return strip_id(doc)
+
+
+@api.post("/program/resume")
+async def program_resume(authorization: Optional[str] = Header(default=None)):
+    """Resume the program that was paused by travel mode."""
+    user = await get_current_user(authorization)
+    # Find current travel program
+    travel = await db.programs.find_one({"user_id": user["user_id"], "active": True, "is_travel": True})
+    if not travel:
+        # Nothing to resume — just try unpausing the paused one
+        paused = await db.programs.find_one({"user_id": user["user_id"], "paused_for_travel": True})
+        if not paused:
+            raise HTTPException(404, "Aucun programme en pause")
+        await db.programs.update_one(
+            {"id": paused["id"]},
+            {"$set": {"active": True, "paused_for_travel": False}, "$unset": {"paused_at": ""}},
+        )
+        return {"ok": True, "resumed": paused["id"]}
+    # Deactivate travel + reactivate paused
+    await db.programs.update_one(
+        {"id": travel["id"]},
+        {"$set": {"active": False, "deactivated_at": now_utc()}},
+    )
+    paused_id = travel.get("paused_program_id")
+    if paused_id:
+        await db.programs.update_one(
+            {"id": paused_id, "user_id": user["user_id"]},
+            {"$set": {"active": True, "paused_for_travel": False}, "$unset": {"paused_at": ""}},
+        )
+    return {"ok": True, "resumed": paused_id, "travel_ended": travel["id"]}
+
+
+# --- Challenges ---
+
+@api.post("/challenges/start")
+async def challenge_start(
+    body: ChallengeStartRequest, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    ch_type = body.type.lower()
+    if ch_type not in CHALLENGE_BLUEPRINTS:
+        raise HTTPException(400, "Type invalide (pushups|abs|squats)")
+    # Stop any active challenge of the same type
+    await db.challenges.update_many(
+        {"user_id": user["user_id"], "type": ch_type, "active": True},
+        {"$set": {"active": False, "abandoned_at": now_utc()}},
+    )
+    prof = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    level = _challenge_level_from_profile(prof)
+    days_plan = _build_challenge_days(ch_type, level)
+    bp = CHALLENGE_BLUEPRINTS[ch_type]
+    doc = {
+        "id": new_id("chl"),
+        "user_id": user["user_id"],
+        "type": ch_type,
+        "name": bp["name"],
+        "icon": bp["icon"],
+        "muscle": bp["muscle"],
+        "exercise": bp["exercise"],
+        "level": level,
+        "active": True,
+        "started_at": now_utc(),
+        "days": days_plan,
+        "streak": 0,
+        "completed_count": 0,
+    }
+    await db.challenges.insert_one(doc)
+    return strip_id(doc)
+
+
+@api.get("/challenges/active")
+async def challenges_active(authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    cur = db.challenges.find(
+        {"user_id": user["user_id"], "active": True}, {"_id": 0}
+    ).sort("started_at", -1)
+    items = await cur.to_list(10)
+    return {"items": items}
+
+
+@api.get("/challenges/blueprints")
+async def challenges_blueprints(_: Optional[str] = Header(default=None, alias="authorization")):
+    items = []
+    for k, bp in CHALLENGE_BLUEPRINTS.items():
+        items.append({"type": k, "name": bp["name"], "muscle": bp["muscle"], "icon": bp["icon"], "exercise": bp["exercise"]})
+    return {"items": items}
+
+
+@api.get("/challenges/{challenge_id}")
+async def challenge_get(
+    challenge_id: str, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    ch = await db.challenges.find_one({"id": challenge_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not ch:
+        raise HTTPException(404, "Challenge not found")
+    return ch
+
+
+@api.post("/challenges/{challenge_id}/check-day")
+async def challenge_check_day(
+    challenge_id: str,
+    body: ChallengeCheckDayRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    user = await get_current_user(authorization)
+    ch = await db.challenges.find_one({"id": challenge_id, "user_id": user["user_id"]})
+    if not ch:
+        raise HTTPException(404, "Challenge not found")
+    days = ch.get("days", [])
+    if body.day_index < 0 or body.day_index >= len(days):
+        raise HTTPException(400, "Invalid day_index")
+    day = days[body.day_index]
+    if day.get("completed"):
+        return {"ok": True, "already_done": True, "challenge": strip_id(ch)}
+    day["completed"] = True
+    day["completed_at"] = now_utc().isoformat()
+    # Recount streak and completion
+    completed_count = sum(1 for d in days if d.get("completed"))
+    # streak: consecutive completed days from day 0 (excluding rest days which count as ok)
+    streak = 0
+    for d in days:
+        if d.get("completed") or d.get("is_rest"):
+            streak += 1
+        else:
+            break
+    await db.challenges.update_one(
+        {"id": challenge_id, "user_id": user["user_id"]},
+        {"$set": {"days": days, "streak": streak, "completed_count": completed_count}},
+    )
+    # Add a workout entry to existing collection so it appears in calendar/history
+    if not day.get("is_rest"):
+        now = now_utc()
+        wk_doc = {
+            "id": new_id("wk"),
+            "user_id": user["user_id"],
+            "date": now.date().isoformat(),
+            "title": ch["name"],
+            "focus": f"Challenge J{body.day_index + 1}: {day.get('label', '')}",
+            "duration_min": 10,
+            "exercises": [{
+                "name": day.get("label", ch["exercise"]),
+                "sets": 1,
+                "reps": str(day.get("target_reps", 0)),
+                "rest_s": 60,
+                "checked": True,
+            }],
+            "completed": True,
+            "session_type": "volume",
+            "created_at": now,
+            "challenge_id": challenge_id,
+            "source": "challenge",
+        }
+        await db.workouts.insert_one(wk_doc)
+    if completed_count >= sum(1 for d in days if not d.get("is_rest")):
+        await db.challenges.update_one(
+            {"id": challenge_id},
+            {"$set": {"active": False, "completed_at": now_utc()}},
+        )
+    refreshed = await db.challenges.find_one({"id": challenge_id}, {"_id": 0})
+    return {"ok": True, "challenge": refreshed}
+
+
+@api.delete("/challenges/{challenge_id}")
+async def challenge_abandon(
+    challenge_id: str, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    res = await db.challenges.update_one(
+        {"id": challenge_id, "user_id": user["user_id"]},
+        {"$set": {"active": False, "abandoned_at": now_utc()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Challenge not found")
+    return {"ok": True}
 
 
 @api.put("/program/{program_id}/week/{week_index}/day/{day_index}")

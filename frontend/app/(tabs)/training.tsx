@@ -11,7 +11,7 @@ import { api } from "@/src/api";
 import { Card, Button, SectionTitle, Stat } from "@/src/components/UI";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
-type Exercise = { name: string; sets: number; reps: string; rest_s: number; checked?: boolean };
+type Exercise = { name: string; sets: number; reps: string; rest_s: number; checked?: boolean; is_recommended?: boolean };
 type Workout = {
   id: string; date: string; title: string; focus: string; duration_min: number;
   exercises: Exercise[]; completed: boolean; session_type?: string;
@@ -116,7 +116,14 @@ export default function Training() {
   const [setupFreq, setSetupFreq] = useState<3 | 5 | 7>(5);
   const [setupSplit, setSetupSplit] = useState<"ppl" | "fullbody" | "split">("ppl");
   const [setupGoal, setSetupGoal] = useState("Hypertrophie");
+  const [setupBlocks, setSetupBlocks] = useState<{ volume: number; puissance: number; force: number }>({ volume: 1, puissance: 1, force: 1 });
   const [creatingProgram, setCreatingProgram] = useState(false);
+
+  // Travel mode + accelerate
+  const [travelOpen, setTravelOpen] = useState(false);
+  const [travelDays, setTravelDays] = useState(7);
+  const [travelBusy, setTravelBusy] = useState(false);
+  const [acceleratingBusy, setAcceleratingBusy] = useState(false);
 
   // AI exercise add
   const [aiExModalOpen, setAiExModalOpen] = useState(false);
@@ -331,13 +338,54 @@ export default function Training() {
     try {
       const created = await api<TrainingProgram>("/program/create", {
         method: "POST",
-        body: { weeks: setupWeeks, frequency: setupFreq, split: setupSplit, goal_label: setupGoal },
+        body: {
+          weeks: setupWeeks,
+          frequency: setupFreq,
+          split: setupSplit,
+          goal_label: setupGoal,
+          block_weeks: setupBlocks,
+        },
       });
       setProgram(created);
       setExpandedWeek(1);
       setProgramSetupOpen(false);
     } catch {} finally {
       setCreatingProgram(false);
+    }
+  };
+
+  const accelerateProgram = async () => {
+    if (!program) return;
+    setAcceleratingBusy(true);
+    try {
+      await api(`/program/${program.id}/accelerate`, { method: "POST" });
+      const refreshed = await api<{ program: TrainingProgram | null }>("/program/current");
+      setProgram(refreshed.program);
+    } finally {
+      setAcceleratingBusy(false);
+    }
+  };
+
+  const startTravelMode = async () => {
+    setTravelBusy(true);
+    try {
+      await api("/program/travel-mode", { method: "POST", body: { days: travelDays, goal_label: "Maintien" } });
+      const refreshed = await api<{ program: TrainingProgram | null }>("/program/current");
+      setProgram(refreshed.program);
+      setTravelOpen(false);
+    } catch {} finally {
+      setTravelBusy(false);
+    }
+  };
+
+  const endTravelMode = async () => {
+    setTravelBusy(true);
+    try {
+      await api("/program/resume", { method: "POST" });
+      const refreshed = await api<{ program: TrainingProgram | null }>("/program/current");
+      setProgram(refreshed.program);
+    } catch {} finally {
+      setTravelBusy(false);
     }
   };
 
@@ -514,6 +562,11 @@ export default function Training() {
         <ProgramSummaryCard
           program={program}
           onCreate={() => setProgramSetupOpen(true)}
+          onAccelerate={accelerateProgram}
+          onTravel={() => setTravelOpen(true)}
+          onEndTravel={endTravelMode}
+          acceleratingBusy={acceleratingBusy}
+          travelBusy={travelBusy}
         />
 
         {/* Activity card */}
@@ -776,6 +829,47 @@ export default function Training() {
       </Modal>
 
       {/* Workout editor modal */}
+      {/* Travel mode modal */}
+      <Modal visible={travelOpen} transparent animationType="fade" onRequestClose={() => setTravelOpen(false)}>
+        <View style={styles.modalBg}>
+          <View style={styles.modalCard} testID="travel-modal">
+            <View style={styles.modalHandle} />
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle}>Mode déplacement</Text>
+                <Text style={[typography.small, { color: colors.textMuted }]}>
+                  100 % poids du corps. Ton programme normal sera mis en pause.
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setTravelOpen(false)} testID="travel-close">
+                <Ionicons name="close" size={22} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
+            <Text style={[typography.caption, { marginTop: spacing.md }]}>Durée du voyage</Text>
+            <View style={styles.setupOptionRow}>
+              {[5, 7, 10, 14, 21, 30].map((d) => (
+                <TouchableOpacity
+                  key={d}
+                  onPress={() => setTravelDays(d)}
+                  style={[styles.setupOption, travelDays === d && styles.setupOptionOn, { minWidth: 60 }]}
+                  testID={`travel-days-${d}`}
+                >
+                  <Text style={[styles.setupOptionLabel, travelDays === d && styles.setupOptionLabelOn]}>{d} j</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Button
+              title={travelBusy ? "Configuration..." : `Activer (${travelDays} jours)`}
+              onPress={startTravelMode}
+              loading={travelBusy}
+              icon={<Ionicons name="airplane" size={16} color="#fff" />}
+              style={{ marginTop: spacing.lg }}
+              testID="travel-confirm"
+            />
+          </View>
+        </View>
+      </Modal>
+
       {/* Program setup modal */}
       <Modal visible={programSetupOpen} transparent animationType="slide" onRequestClose={() => setProgramSetupOpen(false)}>
         <View style={styles.modalBg}>
@@ -826,10 +920,11 @@ export default function Training() {
                   { v: "ppl" as const, label: "PPL", sub: "Push / Pull / Legs" },
                   { v: "fullbody" as const, label: "Full body", sub: "Tout le corps" },
                   { v: "split" as const, label: "Split", sub: "1 groupe / séance" },
+                  { v: "home" as const, label: "À la maison", sub: "Poids du corps" },
                 ]).map((o) => (
                   <TouchableOpacity
                     key={o.v}
-                    onPress={() => setSetupSplit(o.v)}
+                    onPress={() => setSetupSplit(o.v as any)}
                     style={[styles.setupOption, setupSplit === o.v && styles.setupOptionOn]}
                     testID={`setup-split-${o.v}`}
                   >
@@ -852,6 +947,28 @@ export default function Training() {
                   </TouchableOpacity>
                 ))}
               </View>
+
+              <Text style={[typography.caption, { marginTop: spacing.md }]}>Durée des blocs (Volume → Puissance → Force)</Text>
+              {(["volume", "puissance", "force"] as const).map((block) => (
+                <View key={block} style={{ flexDirection: "row", alignItems: "center", marginTop: 6, gap: 8 }}>
+                  <View style={{ width: 88, flexDirection: "row", alignItems: "center", gap: 6 }}>
+                    <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: SESSION_COLOR[block]?.fg || colors.primary }} />
+                    <Text style={[typography.small, { fontWeight: "700", textTransform: "capitalize" }]}>{block}</Text>
+                  </View>
+                  {[1, 2, 3].map((n) => (
+                    <TouchableOpacity
+                      key={n}
+                      onPress={() => setSetupBlocks({ ...setupBlocks, [block]: n })}
+                      style={[styles.setupOption, setupBlocks[block] === n && styles.setupOptionOn, { flex: 1, minWidth: 50, paddingVertical: 8 }]}
+                      testID={`setup-block-${block}-${n}`}
+                    >
+                      <Text style={[styles.setupOptionLabel, { fontSize: 12 }, setupBlocks[block] === n && styles.setupOptionLabelOn]}>
+                        {n} sem.
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ))}
             </ScrollView>
 
             <Button
@@ -1178,6 +1295,7 @@ const styles = StyleSheet.create({
   weekTypePill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.full, borderWidth: 1 },
   programDayRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
   programDayNum: { width: 32, height: 32, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: colors.primaryPale },
+  actionBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 8, borderRadius: radius.full, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.surface },
   // Setup modal
   setupOptionRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
   setupOption: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.md, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, flex: 1, minWidth: 90, alignItems: "center" },
@@ -1213,7 +1331,17 @@ function SessionLegend() {
   );
 }
 
-function ProgramSummaryCard({ program, onCreate }: { program: TrainingProgram | null; onCreate: () => void }) {
+function ProgramSummaryCard({
+  program, onCreate, onAccelerate, onTravel, onEndTravel, acceleratingBusy, travelBusy,
+}: {
+  program: TrainingProgram | null;
+  onCreate: () => void;
+  onAccelerate?: () => void;
+  onTravel?: () => void;
+  onEndTravel?: () => void;
+  acceleratingBusy?: boolean;
+  travelBusy?: boolean;
+}) {
   if (!program) {
     return (
       <Card testID="program-summary-empty">
@@ -1232,14 +1360,17 @@ function ProgramSummaryCard({ program, onCreate }: { program: TrainingProgram | 
       </Card>
     );
   }
+  const isTravel = (program as any).is_travel === true;
   return (
-    <Card testID="program-summary-card" style={{ borderColor: colors.primary, borderWidth: 1.5 }}>
+    <Card testID="program-summary-card" style={{ borderColor: isTravel ? "#A85B0F" : colors.primary, borderWidth: 1.5 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-        <View style={[styles.focusBadge, { backgroundColor: colors.primaryPale }]}>
-          <Ionicons name="rocket" size={20} color={colors.primary} />
+        <View style={[styles.focusBadge, { backgroundColor: isTravel ? "#FCE3CB" : colors.primaryPale }]}>
+          <Ionicons name={isTravel ? "airplane" : "rocket"} size={20} color={isTravel ? "#A85B0F" : colors.primary} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[typography.caption, { color: colors.primary, fontWeight: "700" }]}>Objectif & programme</Text>
+          <Text style={[typography.caption, { color: isTravel ? "#A85B0F" : colors.primary, fontWeight: "700" }]}>
+            {isTravel ? "Mode déplacement actif" : "Objectif & programme"}
+          </Text>
           <Text style={[typography.body, { fontWeight: "700" }]}>{program.goal_label} · {program.split.toUpperCase()} {program.frequency}j</Text>
           <Text style={[typography.small, { marginTop: 2 }]}>
             Semaine <Text style={{ fontWeight: "800", color: colors.primary }}>{program.current_week}/{program.weeks_total}</Text>
@@ -1247,7 +1378,41 @@ function ProgramSummaryCard({ program, onCreate }: { program: TrainingProgram | 
         </View>
       </View>
       <View style={styles.progressBar}>
-        <View style={[styles.progressFill, { width: `${Math.min(100, (program.current_week / program.weeks_total) * 100)}%` }]} />
+        <View style={[styles.progressFill, { width: `${Math.min(100, (program.current_week / program.weeks_total) * 100)}%`, backgroundColor: isTravel ? "#A85B0F" : colors.primary }]} />
+      </View>
+      {/* Action buttons */}
+      <View style={{ flexDirection: "row", gap: 6, marginTop: spacing.sm, flexWrap: "wrap" }}>
+        {isTravel ? (
+          <TouchableOpacity
+            onPress={onEndTravel}
+            disabled={travelBusy}
+            style={[styles.actionBtn, { borderColor: "#A85B0F", flex: 1 }, travelBusy && { opacity: 0.5 }]}
+            testID="summary-end-travel"
+          >
+            <Ionicons name="arrow-undo" size={14} color="#A85B0F" />
+            <Text style={[typography.small, { color: "#A85B0F", fontWeight: "700" }]}>Reprendre mon programme</Text>
+          </TouchableOpacity>
+        ) : (
+          <>
+            <TouchableOpacity
+              onPress={onAccelerate}
+              disabled={acceleratingBusy}
+              style={[styles.actionBtn, acceleratingBusy && { opacity: 0.5 }]}
+              testID="summary-accelerate"
+            >
+              <Ionicons name="flash" size={14} color={colors.primary} />
+              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Accélérer</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onCreate} style={styles.actionBtn} testID="summary-new-goals">
+              <Ionicons name="refresh" size={14} color={colors.primary} />
+              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Nouveaux objectifs</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={onTravel} style={styles.actionBtn} testID="summary-travel">
+              <Ionicons name="airplane-outline" size={14} color={colors.primary} />
+              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Déplacement</Text>
+            </TouchableOpacity>
+          </>
+        )}
       </View>
     </Card>
   );
@@ -1298,9 +1463,14 @@ function ProgramWeekCard({
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[typography.body, { fontWeight: "600" }]}>{d.focus}</Text>
-                <Text style={typography.small} numberOfLines={1}>
-                  {d.exercises.length} ex. · {d.exercises.slice(0, 2).map((e) => e.name.split(" ")[0]).join(", ")}…
-                </Text>
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
+                  {d.exercises.some((e) => e.is_recommended) && (
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} />
+                  )}
+                  <Text style={typography.small} numberOfLines={1}>
+                    {d.exercises.length} ex. · {d.exercises.slice(0, 2).map((e) => e.name.split(" ")[0]).join(", ")}…
+                  </Text>
+                </View>
               </View>
               <Ionicons name="create-outline" size={16} color={colors.textMuted} />
             </TouchableOpacity>

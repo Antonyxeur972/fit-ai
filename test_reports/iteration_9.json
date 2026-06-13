@@ -1,0 +1,48 @@
+{
+  "summary": "Iteration 9 — Phase 3 (Program v2 + Challenges). Backend: 32/32 pytest tests PASS. POST /api/program/create accepts block_weeks (clamped 1-3), goal, split='home', and emits sequence Volume→Puissance→Force (verified [v,v,p,f,f,v,v,p] for {2,1,2}); is_recommended bool present on every exercise (true for goal-matched lifts like Squat barre arrière@muscle). split='home' uses HomePush/Pull/Legs (freq3), +Core+FullBody (freq5), ends with Cardio (freq7). POST /api/program/{id}/accelerate increments accelerated_count, bumps sets +1 from current_week onwards (past weeks untouched), caps at 6, returns {ok, exercises_bumped, accelerated_count}, 404 on unknown. POST /api/program/travel-mode pauses active non-travel program (paused_for_travel:true, active:false), creates is_travel:true split=home with paused_program_id, weeks_total=ceil(days/7), days clamped 3-90. POST /api/program/resume deactivates travel, reactivates paused, 404 when nothing. Challenges: blueprints returns 3 templates (pushups/abs/squats), start creates 30-day plan with exactly 8 rest days, level=2 for activity_level=moderate (day 0 = 20 reps for abs), day 30 target ≈ 4x day 1 (linear), auto-deactivates prior same-type; active returns active items; check-day marks completed, updates streak/completed_count, inserts workout doc with source=challenge+challenge_id (visible in calendar/history), rest days do NOT create workout entries, idempotent on already-done day, auto-completes (active:false, completed_at set) when all non-rest days done, 400 on invalid day_index; GET/{id} returns full doc (no _id leak), DELETE soft-abandons (abandoned_at), 404 on unknown for both. Frontend smoke: bottom tab bar shows new 'Challenges' tab with flame icon (testID='tab-challenges'). Challenges screen renders without crashing (header 'Challenges', subtitle '30 JOURS · À LA MAISON', section 'Démarrer un challenge'). Training screen setup modal opens via 'Créer mon programme' button — all 4 split chips (setup-split-ppl/fullbody/split/home) and all 9 block chips (setup-block-{volume,puissance,force}-{1,2,3}) visible+clickable. Modal section 'Durée des blocs (Volume → Puissance → Force)' present. summary-end-travel / summary-accelerate / summary-new-goals / summary-travel testIDs and is_recommended green dot logic exist in /app/frontend/app/(tabs)/training.tsx (verified by grep — not exercised in UI smoke because post-creation flow needs Google OAuth session). travel-modal testID also present.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/program/travel-mode", "issue": "When called with no active program at all, still creates a travel program with paused_program_id=null. Spec is silent on this — currently no-op-prevention. Probably fine, but worth confirming."},
+      {"endpoint": "POST /api/challenges/{id}/check-day on rest day", "issue": "Returns 200 and *marks the rest day as completed* (sets day.completed=true) instead of being a no-op. Spec said 'Rest days CANNOT be checked (or should return idempotent)'. Current impl mutates the rest day silently. It does NOT insert a workout (good), but the completed flag is flipped which would inflate completed_count beyond non-rest count and may interfere with auto-complete logic if the user taps a rest day. Recommend either rejecting (400) or short-circuit return without mutation."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "ChallengesTab", "issue": "load() uses Promise.all([active, blueprints]); if /challenges/active rejects (401 unauth, network), blueprints — which is essentially public — is also discarded and the screen shows an empty 'Démarrer un challenge' list. Either call them independently or use Promise.allSettled. Reference: /app/frontend/app/(tabs)/challenges.tsx:46-58", "testID": "challenge-start-*", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "challenges", "issues": ["Day cells use width:'13.5%' inside a flexbox with gap:4 — on 375px viewport this yields 7 cells/row (50.6px each) which is below 44pt touch-target on the inner tappable area once padding is removed. Consider 4-5 cells/row or larger min height."]}
+    ],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration9_program_challenges.py",
+    "/app/test_reports/pytest/iteration9_results.xml"
+  ],
+  "action_items": [
+    "Consider: in ChallengesTab.load(), switch to Promise.allSettled so blueprints render even when /challenges/active 401s during boot.",
+    "Decide check-day semantics for rest days: either return 400 'Repos — non vérifiable' or short-circuit without flipping day.completed. Current behavior flips the flag silently (no workout created though).",
+    "Optional: shrink day-grid to 5 columns or increase row height for 44pt minimum touch target on small phones."
+  ],
+  "critical_code_review_comments": [
+    "server.py:1672 — body.split fallback silently coerces unknown values to 'ppl'. Same advice as iter 8: prefer 422 for invalid split rather than silent fallback.",
+    "server.py:1699 — cycle_pattern stored as structure[:6] which captures the full cycle for {1,1,1}=[v,p,f] up to 6 weeks but truncates for longer cycles (e.g. {3,3,3}=9 weeks). Harmless but inconsistent with stored block_weeks; consider storing the full expanded pattern.",
+    "server.py:1751 — travel-mode does not require an active program to exist; if none, paused_program_id=null and resume will 404. OK behavior but undocumented.",
+    "server.py:1873-1878 — /challenges/blueprints does NOT call get_current_user; consider explicit no-auth note in the docstring (currently relies on alias trick).",
+    "server.py:1906 — check-day on rest day still mutates day.completed=true (line 1908 runs before is_rest check). Move the is_rest short-circuit above the mutation."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration9_program_challenges.py (new, 32 tests; uses sys.path conftest import to avoid relative-import issue in pytest CLI mode)"
+  ],
+  "success_rate": {
+    "backend": "100% (32/32)",
+    "frontend": "smoke-pass: Challenges tab appears in bottom nav (flame icon, testID=tab-challenges), Challenges screen renders without crash. Training setup modal exposes all required testIDs (4 splits incl. setup-split-home + 9 block chips setup-block-{volume,puissance,force}-{1,2,3}). Post-creation summary card / travel modal / green-dot exercised only by grep (testIDs summary-accelerate, summary-new-goals, summary-travel, summary-end-travel, travel-modal, is_recommended logic all present in training.tsx). Full interactive run blocked by Emergent Managed Google Auth on web preview (same constraint as iter 7/8)."
+  },
+  "seed_data_creation": "Reuses conftest-seeded user (user_test_001 / test_session_token_abc). New autouse module fixture in test_iteration9 cleans db.programs, db.challenges, and challenge-source workouts for the user before and after; upserts profile with goal=muscle / activity_level=moderate so level computation tests are deterministic.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend phase-3 endpoints (program block_weeks/goal/home/accelerate/travel/resume + 6 challenge endpoints) are stable: 32/32 pytest. Re-running the suite is idempotent (fixtures wipe & re-seed). To exercise the post-creation UI flow (ProgramSummaryCard with summary-accelerate/new-goals/travel buttons, travel-modal, ProgramWeekCard green dot), you must drive real Google OAuth or seed a program directly into Mongo for user_test_001 — AsyncStorage injection from the test harness is not sufficient because the AuthProvider bootstraps via /auth/me. Two known minor bugs to flag: (1) ChallengesTab Promise.all rejects both calls on a single failure — use allSettled; (2) check-day on a rest day mutates day.completed=true (no workout doc though).",
+  "rca_of_issue": "N/A — all backend tests pass and frontend smoke confirms the new Challenges tab + setup modal block chips compile and render."
+}
