@@ -1903,6 +1903,8 @@ async def challenge_check_day(
     if body.day_index < 0 or body.day_index >= len(days):
         raise HTTPException(400, "Invalid day_index")
     day = days[body.day_index]
+    if day.get("is_rest"):
+        return {"ok": True, "rest_day": True, "challenge": strip_id(ch)}
     if day.get("completed"):
         return {"ok": True, "already_done": True, "challenge": strip_id(ch)}
     day["completed"] = True

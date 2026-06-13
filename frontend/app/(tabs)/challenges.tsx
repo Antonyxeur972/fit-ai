@@ -43,13 +43,15 @@ export default function ChallengesTab() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [ac, bp] = await Promise.all([
+      const [ac, bp] = await Promise.allSettled([
         api<{ items: Challenge[] }>("/challenges/active"),
         api<{ items: Blueprint[] }>("/challenges/blueprints"),
       ]);
-      setActive(ac.items || []);
-      setBlueprints(bp.items || []);
-      if (ac.items?.[0]) setSelectedId(ac.items[0].id);
+      const activeItems = ac.status === "fulfilled" ? (ac.value.items || []) : [];
+      const bpItems = bp.status === "fulfilled" ? (bp.value.items || []) : [];
+      setActive(activeItems);
+      setBlueprints(bpItems);
+      if (activeItems[0]) setSelectedId(activeItems[0].id);
     } catch (e) {
       console.warn("challenges load", e);
     } finally {
