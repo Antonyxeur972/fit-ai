@@ -260,3 +260,12 @@ agent_communication:
       * Share card uses react-native-view-shot; capture only fully works on native build,
         web fallback opens preview URL. UI itself should still render & buttons must not crash.
       * Photo background picker is optional. The card MUST also work without a background photo.
+  - agent: "testing"
+    message: |
+      Iteration 10: 17/18 backend tests passing. Critical bug found in force_metrics keys
+      collision ('développé' overrides 'bench' & 'ohp'). RCA pointed to a stray slug recompute.
+  - agent: "main"
+    message: |
+      Bug fixed: removed the stray `slug = name.split(" ")[0].lower()` override. Snapshot now
+      uses tuple-provided slugs squat/bench/deadlift/ohp. TestEstimate1RM (4/4) PASSED.
+      Backend Phase 4: 18/18 ✅.

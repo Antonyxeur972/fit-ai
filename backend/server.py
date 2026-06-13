@@ -1407,7 +1407,6 @@ async def estimate_1rm_endpoint(
             "ratio_bw": round(ratio, 2),
             "tier": tier,
         })
-        slug = name.split(" ")[0].lower()
         snapshot[slug] = est
     if results:
         await db.users.update_one(
