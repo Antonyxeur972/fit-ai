@@ -5,7 +5,6 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import DateTimePicker from "@react-native-community/datetimepicker";
-import Svg, { Path, Circle, Defs, LinearGradient, Stop } from "react-native-svg";
 import { useAuth } from "@/src/auth";
 import { api } from "@/src/api";
 import { Card, SectionTitle, Stat, Button } from "@/src/components/UI";
@@ -32,8 +31,6 @@ type BodyComp = {
   muscle_groups?: { group: string; score_pct: number; status: string }[];
 };
 
-type TransfoLite = { id: string; view?: string };
-
 const GOAL_LABEL: Record<string, string> = { lose: "Perte de gras", maintain: "Maintien", gain: "Prise de muscle" };
 const MUSCLE_COLOR = (score: number) => score >= 100 ? colors.primary : score >= 50 ? "#F59E0B" : colors.alert;
 
@@ -42,7 +39,6 @@ export default function ProfileTab() {
   const { user, signOut, refreshUser } = useAuth();
   const [profile, setProfile] = useState<Profile>({});
   const [composition, setComposition] = useState<BodyComp | null>(null);
-  const [transfoViews, setTransfoViews] = useState<{ front: boolean; back: boolean }>({ front: false, back: false });
 
   const [nameModal, setNameModal] = useState(false);
   const [nameInput, setNameInput] = useState("");
@@ -53,8 +49,6 @@ export default function ProfileTab() {
   const [neck, setNeck] = useState("");
   const [hips, setHips] = useState("");
   const [savingMeasures, setSavingMeasures] = useState(false);
-
-  const [avatarOpen, setAvatarOpen] = useState(false);
 
   // Phase 4: silhouette edit modal
   const [silhouetteModal, setSilhouetteModal] = useState(false);
@@ -91,10 +85,9 @@ export default function ProfileTab() {
 
   const load = useCallback(async () => {
     try {
-      const [p, c, transfos, ps] = await Promise.all([
+      const [p, c, ps] = await Promise.all([
         api<Profile>("/profile"),
         api<BodyComp>("/body/composition").catch(() => ({ available: false } as BodyComp)),
-        api<TransfoLite[]>("/transformations").catch(() => [] as TransfoLite[]),
         api<any>("/points/summary").catch(() => null),
       ]);
       setProfile(p);
@@ -103,14 +96,6 @@ export default function ProfileTab() {
       setHips(String(p.hips_cm || ""));
       setComposition(c);
       setPoints(ps);
-      const views = { front: false, back: false };
-      transfos.forEach((t) => {
-        const v = (t.view || "front").toLowerCase();
-        if (v === "front" || v === "side") views.front = true;
-        if (v === "back") views.back = true;
-      });
-      if (!views.front && !views.back) views.front = true;
-      setTransfoViews(views);
     } catch {}
   }, []);
 
@@ -403,49 +388,6 @@ export default function ProfileTab() {
           )}
         </Card>
 
-        {/* Body Avatar */}
-        {composition?.available && composition.muscle_groups && (
-          <Card testID="body-avatar-card">
-            <SectionTitle title="Ton avatar de force" action={
-              <TouchableOpacity onPress={() => setAvatarOpen(true)} testID="avatar-detail">
-                <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Détails</Text>
-              </TouchableOpacity>
-            } />
-            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.sm }}>
-              <View style={{ flexDirection: "row", gap: 4 }}>
-                {transfoViews.front && (
-                  <View style={{ alignItems: "center" }}>
-                    <BodyAvatar groups={composition.muscle_groups} view="front" />
-                    <Text style={[typography.small, { fontSize: 10, marginTop: 4, color: colors.textMuted }]}>Face</Text>
-                  </View>
-                )}
-                {transfoViews.back && (
-                  <View style={{ alignItems: "center" }}>
-                    <BodyAvatar groups={composition.muscle_groups} view="back" />
-                    <Text style={[typography.small, { fontSize: 10, marginTop: 4, color: colors.textMuted }]}>Dos</Text>
-                  </View>
-                )}
-              </View>
-              <View style={{ flex: 1, gap: 6 }}>
-                {composition.muscle_groups.map((g) => (
-                  <View key={g.group} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-                      <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: MUSCLE_COLOR(g.score_pct) }} />
-                      <Text style={typography.small}>{g.group}</Text>
-                    </View>
-                    <Text style={[typography.small, { color: MUSCLE_COLOR(g.score_pct), fontWeight: "700" }]}>{g.score_pct}%</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-            {!transfoViews.back && (
-              <Text style={[typography.small, { marginTop: spacing.sm, color: colors.textMuted, fontSize: 11 }]}>
-                Ajoute une photo « Dos » dans Progression pour voir ton avatar de dos.
-              </Text>
-            )}
-          </Card>
-        )}
-
         {/* Body composition */}
         <Card testID="body-comp-card">
           <SectionTitle title="Composition corporelle" action={
@@ -585,48 +527,6 @@ export default function ProfileTab() {
         </View>
       </Modal>
 
-      {/* Avatar detail modal */}
-      <Modal visible={avatarOpen} transparent animationType="slide" onRequestClose={() => setAvatarOpen(false)}>
-        <View style={styles.modalBg}>
-          <View style={[styles.modalCard, { maxHeight: "85%" }]}>
-            <View style={styles.modalHandle} />
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <Text style={styles.modalTitle}>Diagnostic musculaire</Text>
-              <TouchableOpacity onPress={() => setAvatarOpen(false)} testID="avatar-close">
-                <Ionicons name="close" size={22} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={{ marginTop: spacing.md }}>
-              <View style={{ flexDirection: "row", justifyContent: "center", gap: spacing.lg, marginBottom: spacing.lg }}>
-                {transfoViews.front && (
-                  <View style={{ alignItems: "center" }}>
-                    <BodyAvatar groups={composition?.muscle_groups || []} size={180} view="front" />
-                    <Text style={[typography.small, { marginTop: 4, color: colors.textSecondary, fontWeight: "600" }]}>Face</Text>
-                  </View>
-                )}
-                {transfoViews.back && (
-                  <View style={{ alignItems: "center" }}>
-                    <BodyAvatar groups={composition?.muscle_groups || []} size={180} view="back" />
-                    <Text style={[typography.small, { marginTop: 4, color: colors.textSecondary, fontWeight: "600" }]}>Dos</Text>
-                  </View>
-                )}
-              </View>
-              {composition?.muscle_groups?.map((g) => (
-                <View key={g.group} style={styles.diagRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[typography.body, { fontWeight: "700" }]}>{g.group}</Text>
-                    <Text style={[typography.small, { color: MUSCLE_COLOR(g.score_pct) }]}>
-                      {g.status === "fort" ? "✓ Niveau solide" : g.status === "moyen" ? "Continue à pousser" : "À développer en priorité"}
-                    </Text>
-                  </View>
-                  <Text style={[typography.h3, { color: MUSCLE_COLOR(g.score_pct) }]}>{g.score_pct}%</Text>
-                </View>
-              ))}
-              <View style={{ height: spacing.lg }} />
-            </ScrollView>
-          </View>
-        </View>
-      </Modal>
       {/* Phase 5: Mascot modal */}
       <Modal visible={mascotModal} transparent animationType="slide" onRequestClose={() => setMascotModal(false)}>
         <View style={styles.modalBg}>
@@ -821,77 +721,6 @@ function ForceLiftRow({
         </Text>
       )}
     </View>
-  );
-}
-
-// Stylized body avatar with colored muscle zones (front OR back view)
-function BodyAvatar({ groups, size = 110, view = "front" }: { groups: { group: string; score_pct: number }[]; size?: number; view?: "front" | "back" }) {
-  const get = (g: string) => MUSCLE_COLOR(groups.find((x) => x.group === g)?.score_pct || 0);
-  const w = size, h = size * 1.6;
-  const isBack = view === "back";
-  return (
-    <Svg width={w} height={h} viewBox="0 0 100 160">
-      <Defs>
-        <LinearGradient id={`bodyBg-${view}`} x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor="#F5F5F0" />
-          <Stop offset="1" stopColor="#EBEBE6" />
-        </LinearGradient>
-      </Defs>
-      {/* Body silhouette outline (same for both views) */}
-      <Path
-        d="M50 6 C 58 6, 60 14, 60 18 C 60 22, 58 26, 50 26 C 42 26, 40 22, 40 18 C 40 14, 42 6, 50 6 Z
-           M 38 30 L 62 30 L 70 38 L 78 60 L 76 64 L 70 56 L 68 70 L 70 92 L 67 130 L 63 150 L 56 150 L 54 110 L 50 110 L 46 110 L 44 150 L 37 150 L 33 130 L 30 92 L 32 70 L 30 56 L 24 64 L 22 60 L 30 38 L 38 30 Z"
-        fill={`url(#bodyBg-${view})`}
-        stroke="#D5D5CE"
-        strokeWidth="1"
-      />
-
-      {isBack ? (
-        <>
-          {/* BACK VIEW */}
-          {/* Trapèze / haut du dos (Épaules) */}
-          <Path d="M 42 30 L 50 28 L 58 30 L 56 38 L 50 36 L 44 38 Z" fill={get("Épaules")} opacity="0.85" />
-          {/* Deltoïdes arrière */}
-          <Path d="M 32 36 L 30 50 L 38 44 L 39 36 Z" fill={get("Épaules")} opacity="0.85" />
-          <Path d="M 68 36 L 70 50 L 62 44 L 61 36 Z" fill={get("Épaules")} opacity="0.85" />
-          {/* Grand dorsal (large) */}
-          <Path d="M 38 40 L 62 40 L 64 70 L 50 78 L 36 70 Z" fill={get("Dos")} opacity="0.9" />
-          {/* Triceps (Bras) */}
-          <Path d="M 26 52 L 22 70 L 26 72 L 30 56 Z" fill={get("Bras")} opacity="0.85" />
-          <Path d="M 74 52 L 78 70 L 74 72 L 70 56 Z" fill={get("Bras")} opacity="0.85" />
-          {/* Lombaire (Core) */}
-          <Path d="M 44 78 L 56 78 L 56 90 L 44 90 Z" fill={get("Core")} opacity="0.7" />
-          {/* Fessiers + ischios (Jambes) */}
-          <Path d="M 36 90 L 50 92 L 36 130 L 32 130 Z" fill={get("Jambes")} opacity="0.85" />
-          <Path d="M 64 90 L 50 92 L 64 130 L 68 130 Z" fill={get("Jambes")} opacity="0.85" />
-          <Path d="M 36 130 L 33 148 L 40 148 L 44 130 Z" fill={get("Jambes")} opacity="0.7" />
-          <Path d="M 64 130 L 67 148 L 60 148 L 56 130 Z" fill={get("Jambes")} opacity="0.7" />
-        </>
-      ) : (
-        <>
-          {/* FRONT VIEW */}
-          {/* Shoulders/Épaules */}
-          <Path d="M 36 30 L 32 36 L 28 50 L 38 38 Z" fill={get("Épaules")} opacity="0.85" />
-          <Path d="M 64 30 L 68 36 L 72 50 L 62 38 Z" fill={get("Épaules")} opacity="0.85" />
-          {/* Pectoraux */}
-          <Path d="M 39 32 L 50 36 L 61 32 L 60 50 L 50 54 L 40 50 Z" fill={get("Pectoraux")} opacity="0.85" />
-          {/* Bras (biceps) */}
-          <Path d="M 27 50 L 23 70 L 26 72 L 30 56 Z" fill={get("Bras")} opacity="0.85" />
-          <Path d="M 73 50 L 77 70 L 74 72 L 70 56 Z" fill={get("Bras")} opacity="0.85" />
-          {/* Core / abdo */}
-          <Path d="M 42 56 L 58 56 L 58 78 L 42 78 Z" fill={get("Core")} opacity="0.85" />
-          {/* Dos (side lines / obliques) */}
-          <Path d="M 33 38 L 30 56 L 32 70 L 36 56 Z" fill={get("Dos")} opacity="0.5" />
-          <Path d="M 67 38 L 70 56 L 68 70 L 64 56 Z" fill={get("Dos")} opacity="0.5" />
-          {/* Jambes */}
-          <Path d="M 36 92 L 33 130 L 37 148 L 44 148 L 46 110 L 42 92 Z" fill={get("Jambes")} opacity="0.85" />
-          <Path d="M 64 92 L 67 130 L 63 148 L 56 148 L 54 110 L 58 92 Z" fill={get("Jambes")} opacity="0.85" />
-        </>
-      )}
-
-      {/* Head detail */}
-      <Circle cx="50" cy="18" r="9" fill="#E8E8E0" stroke="#D5D5CE" />
-    </Svg>
   );
 }
 

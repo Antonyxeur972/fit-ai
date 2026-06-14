@@ -2,8 +2,8 @@ import { forwardRef } from "react";
 import { View, Text, StyleSheet, Image, Dimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import Svg, { Path, Defs, Pattern, Rect, Circle } from "react-native-svg";
+import { Ionicons } from "@expo/vector-icons";
 import { Mascot, MascotAnimal } from "./Mascot";
-import { StrengthSymbol } from "./StrengthSymbol";
 
 export type ShareCardData = {
   date?: string;
@@ -76,10 +76,12 @@ export const ShareCard = forwardRef<View, { data: ShareCardData; width?: number 
           <Rect width="100%" height="100%" fill="url(#dots)" />
         </Svg>
 
-        {/* Header */}
+        {/* Header — FIT AI brand with leaf logo, prominent */}
         <View style={styles.headerRow}>
           <View style={styles.brandRow}>
-            <View style={styles.brandDot} />
+            <View style={styles.logoBadge}>
+              <Ionicons name="leaf" size={20} color="#fff" />
+            </View>
             <Text style={styles.brand}>FIT AI</Text>
           </View>
           <View style={styles.dateBox}>
@@ -87,59 +89,39 @@ export const ShareCard = forwardRef<View, { data: ShareCardData; width?: number 
           </View>
         </View>
 
-        {/* Big "Training du jour" title */}
-        <View style={styles.titleBlock}>
-          <Text style={styles.titleSmall}>TRAINING DU JOUR</Text>
-          {!!data.focus && (
+        {/* Focus title */}
+        {!!data.focus && (
+          <View style={styles.titleBlock}>
+            <Text style={styles.titleSmall}>TRAINING DU JOUR</Text>
             <Text style={styles.focus} numberOfLines={2}>
               {data.focus}
             </Text>
-          )}
-          <View style={styles.titleBar} />
-        </View>
+            <View style={styles.titleBar} />
+          </View>
+        )}
 
-        {/* Mascot + Strength symbol — central artwork */}
+        {/* Duration — big hero number */}
+        {typeof data.duration_min === "number" && data.duration_min > 0 && (
+          <View style={styles.durationBlock}>
+            <Text style={styles.durationValue}>{data.duration_min}min</Text>
+            <Text style={styles.durationLabel}>de séance</Text>
+          </View>
+        )}
+
+        {/* Mascot — small accent */}
         <View style={styles.mascotRow}>
           <View style={styles.mascotCircle}>
             {data.mascot?.animal ? (
               <Mascot
                 animal={data.mascot.animal}
                 evolution={evolution}
-                size={140}
+                size={56}
                 color="#0F3F1B"
                 strokeWidth={2.4}
               />
             ) : (
-              <Mascot animal="lion" evolution={1} size={140} color="#0F3F1B" strokeWidth={2.4} />
+              <Mascot animal="lion" evolution={1} size={56} color="#0F3F1B" strokeWidth={2.4} />
             )}
-          </View>
-          <View style={styles.strengthSlot}>
-            <StrengthSymbol
-              size={64}
-              evolution={evolution}
-              strength={data.strength_value ?? 0.5}
-              color="#2D7C3E"
-            />
-          </View>
-        </View>
-
-        {/* Duration + points row */}
-        <View style={styles.statsRow}>
-          {typeof data.duration_min === "number" && data.duration_min > 0 && (
-            <View style={styles.statChip}>
-              <Text style={styles.statEmoji}>⏱️</Text>
-              <View>
-                <Text style={styles.statValue}>{data.duration_min} min</Text>
-                <Text style={styles.statLabel}>Durée séance</Text>
-              </View>
-            </View>
-          )}
-          <View style={styles.statChip}>
-            <Text style={styles.statEmoji}>💪</Text>
-            <View>
-              <Text style={styles.statValue}>Séance OK</Text>
-              <Text style={styles.statLabel}>Terminée</Text>
-            </View>
           </View>
           {data.show_points && typeof data.points_today === "number" && data.points_today > 0 && (
             <View style={[styles.statChip, styles.pointsChip]}>
@@ -182,10 +164,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 5,
   },
-  brandRow: { flexDirection: "row", alignItems: "center", gap: 6 },
-  brandDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#2D7C3E" },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  logoBadge: {
+    width: 32, height: 32, borderRadius: 10,
+    backgroundColor: "#2D7C3E",
+    alignItems: "center", justifyContent: "center",
+  },
   brandDotSmall: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#2D7C3E" },
-  brand: { color: "#0F3F1B", fontSize: 16, fontWeight: "900", letterSpacing: 2 },
+  brand: { color: "#0F3F1B", fontSize: 22, fontWeight: "900", letterSpacing: 2 },
   dateBox: {
     backgroundColor: "rgba(255,255,255,0.85)",
     borderRadius: 14,
@@ -205,18 +191,32 @@ const styles = StyleSheet.create({
     lineHeight: 34,
   },
   titleBar: { width: 36, height: 4, backgroundColor: "#4ADE80", borderRadius: 2, marginTop: 4 },
-  mascotRow: { alignItems: "center", zIndex: 4, gap: 8 },
+  durationBlock: { alignItems: "center", zIndex: 5 },
+  durationValue: {
+    color: "#0F3F1B",
+    fontSize: 72,
+    fontWeight: "900",
+    letterSpacing: -2,
+  },
+  durationLabel: {
+    color: "#2D7C3E",
+    fontSize: 13,
+    fontWeight: "800",
+    letterSpacing: 2,
+    textTransform: "uppercase",
+    marginTop: -6,
+  },
+  mascotRow: { flexDirection: "row", alignItems: "center", justifyContent: "center", zIndex: 4, gap: 10 },
   mascotCircle: {
-    width: 180,
-    height: 180,
-    borderRadius: 90,
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     backgroundColor: "rgba(255,255,255,0.7)",
     borderWidth: 2,
     borderColor: "rgba(45,124,62,0.45)",
     alignItems: "center",
     justifyContent: "center",
   },
-  strengthSlot: { marginTop: -16 },
   statsRow: { flexDirection: "row", gap: 8, flexWrap: "wrap", zIndex: 5 },
   statChip: {
     flexDirection: "row",

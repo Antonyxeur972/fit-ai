@@ -19,21 +19,83 @@ export const SILHOUETTE_LABELS: Record<number, string> = {
   5: "Très musclé",
 };
 
+type SilParams = {
+  sH: number; // shoulder half-width
+  cH: number; // chest/armpit half-width
+  wH: number; // waist half-width
+  hH: number; // hip half-width
+  aO: number; // arm outer reach at elbow
+  aW: number; // wrist half-width
+  lA: number; // ankle half-width
+  gap: number; // half-gap between legs
+  hr: number; // head radius
+};
+
+// Build a clean, symmetric humanoid silhouette path from a small set of body parameters.
+function buildSilhouette(p: SilParams): string {
+  const { sH, cH, wH, hH, aO, aW, lA, gap, hr } = p;
+  const body = [
+    [50 + 4, 24], // neck R
+    [50 + sH, 28], // shoulder R
+    [50 + aO, 52], // elbow R
+    [50 + aW + 2, 94], // wrist R outer
+    [50 + aW - 2, 94], // wrist R inner
+    [50 + cH - 1, 56], // armpit R
+    [50 + wH, 78], // waist R
+    [50 + hH, 88], // hip R
+    [50 + hH - 1, 132], // thigh R
+    [50 + lA + gap, 160], // ankle R outer
+    [50 + gap, 160], // ankle R inner
+    [50 + gap, 100], // crotch up R
+    [50, 92], // crotch center
+    [50 - gap, 100], // crotch up L
+    [50 - gap, 160], // ankle L inner
+    [50 - lA - gap, 160], // ankle L outer
+    [50 - (hH - 1), 132], // thigh L
+    [50 - hH, 88], // hip L
+    [50 - wH, 78], // waist L
+    [50 - (cH - 1), 56], // armpit L
+    [50 - (aW - 2), 94], // wrist L inner
+    [50 - (aW + 2), 94], // wrist L outer
+    [50 - aO, 52], // elbow L
+    [50 - sH, 28], // shoulder L
+    [50 - 4, 24], // neck L
+  ];
+  const torso = `M${body.map(([x, y]) => `${x} ${y}`).join(" L")} Z`;
+  const head = `M${50 + hr} 14 a${hr} ${hr} 0 1 0 ${-2 * hr} 0 a${hr} ${hr} 0 1 0 ${2 * hr} 0 Z`;
+  return `${head} ${torso}`;
+}
+
+const MALE_LEVELS: SilParams[] = [
+  { sH: 14, cH: 12, wH: 9, hH: 11, aO: 17, aW: 6, lA: 5, gap: 2, hr: 8 },
+  { sH: 15, cH: 13, wH: 9.5, hH: 11.5, aO: 18, aW: 6.5, lA: 5.5, gap: 2, hr: 8 },
+  { sH: 16, cH: 14, wH: 10, hH: 12, aO: 19, aW: 7, lA: 6, gap: 2, hr: 8 },
+  { sH: 18, cH: 15, wH: 11, hH: 13, aO: 21, aW: 8, lA: 7, gap: 2.5, hr: 8 },
+  { sH: 20, cH: 17, wH: 12, hH: 14, aO: 23, aW: 9, lA: 8, gap: 2.5, hr: 8 },
+];
+
+const FEMALE_LEVELS: SilParams[] = [
+  { sH: 11, cH: 10, wH: 7, hH: 12, aO: 13, aW: 5, lA: 5, gap: 2, hr: 7.5 },
+  { sH: 12, cH: 10.5, wH: 7.5, hH: 13, aO: 14, aW: 5.5, lA: 5, gap: 2, hr: 7.5 },
+  { sH: 12.5, cH: 11, wH: 7.5, hH: 14, aO: 14.5, aW: 6, lA: 5.5, gap: 2, hr: 7.5 },
+  { sH: 13, cH: 11.5, wH: 8, hH: 15, aO: 15, aW: 6.5, lA: 6, gap: 2, hr: 7.5 },
+  { sH: 14, cH: 12, wH: 8.5, hH: 16, aO: 16, aW: 7, lA: 6.5, gap: 2, hr: 7.5 },
+];
+
 const MALE_PATHS: Record<number, string> = {
-  // Head, neck, then shoulders, torso, arms, waist, legs
-  1: "M50 8 a8 8 0 1 1 0 16 a8 8 0 1 1 0 -16 Z M46 25 L54 25 L57 34 L62 34 L66 50 L64 56 L62 70 L60 90 L58 110 L57 140 L54 156 L50 156 L48 140 L48 110 L48 90 L42 110 L42 140 L40 156 L36 156 L37 140 L39 110 L40 90 L38 70 L36 56 L34 50 L38 34 L43 34 Z",
-  2: "M50 8 a8 8 0 1 1 0 16 a8 8 0 1 1 0 -16 Z M45 25 L55 25 L60 33 L66 35 L70 52 L66 58 L63 70 L60 90 L58 110 L57 142 L54 158 L50 158 L48 142 L48 110 L48 90 L42 110 L42 142 L40 158 L36 158 L37 142 L39 110 L40 90 L37 70 L34 58 L30 52 L34 35 L40 33 Z",
-  3: "M50 8 a9 9 0 1 1 0 18 a9 9 0 1 1 0 -18 Z M44 27 L56 27 L62 34 L70 36 L75 55 L70 60 L65 72 L62 92 L59 112 L58 142 L54 158 L50 158 L48 142 L48 110 L48 90 L42 110 L42 142 L40 158 L36 158 L36 142 L37 112 L35 92 L30 72 L30 60 L25 55 L30 36 L38 34 Z",
-  4: "M50 6 a9 9 0 1 1 0 18 a9 9 0 1 1 0 -18 Z M40 25 L60 25 L70 34 L80 38 L82 58 L75 64 L70 76 L65 95 L62 115 L58 144 L54 160 L50 160 L48 144 L48 113 L48 92 L42 113 L42 144 L40 160 L36 160 L36 144 L34 115 L30 95 L25 76 L20 64 L17 58 L20 38 L30 34 Z",
-  5: "M50 6 a10 10 0 1 1 0 20 a10 10 0 1 1 0 -20 Z M38 25 L62 25 L74 34 L86 40 L88 60 L80 68 L72 80 L68 100 L64 118 L60 146 L55 160 L50 160 L47 144 L48 116 L48 95 L42 116 L42 144 L39 160 L34 160 L32 146 L28 118 L24 100 L20 80 L14 68 L12 60 L14 40 L26 34 Z",
+  1: buildSilhouette(MALE_LEVELS[0]),
+  2: buildSilhouette(MALE_LEVELS[1]),
+  3: buildSilhouette(MALE_LEVELS[2]),
+  4: buildSilhouette(MALE_LEVELS[3]),
+  5: buildSilhouette(MALE_LEVELS[4]),
 };
 
 const FEMALE_PATHS: Record<number, string> = {
-  1: "M50 8 a7 7 0 1 1 0 14 a7 7 0 1 1 0 -14 Z M46 23 L54 23 L57 32 L62 34 L65 50 L62 56 L58 70 L54 88 L51 100 L46 100 L42 88 L38 70 L34 56 L32 50 L35 34 L43 32 Z M48 100 L52 100 L54 130 L56 156 L52 158 L50 130 L48 158 L44 156 L46 130 Z",
-  2: "M50 8 a8 8 0 1 1 0 16 a8 8 0 1 1 0 -16 Z M45 24 L55 24 L60 33 L66 36 L68 52 L64 58 L60 72 L55 90 L51 100 L46 100 L41 90 L36 72 L32 58 L28 52 L30 36 L40 33 Z M48 100 L52 100 L56 130 L58 156 L52 158 L50 130 L48 158 L42 156 L44 130 Z",
-  3: "M50 8 a8 8 0 1 1 0 16 a8 8 0 1 1 0 -16 Z M44 24 L56 24 L62 34 L70 38 L72 54 L66 60 L62 74 L57 92 L51 100 L45 100 L39 92 L34 74 L30 60 L24 54 L26 38 L38 34 Z M48 100 L52 100 L58 132 L60 158 L52 158 L50 130 L48 158 L40 158 L42 132 Z",
-  4: "M50 8 a9 9 0 1 1 0 18 a9 9 0 1 1 0 -18 Z M42 25 L58 25 L66 34 L74 40 L76 58 L70 64 L64 78 L58 96 L52 104 L46 104 L40 96 L34 78 L28 64 L22 58 L24 40 L34 34 Z M46 104 L54 104 L60 134 L62 160 L52 160 L50 132 L48 160 L38 160 L40 134 Z",
-  5: "M50 8 a10 10 0 1 1 0 20 a10 10 0 1 1 0 -20 Z M40 25 L60 25 L70 35 L82 42 L84 62 L76 68 L68 82 L60 100 L52 108 L46 108 L40 100 L32 82 L24 68 L16 62 L18 42 L30 35 Z M46 108 L54 108 L62 138 L64 160 L52 160 L50 134 L48 160 L36 160 L38 138 Z",
+  1: buildSilhouette(FEMALE_LEVELS[0]),
+  2: buildSilhouette(FEMALE_LEVELS[1]),
+  3: buildSilhouette(FEMALE_LEVELS[2]),
+  4: buildSilhouette(FEMALE_LEVELS[3]),
+  5: buildSilhouette(FEMALE_LEVELS[4]),
 };
 
 export function Silhouette({
@@ -68,7 +130,6 @@ export function Silhouette({
           stroke={stroke}
           strokeWidth={active ? 1.4 : 0.9}
           strokeLinejoin="round"
-          fillRule="evenodd"
         />
         {/* Soft ground shadow */}
         <Ellipse cx="50" cy="166" rx="18" ry="2.2" fill={active ? "#2D7C3E" : "#9A9A95"} opacity="0.15" />
