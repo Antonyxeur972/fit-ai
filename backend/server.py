@@ -31,7 +31,8 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
 anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
-client = AsyncIOMotorClient(MONGO_URL)
+import certifi
+client = AsyncIOMotorClient(MONGO_URL, tlsCAFile=certifi.where())
 db = client[DB_NAME]
 
 app = FastAPI(title="Performance Fitness API")
