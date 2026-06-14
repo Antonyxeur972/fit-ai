@@ -112,7 +112,6 @@ export default function Training() {
   const [cardioType, setCardioType] = useState("");
   const [generating, setGenerating] = useState(false);
   const [generateType, setGenerateType] = useState<SessionKey>("volume");
-  const [cycleWeeks, setCycleWeeks] = useState<number>(4);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editWorkout, setEditWorkout] = useState<Workout | null>(null);
@@ -231,18 +230,7 @@ export default function Training() {
     if (tab === "calendar") loadCalendar(calMonth);
   };
 
-  // ---- Cycle / Calendar / History ----
-
-  const generateCycle = async () => {
-    setGenerating(true);
-    try {
-      await api(`/workouts/cycle/generate?weeks=${cycleWeeks}`, { method: "POST" });
-      await load();
-      await loadCalendar(calMonth);
-    } finally {
-      setGenerating(false);
-    }
-  };
+  // ---- Calendar / History ----
 
   const loadCalendar = useCallback(async (anchor: Date) => {
     setCalLoading(true);
@@ -763,34 +751,6 @@ export default function Training() {
 
         {tab === "calendar" && (
           <>
-            <Card testID="cycle-generator-card">
-              <SectionTitle title="Cycle de périodisation" />
-              <Text style={[typography.small, { marginBottom: spacing.sm }]}>
-                Volume × Volume × Force × Puissance. Cycle paramétrable de 1 à 8 semaines.
-              </Text>
-              <View style={{ flexDirection: "row", gap: 8, marginBottom: spacing.sm }}>
-                {[2, 4, 6, 8].map((n) => (
-                  <TouchableOpacity
-                    key={n}
-                    onPress={() => setCycleWeeks(n)}
-                    style={[styles.cycleChip, cycleWeeks === n && styles.cycleChipOn]}
-                    testID={`cycle-${n}w`}
-                  >
-                    <Text style={[typography.small, { fontWeight: "700", color: cycleWeeks === n ? colors.primary : colors.textSecondary }]}>
-                      {n} sem.
-                    </Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              <Button
-                title={`Générer ${cycleWeeks} sem. de cycle`}
-                loading={generating}
-                onPress={generateCycle}
-                icon={<Ionicons name="layers-outline" size={16} color="#fff" />}
-                testID="cycle-generate-btn"
-              />
-            </Card>
-
             <SessionLegend />
 
             <CalendarTrainingView
@@ -1382,9 +1342,6 @@ const styles = StyleSheet.create({
   tabChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   tabText: { fontSize: 12, fontWeight: "700", color: colors.textSecondary },
   tabTextActive: { color: colors.surface },
-  // Cycle
-  cycleChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
-  cycleChipOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
   // History
   histDot: { width: 8, height: 8, borderRadius: 4 },
   // Timer overlay
