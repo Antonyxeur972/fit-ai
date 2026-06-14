@@ -83,3 +83,8 @@ memory/test_credentials.md
 
 # Mobile development
 android-sdk/
+# Expo / Metro build artifacts
+frontend/.metro-cache/
+frontend/dist/
+frontend/.expo/
+backend/run_preview.py
