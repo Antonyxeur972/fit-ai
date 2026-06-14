@@ -23,9 +23,16 @@
       },
       "edgeToEdgeEnabled": true,
       "permissions": [
-        "CAMERA",
-        "READ_EXTERNAL_STORAGE",
-        "READ_MEDIA_IMAGES"
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
@@ -64,6 +71,19 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "79f780f1-9e98-428e-9a0f-f977ff18df71"
+      }
+    },
+    "owner": "global_ai_studio",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/79f780f1-9e98-428e-9a0f-f977ff18df71"
     }
   }
 }
