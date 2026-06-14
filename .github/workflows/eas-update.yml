@@ -2,27 +2,27 @@ name: EAS Update
 
 on:
   push:
-      branches:
-            - main
+    branches:
+      - main
 
-            jobs:
-              update:
-                  name: EAS Update
-                      runs-on: ubuntu-latest
-                          steps:
-                                - name: Checkout repository
-                                        uses: actions/checkout@v4
+jobs:
+  update:
+    name: EAS Update
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-                                              - name: Setup Node.js
-                                                      uses: actions/setup-node@v4
-                                                              with:
-                                                                        node-version: 20
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-                                                                              - name: Install dependencies
-                                                                                      run: cd frontend && npm install --legacy-peer-deps
+      - name: Install dependencies
+        run: cd frontend && npm install --legacy-peer-deps
 
-                                                                                            - name: Publish EAS Update
-                                                                                                    run: cd frontend && npx eas update --branch main --message "Auto update from GitHub Actions" --non-interactive
-                                                                                                            env:
-                                                                                                                      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-                                                                                                                                EXPO_PUBLIC_BACKEND_URL: ${{ secrets.EXPO_PUBLIC_BACKEND_URL }}
+      - name: Publish EAS Update
+        run: cd frontend && npx eas update --branch main --message "Auto update from GitHub Actions" --non-interactive
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EXPO_PUBLIC_BACKEND_URL: ${{ secrets.EXPO_PUBLIC_BACKEND_URL }}
