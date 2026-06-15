@@ -37,7 +37,7 @@ const SESSION_COLOR: Record<string, { bg: string; fg: string; border: string }> 
 };
 
 type CalendarDay = {
-  id: string; session_type: string; completed: boolean; focus: string; exercises_count: number;
+  id: string | null; session_type: string; completed: boolean; focus: string; exercises_count: number; planned?: boolean;
 };
 
 type ProgramDay = {
