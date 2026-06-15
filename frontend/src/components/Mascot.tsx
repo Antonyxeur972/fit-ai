@@ -22,6 +22,37 @@ export const MASCOT_LABELS: Record<MascotAnimal, string> = {
 
 type Variant = { paths: string[]; accents?: string[] };
 
+// Low-poly facet overlays (inspired by polygonal wildlife illustrations),
+// layered over the head/body for a more modern, "evolving" look — more
+// facets at higher evolution stages.
+const FACETS_BY_STAGE: Record<1 | 2 | 3, { d: string; fill: "color" | "white"; opacity: number }[]> = {
+  1: [
+    { d: "M50 14 L62 26 L50 32 Z", fill: "color", opacity: 0.22 },
+    { d: "M50 14 L38 26 L50 32 Z", fill: "white", opacity: 0.5 },
+    { d: "M38 26 L50 32 L42 46 Z", fill: "color", opacity: 0.16 },
+    { d: "M62 26 L50 32 L58 46 Z", fill: "white", opacity: 0.4 },
+  ],
+  2: [
+    { d: "M50 10 L64 24 L50 30 Z", fill: "color", opacity: 0.24 },
+    { d: "M50 10 L36 24 L50 30 Z", fill: "white", opacity: 0.5 },
+    { d: "M36 24 L50 30 L40 46 Z", fill: "color", opacity: 0.18 },
+    { d: "M64 24 L50 30 L60 46 Z", fill: "white", opacity: 0.42 },
+    { d: "M40 46 L50 30 L60 46 L50 58 Z", fill: "color", opacity: 0.12 },
+    { d: "M50 30 L60 46 L72 40 Z", fill: "white", opacity: 0.32 },
+  ],
+  3: [
+    { d: "M50 6 L66 22 L50 28 Z", fill: "color", opacity: 0.26 },
+    { d: "M50 6 L34 22 L50 28 Z", fill: "white", opacity: 0.52 },
+    { d: "M34 22 L50 28 L38 46 Z", fill: "color", opacity: 0.2 },
+    { d: "M66 22 L50 28 L62 46 Z", fill: "white", opacity: 0.44 },
+    { d: "M38 46 L50 28 L62 46 L50 62 Z", fill: "color", opacity: 0.14 },
+    { d: "M50 28 L62 46 L76 40 Z", fill: "white", opacity: 0.34 },
+    { d: "M50 28 L38 46 L24 40 Z", fill: "color", opacity: 0.28 },
+    { d: "M38 46 L50 62 L34 64 Z", fill: "white", opacity: 0.3 },
+    { d: "M62 46 L50 62 L66 64 Z", fill: "color", opacity: 0.2 },
+  ],
+};
+
 const LION: Record<1 | 2 | 3, Variant> = {
   1: {
     paths: [
@@ -433,6 +464,10 @@ export function Mascot({
         )}
         {/* Filled silhouette (head/body shape) for a richer, illustrated look */}
         <Path d={variant.paths[0]} fill={color} fillOpacity={0.14} stroke="none" />
+        {/* Low-poly facets — modern illustrated style, denser at higher evolution stages */}
+        {FACETS_BY_STAGE[stage].map((f, i) => (
+          <Path key={`facet-${i}`} d={f.d} fill={f.fill === "color" ? color : "#FFFFFF"} fillOpacity={f.opacity} stroke="none" />
+        ))}
         <G fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" strokeLinecap="round">
           {variant.paths.map((d, i) => (
             <Path key={i} d={d} />

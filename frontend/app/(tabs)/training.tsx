@@ -36,6 +36,14 @@ const SESSION_COLOR: Record<string, { bg: string; fg: string; border: string }> 
   deload: { bg: "#E6E6DF", fg: "#666661", border: "#BFBFB7" },      // gris (déload)
 };
 
+// Display label for the program split, used on the share card
+const SPLIT_LABELS: Record<string, string> = {
+  ppl: "PPL",
+  fullbody: "Full Body",
+  split: "Split",
+  home: "Home",
+};
+
 type CalendarDay = {
   id: string | null; session_type: string; completed: boolean; focus: string; exercises_count: number; planned?: boolean;
 };
@@ -142,6 +150,7 @@ export default function Training() {
   const [programSetupOpen, setProgramSetupOpen] = useState(false);
   const [setupWeeks, setSetupWeeks] = useState(8);
   const [setupFreq, setSetupFreq] = useState<3 | 5 | 7>(5);
+  const [setupDays, setSetupDays] = useState<number[]>([0, 1, 2, 3, 4]);
   const [setupSplit, setSetupSplit] = useState<"ppl" | "fullbody" | "split">("ppl");
   const [setupGoal, setSetupGoal] = useState("Hypertrophie");
   const [setupBlocks, setSetupBlocks] = useState<{ volume: number; puissance: number; force: number }>({ volume: 1, puissance: 1, force: 1 });
@@ -202,7 +211,6 @@ export default function Training() {
     // Build share card data
     try {
       const w = week.find((x) => x.id === id);
-      const focus = w?.focus || w?.title || "Séance";
       const sType = (w?.session_type || "").toString();
       const sLabel = sType ? ` · ${sType.charAt(0).toUpperCase() + sType.slice(1)}` : "";
       // Phase 5: fetch points/strength to enrich the share card
@@ -215,8 +223,9 @@ export default function Training() {
         strength_value = ps.level_span > 0 ? Math.min(1, ps.points_in_level / ps.level_span) : 0.5;
         points_today = ps.points_today || 0;
       } catch {}
+      const splitLabel = SPLIT_LABELS[program?.split || ""] || "Training";
       setShareData({
-        focus: `${focus}${sLabel}`,
+        focus: `${splitLabel}${sLabel}`,
         duration_min: w?.duration_min,
         evolution,
         strength_value,
@@ -388,6 +397,7 @@ export default function Training() {
         body: {
           weeks: setupWeeks,
           frequency: setupFreq,
+          training_days: setupDays,
           split: setupSplit,
           goal_label: setupGoal,
           block_weeks: setupBlocks,
@@ -677,7 +687,6 @@ export default function Training() {
                 variant="primary"
                 onPress={async () => {
                   try {
-                    const focus = todayWorkout.focus || todayWorkout.title || "Séance";
                     const sType = (todayWorkout.session_type || "").toString();
                     const sLabel = sType ? ` · ${sType.charAt(0).toUpperCase() + sType.slice(1)}` : "";
                     let evolution: 1 | 2 | 3 = 1;
@@ -689,8 +698,9 @@ export default function Training() {
                       strength_value = ps.level_span > 0 ? Math.min(1, ps.points_in_level / ps.level_span) : 0.5;
                       points_today = ps.points_today || 0;
                     } catch {}
+                    const splitLabel = SPLIT_LABELS[program?.split || ""] || "Training";
                     setShareData({
-                      focus: `${focus}${sLabel}`,
+                      focus: `${splitLabel}${sLabel}`,
                       duration_min: todayWorkout.duration_min,
                       evolution,
                       strength_value,
@@ -953,7 +963,11 @@ export default function Training() {
                 {([3, 5, 7] as const).map((f) => (
                   <TouchableOpacity
                     key={f}
-                    onPress={() => setSetupFreq(f)}
+                    onPress={() => {
+                      setSetupFreq(f);
+                      const defaults: Record<number, number[]> = { 3: [0, 2, 4], 5: [0, 1, 2, 3, 4], 7: [0, 1, 2, 3, 4, 5, 6] };
+                      setSetupDays(defaults[f]);
+                    }}
                     style={[styles.setupOption, setupFreq === f && styles.setupOptionOn]}
                     testID={`setup-freq-${f}`}
                   >
@@ -963,6 +977,29 @@ export default function Training() {
                     </Text>
                   </TouchableOpacity>
                 ))}
+              </View>
+
+              <Text style={[typography.caption, { marginTop: spacing.md }]}>Jours d&apos;entraînement ({setupDays.length}/{setupFreq})</Text>
+              <View style={styles.setupOptionRow}>
+                {["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"].map((label, idx) => {
+                  const on = setupDays.includes(idx);
+                  return (
+                    <TouchableOpacity
+                      key={idx}
+                      onPress={() => {
+                        if (on) {
+                          setSetupDays(setupDays.filter((d) => d !== idx));
+                        } else if (setupDays.length < setupFreq) {
+                          setSetupDays([...setupDays, idx].sort());
+                        }
+                      }}
+                      style={[styles.setupOption, on && styles.setupOptionOn, { minWidth: 44, paddingVertical: 8 }]}
+                      testID={`setup-day-${idx}`}
+                    >
+                      <Text style={[styles.setupOptionLabel, { fontSize: 12 }, on && styles.setupOptionLabelOn]}>{label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
 
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Organisation des séances</Text>
