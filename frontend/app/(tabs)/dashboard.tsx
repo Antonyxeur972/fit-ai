@@ -14,6 +14,13 @@ import { StrengthSymbol } from "@/src/components/StrengthSymbol";
 import { quoteForToday } from "@/src/lib/motivation";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
+const SPLIT_LABELS: Record<string, string> = {
+  ppl: "PPL",
+  fullbody: "Full Body",
+  split: "Split",
+  home: "Home",
+};
+
 type DashboardData = {
   date: string;
   target_calories: number;
@@ -54,17 +61,20 @@ export default function Dashboard() {
     streak_days: number;
   } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
+  const [programSplit, setProgramSplit] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
-      const [d, wm, ps] = await Promise.all([
+      const [d, wm, ps, prog] = await Promise.all([
         api<DashboardData>("/dashboard/day"),
         api<WeekMacros>("/dashboard/week-macros").catch(() => null),
         api<any>("/points/summary").catch(() => null),
+        api<{ program: { split?: string } | null }>("/program/current").catch(() => null),
       ]);
       setData(d);
       setWeekMacros(wm);
       setPoints(ps);
+      setProgramSplit(prog?.program?.split || null);
     } catch (e) {
       console.warn("dashboard load", e);
     }
@@ -365,9 +375,7 @@ export default function Dashboard() {
         visible={shareOpen}
         onClose={() => setShareOpen(false)}
         data={{
-          focus: data.workout?.focus
-            ? `${data.workout.focus}${data.workout.completed ? "" : " · à faire"}`
-            : "Training du jour",
+          focus: SPLIT_LABELS[programSplit || ""] || "Training",
           duration_min: data.workout?.duration_min,
           mascot: user?.mascot ? { animal: user.mascot.animal, evolution: (points?.evolution || 1) as 1 | 2 | 3 } : null,
           strength_evolution: (points?.evolution || 1) as 1 | 2 | 3,
