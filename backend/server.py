@@ -240,6 +240,7 @@ class ProgramCreateRequest(BaseModel):
     goal: Optional[str] = None  # "muscle" | "strength" | "fat_loss" | "endurance"
     cycle_pattern: Optional[List[str]] = None  # legacy
     block_weeks: Optional[Dict[str, int]] = None  # {"volume": 2, "puissance": 1, "force": 2}
+    training_days: Optional[List[int]] = None  # weekdays 0=Mon..6=Sun, len == frequency
 
 
 class ProgramDayUpdate(BaseModel):
@@ -1950,6 +1951,7 @@ async def program_create(
         "goal": goal,
         "weeks_total": weeks,
         "frequency": frequency,
+        "training_days": body.training_days if body.training_days else None,
         "split": split,
         "block_weeks": body.block_weeks or {"volume": 1, "puissance": 1, "force": 1},
         "cycle_pattern": [w["session_type"] for w in structure[:6]],
@@ -2403,13 +2405,17 @@ async def workouts_calendar(
             weeks_total = int(prog.get("weeks_total", 0))
             pattern = prog.get("cycle_pattern") or [w.get("session_type", "volume") for w in prog.get("weeks", [])]
             pattern = pattern or ["volume"]
-            frequency = prog.get("frequency", 3)
-            if frequency >= 7:
-                training_days = set(range(7))
-            elif frequency >= 5:
-                training_days = {0, 1, 2, 3, 4}
+            custom_days = prog.get("training_days")
+            if custom_days:
+                training_days = set(int(x) % 7 for x in custom_days)
             else:
-                training_days = {0, 2, 4}
+                frequency = prog.get("frequency", 3)
+                if frequency >= 7:
+                    training_days = set(range(7))
+                elif frequency >= 5:
+                    training_days = {0, 1, 2, 3, 4}
+                else:
+                    training_days = {0, 2, 4}
             d = start
             while d < end:
                 d_iso = d.isoformat()

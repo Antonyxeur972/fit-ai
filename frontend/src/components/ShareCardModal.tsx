@@ -65,6 +65,27 @@ export function ShareCardModal({
     }
   };
 
+  const captureBackground = async () => {
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert("Appareil photo", "Autorise l'accès à la caméra pour photographier ton environnement.");
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        quality: 0.6,
+        base64: true,
+        allowsEditing: true,
+        aspect: [9, 16],
+      });
+      if (result.canceled || !result.assets?.[0]) return;
+      const asset = result.assets[0];
+      setBgPhoto(asset.base64 || null);
+    } catch (e) {
+      console.warn("captureBackground", e);
+    }
+  };
+
   const removeBackground = () => {
     setBgPhoto(null);
   };
@@ -185,7 +206,15 @@ export function ShareCardModal({
                 testID="share-bg-image"
               >
                 <Ionicons name="image-outline" size={16} color={colors.primary} />
-                <Text style={styles.bgBtnText}>Photo de fond</Text>
+                <Text style={styles.bgBtnText}>Galerie</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={captureBackground}
+                style={styles.bgBtn}
+                testID="share-bg-camera"
+              >
+                <Ionicons name="camera-outline" size={16} color={colors.primary} />
+                <Text style={styles.bgBtnText}>Photo</Text>
               </TouchableOpacity>
               {bgPhoto ? (
                 <TouchableOpacity onPress={removeBackground} style={styles.bgBtnGhost} testID="share-bg-remove">
