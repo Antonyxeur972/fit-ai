@@ -80,7 +80,7 @@ export const ShareCard = forwardRef<View, { data: ShareCardData; width?: number 
         <View style={styles.headerRow}>
           <View style={styles.brandRow}>
             <View style={styles.logoBadge}>
-              <Ionicons name="leaf" size={20} color="#fff" />
+              <Ionicons name="leaf" size={24} color="#2D7C3E" />
             </View>
             <Text style={styles.brand}>FIT AI</Text>
           </View>
@@ -166,8 +166,7 @@ const styles = StyleSheet.create({
   },
   brandRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   logoBadge: {
-    width: 32, height: 32, borderRadius: 10,
-    backgroundColor: "#2D7C3E",
+    width: 32, height: 32,
     alignItems: "center", justifyContent: "center",
   },
   brandDotSmall: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#2D7C3E" },
@@ -194,9 +193,9 @@ const styles = StyleSheet.create({
   durationBlock: { alignItems: "center", zIndex: 5 },
   durationValue: {
     color: "#0F3F1B",
-    fontSize: 72,
+    fontSize: 44,
     fontWeight: "900",
-    letterSpacing: -2,
+    letterSpacing: -1,
   },
   durationLabel: {
     color: "#2D7C3E",
