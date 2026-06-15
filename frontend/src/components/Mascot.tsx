@@ -431,6 +431,8 @@ export function Mascot({
         {background !== "transparent" && (
           <Circle cx="50" cy="50" r="48" fill={background} />
         )}
+        {/* Filled silhouette (head/body shape) for a richer, illustrated look */}
+        <Path d={variant.paths[0]} fill={color} fillOpacity={0.14} stroke="none" />
         <G fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" strokeLinecap="round">
           {variant.paths.map((d, i) => (
             <Path key={i} d={d} />

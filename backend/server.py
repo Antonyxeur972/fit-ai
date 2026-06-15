@@ -2283,6 +2283,7 @@ async def generate_workouts(
         {
             "user_id": user["user_id"],
             "date": {"$gte": today.isoformat(), "$lt": end.isoformat()},
+            "completed": {"$ne": True},
         }
     )
     plan = generate_week_plan(profile, session_type=session_type)
@@ -2323,6 +2324,7 @@ async def generate_cycle(
         {
             "user_id": user["user_id"],
             "date": {"$gte": today.isoformat(), "$lt": end.isoformat()},
+            "completed": {"$ne": True},
         }
     )
     all_workouts: List[Dict[str, Any]] = []
@@ -2384,6 +2386,47 @@ async def workouts_calendar(
             "focus": w.get("focus", ""),
             "exercises_count": len(w.get("exercises") or []),
         }
+    # Fill remaining days of the month with the active program's plan
+    # (so the calendar reflects the whole program). Pauses are handled
+    # naturally: a paused program's started_at predates the pause, so its
+    # future days fall outside [started_at, started_at + weeks_total*7)
+    # once a new (travel/resumed) program takes over with its own started_at.
+    prog = await db.programs.find_one(
+        {"user_id": user["user_id"], "active": True}, {"_id": 0}, sort=[("created_at", -1)]
+    )
+    if prog and prog.get("started_at"):
+        started = prog["started_at"]
+        if isinstance(started, str):
+            started = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        if isinstance(started, datetime):
+            started_date = started.date()
+            weeks_total = int(prog.get("weeks_total", 0))
+            pattern = prog.get("cycle_pattern") or [w.get("session_type", "volume") for w in prog.get("weeks", [])]
+            pattern = pattern or ["volume"]
+            frequency = prog.get("frequency", 3)
+            if frequency >= 7:
+                training_days = set(range(7))
+            elif frequency >= 5:
+                training_days = {0, 1, 2, 3, 4}
+            else:
+                training_days = {0, 2, 4}
+            d = start
+            while d < end:
+                d_iso = d.isoformat()
+                if d_iso not in out:
+                    days_since_start = (d - started_date).days
+                    if 0 <= days_since_start < weeks_total * 7 and d.weekday() in training_days:
+                        week_index = days_since_start // 7
+                        st = pattern[week_index % len(pattern)]
+                        out[d_iso] = {
+                            "id": None,
+                            "session_type": st,
+                            "completed": False,
+                            "focus": "",
+                            "exercises_count": 0,
+                            "planned": True,
+                        }
+                d += timedelta(days=1)
     return {
         "month": f"{year_i:04d}-{month_i:02d}",
         "days": out,
