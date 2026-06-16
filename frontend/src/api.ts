@@ -21,12 +21,30 @@ type ApiOpts = {
   method?: "GET" | "POST" | "PUT" | "DELETE";
   body?: unknown;
   auth?: boolean;
+  retries?: number;
 };
+
+async function fetchWithRetry(url: string, init: RequestInit, retries: number): Promise<Response> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
+      return await fetch(url, init);
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr;
+}
 
 export async function api<T = unknown>(
   path: string,
   opts: ApiOpts = {}
 ): Promise<T> {
+  if (!BACKEND_URL) {
+    throw new Error("Serveur inaccessible — configuration manquante. Contacte le support.");
+  }
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -34,11 +52,19 @@ export async function api<T = unknown>(
     const token = await getToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
-  const res = await fetch(`${API_URL}${path}`, {
-    method: opts.method || "GET",
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
+
+  const retries = opts.retries ?? 1;
+  let res: Response;
+  try {
+    res = await fetchWithRetry(`${API_URL}${path}`, {
+      method: opts.method || "GET",
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    }, retries);
+  } catch (e: any) {
+    throw new Error("Serveur inaccessible. Vérifie ta connexion et réessaie.");
+  }
+
   if (!res.ok) {
     let detail = "";
     try {
