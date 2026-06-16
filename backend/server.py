@@ -2474,6 +2474,14 @@ async def workouts_history(
     return history
 
 
+@api.delete("/workouts/all")
+async def delete_all_workouts(authorization: Optional[str] = Header(default=None)):
+    """Delete all workouts for the current user (calendar clear)."""
+    user = await get_current_user(authorization)
+    result = await db.workouts.delete_many({"user_id": user["user_id"]})
+    return {"deleted": result.deleted_count}
+
+
 @api.put("/workouts/{workout_id}")
 async def update_workout(
     workout_id: str, body: WorkoutUpdate, authorization: Optional[str] = Header(default=None)

@@ -2,7 +2,6 @@ import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { quoteForToday, MotivationContext } from "./motivation";
 
-// Configure handler once for foreground display
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldPlaySound: false,
@@ -12,9 +11,11 @@ Notifications.setNotificationHandler({
   }),
 });
 
+export type ReminderKind = "workout" | "protein" | "meal" | "custom";
+
 export type Reminder = {
   id: string;
-  kind: "workout" | "protein";
+  kind: ReminderKind;
   hour: number;
   minute: number;
   enabled: boolean;
@@ -38,17 +39,17 @@ export async function cancelAll(): Promise<void> {
   } catch {}
 }
 
-function bodyFor(kind: Reminder["kind"]): { title: string; body: string } {
-  if (kind === "protein") {
-    return {
-      title: "Check protéines",
-      body: quoteForToday("protein_low" as MotivationContext),
-    };
+function bodyFor(r: Reminder): { title: string; body: string } {
+  if (r.kind === "protein") {
+    return { title: "Check protéines", body: quoteForToday("protein_low" as MotivationContext) };
   }
-  return {
-    title: "Ta séance t'attend",
-    body: quoteForToday("pre_workout" as MotivationContext),
-  };
+  if (r.kind === "meal") {
+    return { title: r.label || "Heure de manger", body: "N'oublie pas ton repas pour rester en forme." };
+  }
+  if (r.kind === "custom") {
+    return { title: r.label || "Rappel FIT AI", body: "" };
+  }
+  return { title: "Ta séance t'attend", body: quoteForToday("pre_workout" as MotivationContext) };
 }
 
 export async function scheduleReminders(reminders: Reminder[]): Promise<number> {
@@ -60,10 +61,9 @@ export async function scheduleReminders(reminders: Reminder[]): Promise<number> 
   for (const r of reminders) {
     if (!r.enabled) continue;
     const days = r.days_of_week && r.days_of_week.length > 0 ? r.days_of_week : [0, 1, 2, 3, 4, 5, 6];
-    const { title, body } = bodyFor(r.kind);
+    const { title, body } = bodyFor(r);
     for (const dow of days) {
-      // expo-notifications weekday: 1=Sunday..7=Saturday
-      const weekday = ((dow + 1) % 7) + 1; // map 0=Mon..6=Sun -> 2..1
+      const weekday = ((dow + 1) % 7) + 1;
       try {
         await Notifications.scheduleNotificationAsync({
           content: { title, body, data: { reminderId: r.id, kind: r.kind } },

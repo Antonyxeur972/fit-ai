@@ -13,7 +13,7 @@ import { SilhouettePicker } from "@/src/components/SilhouettePicker";
 import { Mascot, MascotAnimal, MASCOT_LABELS } from "@/src/components/Mascot";
 import { MascotPicker } from "@/src/components/MascotPicker";
 import { StrengthSymbol } from "@/src/components/StrengthSymbol";
-import { scheduleReminders, Reminder } from "@/src/lib/notifications";
+import { scheduleReminders, Reminder, ReminderKind } from "@/src/lib/notifications";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type Profile = {
@@ -76,7 +76,9 @@ export default function ProfileTab() {
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
   const [savingReminders, setSavingReminders] = useState(false);
+  // Custom time picker (avoids native rendering bug with transparent numbers)
   const [showTimePicker, setShowTimePicker] = useState(false);
+  const [customLabelInput, setCustomLabelInput] = useState("");
 
   // Phase 5: Points
   const [points, setPoints] = useState<{
@@ -176,14 +178,19 @@ export default function ProfileTab() {
   };
 
   // Phase 5: notification reminders
-  const addReminder = (kind: "workout" | "protein") => {
+  const REMINDER_DEFAULTS: Record<ReminderKind, { hour: number; minute: number; label: string | null }> = {
+    workout: { hour: 19, minute: 0, label: null },
+    protein: { hour: 21, minute: 30, label: null },
+    meal: { hour: 12, minute: 30, label: "Repas" },
+    custom: { hour: 9, minute: 0, label: "Mon rappel" },
+  };
+
+  const addReminder = (kind: ReminderKind) => {
     const id = `tmp_${Date.now()}`;
+    const def = REMINDER_DEFAULTS[kind];
     setReminders((arr) => [
       ...arr,
-      {
-        id, kind, hour: kind === "protein" ? 21 : 19, minute: kind === "protein" ? 30 : 0,
-        enabled: true, days_of_week: [0, 1, 2, 3, 4, 5, 6], label: null,
-      },
+      { id, kind, hour: def.hour, minute: def.minute, enabled: true, days_of_week: [0, 1, 2, 3, 4, 5, 6], label: def.label },
     ]);
   };
   const updateReminder = (id: string, patch: Partial<Reminder>) => {
@@ -553,7 +560,7 @@ export default function ProfileTab() {
       {/* Phase 5: Notifications modal */}
       <Modal visible={notifModal} transparent animationType="slide" onRequestClose={() => setNotifModal(false)}>
         <View style={styles.modalBg}>
-          <View style={[styles.modalCard, { maxHeight: "92%" }]}>
+          <View style={[styles.modalCard, { maxHeight: "96%" }]}>
             <View style={styles.modalHandle} />
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
               <Text style={styles.modalTitle}>Mes rappels</Text>
@@ -564,60 +571,93 @@ export default function ProfileTab() {
             <Text style={[typography.small, { marginTop: 4 }]}>
               Ajoute autant de rappels que tu veux. Aucune notif n&apos;est envoyée sans ta validation.
             </Text>
-            <ScrollView style={{ maxHeight: 400, marginTop: spacing.md }} contentContainerStyle={{ gap: 8 }}>
-              {reminders.map((r) => (
-                <View key={r.id} style={styles.reminderRow}>
-                  <Ionicons name={r.kind === "workout" ? "barbell-outline" : "nutrition-outline"} size={16} color={colors.primary} />
-                  <TouchableOpacity
-                    onPress={() => { setEditingReminder(r); setShowTimePicker(true); }}
-                    style={styles.reminderTime}
-                    testID={`reminder-time-${r.id}`}
-                  >
-                    <Text style={[typography.h3, { fontSize: 18 }]}>
-                      {String(r.hour).padStart(2, "0")}:{String(r.minute).padStart(2, "0")}
-                    </Text>
-                  </TouchableOpacity>
-                  <Text style={[typography.small, { flex: 1 }]} numberOfLines={1}>
-                    {r.kind === "workout" ? "Séance" : "Protéines"}
-                  </Text>
-                  <Switch
-                    value={r.enabled}
-                    onValueChange={(v) => updateReminder(r.id, { enabled: v })}
-                    trackColor={{ true: colors.primary, false: colors.border }}
-                    thumbColor="#fff"
-                    testID={`reminder-toggle-${r.id}`}
-                  />
-                  <TouchableOpacity onPress={() => removeReminder(r.id)} hitSlop={10} testID={`reminder-remove-${r.id}`}>
-                    <Ionicons name="trash-outline" size={16} color={colors.alert} />
-                  </TouchableOpacity>
-                </View>
-              ))}
-              <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-                <Button title="+ Rappel séance" onPress={() => addReminder("workout")} variant="secondary" style={{ flex: 1 }} testID="reminder-add-workout" />
-                <Button title="+ Check protéines" onPress={() => addReminder("protein")} variant="secondary" style={{ flex: 1 }} testID="reminder-add-protein" />
+
+            <ScrollView style={{ maxHeight: 420, marginTop: spacing.md }} contentContainerStyle={{ gap: 10 }}>
+              {reminders.map((r) => {
+                const kindIcon = r.kind === "workout" ? "barbell-outline" : r.kind === "meal" ? "restaurant-outline" : r.kind === "protein" ? "nutrition-outline" : "notifications-outline";
+                const kindLabel = r.kind === "workout" ? "Séance" : r.kind === "meal" ? "Repas" : r.kind === "protein" ? "Protéines" : "Personnalisé";
+                const isEditing = showTimePicker && editingReminder?.id === r.id;
+                return (
+                  <View key={r.id} style={[styles.reminderRow, { flexDirection: "column", alignItems: "stretch", gap: 8 }]}>
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <Ionicons name={kindIcon as any} size={16} color={colors.primary} />
+                      <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>{kindLabel}</Text>
+                      <Switch
+                        value={r.enabled}
+                        onValueChange={(v) => updateReminder(r.id, { enabled: v })}
+                        trackColor={{ true: colors.primary, false: colors.border }}
+                        thumbColor="#fff"
+                        testID={`reminder-toggle-${r.id}`}
+                        style={{ marginLeft: "auto" }}
+                      />
+                      <TouchableOpacity onPress={() => removeReminder(r.id)} hitSlop={10} testID={`reminder-remove-${r.id}`}>
+                        <Ionicons name="trash-outline" size={16} color={colors.alert} />
+                      </TouchableOpacity>
+                    </View>
+                    {(r.kind === "meal" || r.kind === "custom") && (
+                      <TextInput
+                        style={[styles.input, { marginBottom: 0 }]}
+                        placeholder={r.kind === "meal" ? "Nom du repas (ex: Déjeuner)" : "Libellé du rappel"}
+                        placeholderTextColor={colors.textMuted}
+                        value={r.label || ""}
+                        onChangeText={(v) => updateReminder(r.id, { label: v })}
+                        maxLength={40}
+                      />
+                    )}
+                    {/* Inline time picker — avoids native rendering bugs */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        if (isEditing) { setShowTimePicker(false); setEditingReminder(null); }
+                        else { setEditingReminder(r); setShowTimePicker(true); }
+                      }}
+                      style={styles.reminderTime}
+                      testID={`reminder-time-${r.id}`}
+                    >
+                      <Ionicons name="time-outline" size={14} color={colors.textSecondary} />
+                      <Text style={[typography.h3, { fontSize: 22, color: colors.textMain }]}>
+                        {String(r.hour).padStart(2, "0")}:{String(r.minute).padStart(2, "0")}
+                      </Text>
+                      <Ionicons name={isEditing ? "chevron-up" : "chevron-down"} size={14} color={colors.textSecondary} />
+                    </TouchableOpacity>
+                    {isEditing && (
+                      <View style={styles.inlineTimePicker}>
+                        <View style={styles.timeColumn}>
+                          <TouchableOpacity onPress={() => updateReminder(r.id, { hour: (r.hour + 1) % 24 })} hitSlop={8}>
+                            <Ionicons name="chevron-up" size={20} color={colors.primary} />
+                          </TouchableOpacity>
+                          <Text style={styles.timeDigit}>{String(r.hour).padStart(2, "0")}</Text>
+                          <TouchableOpacity onPress={() => updateReminder(r.id, { hour: (r.hour + 23) % 24 })} hitSlop={8}>
+                            <Ionicons name="chevron-down" size={20} color={colors.primary} />
+                          </TouchableOpacity>
+                        </View>
+                        <Text style={styles.timeSep}>:</Text>
+                        <View style={styles.timeColumn}>
+                          <TouchableOpacity onPress={() => updateReminder(r.id, { minute: (r.minute + 5) % 60 })} hitSlop={8}>
+                            <Ionicons name="chevron-up" size={20} color={colors.primary} />
+                          </TouchableOpacity>
+                          <Text style={styles.timeDigit}>{String(r.minute).padStart(2, "0")}</Text>
+                          <TouchableOpacity onPress={() => updateReminder(r.id, { minute: (r.minute + 55) % 60 })} hitSlop={8}>
+                            <Ionicons name="chevron-down" size={20} color={colors.primary} />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+
+              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 4 }}>
+                <Button title="+ Séance" onPress={() => addReminder("workout")} variant="secondary" style={{ flex: 1, minWidth: 100 }} testID="reminder-add-workout" />
+                <Button title="+ Protéines" onPress={() => addReminder("protein")} variant="secondary" style={{ flex: 1, minWidth: 100 }} testID="reminder-add-protein" />
+                <Button title="+ Repas" onPress={() => addReminder("meal")} variant="secondary" style={{ flex: 1, minWidth: 100 }} testID="reminder-add-meal" />
+                <Button title="+ Personnalisé" onPress={() => addReminder("custom")} variant="secondary" style={{ flex: 1, minWidth: 120 }} testID="reminder-add-custom" />
               </View>
             </ScrollView>
+
             <Button title="Enregistrer" onPress={saveReminders} loading={savingReminders} style={{ marginTop: spacing.lg }} testID="reminders-save" />
             <View style={{ height: spacing.md }} />
           </View>
         </View>
-        {showTimePicker && editingReminder && (
-          <DateTimePicker
-            value={(() => { const d = new Date(); d.setHours(editingReminder.hour); d.setMinutes(editingReminder.minute); return d; })()}
-            mode="time"
-            is24Hour
-            display={Platform.OS === "ios" ? "spinner" : "default"}
-            onChange={(event, selected) => {
-              if (Platform.OS !== "ios") setShowTimePicker(false);
-              if (event.type === "dismissed") { setEditingReminder(null); return; }
-              if (selected) {
-                updateReminder(editingReminder.id, { hour: selected.getHours(), minute: selected.getMinutes() });
-              }
-              if (Platform.OS === "ios") setShowTimePicker(false);
-              setEditingReminder(null);
-            }}
-          />
-        )}
       </Modal>
 
       {/* Silhouette modal */}
@@ -753,14 +793,27 @@ const styles = StyleSheet.create({
   },
   notifPill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full },
   reminderRow: {
-    flexDirection: "row", alignItems: "center", gap: 8,
-    paddingVertical: 8, paddingHorizontal: 12,
+    paddingVertical: 10, paddingHorizontal: 12,
     backgroundColor: colors.background, borderRadius: radius.md,
     borderWidth: 1, borderColor: colors.border,
   },
   reminderTime: {
-    paddingHorizontal: 10, paddingVertical: 4,
-    backgroundColor: colors.primaryPale, borderRadius: radius.sm,
+    flexDirection: "row", alignItems: "center", gap: 6,
+    paddingHorizontal: 12, paddingVertical: 8,
+    backgroundColor: colors.primaryPale, borderRadius: radius.md,
     borderWidth: 1, borderColor: colors.primary,
   },
+  inlineTimePicker: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    paddingVertical: 12, backgroundColor: colors.surface,
+    borderRadius: radius.md, borderWidth: 1, borderColor: colors.border,
+  },
+  timeColumn: { alignItems: "center", gap: 4, minWidth: 48 },
+  timeDigit: {
+    fontSize: 32, fontWeight: "800", color: colors.textMain,
+    minWidth: 48, textAlign: "center",
+    backgroundColor: colors.primaryPale, borderRadius: radius.sm,
+    paddingVertical: 4,
+  },
+  timeSep: { fontSize: 28, fontWeight: "800", color: colors.textMain, marginBottom: 2 },
 });

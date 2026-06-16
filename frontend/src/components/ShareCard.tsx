@@ -140,7 +140,6 @@ export const ShareCard = forwardRef<View, { data: ShareCardData; width?: number 
             <View style={styles.brandDotSmall} />
             <Text style={styles.watermark}>FIT AI</Text>
           </View>
-          <Text style={styles.footerTagline}>Performance. Pas de fluff.</Text>
         </View>
       </View>
     );

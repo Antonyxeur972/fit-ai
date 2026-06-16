@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Platform,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Platform, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
@@ -134,6 +134,7 @@ export default function Training() {
   const [calMonth, setCalMonth] = useState<Date>(() => new Date());
   const [calDays, setCalDays] = useState<Record<string, CalendarDay>>({});
   const [calLoading, setCalLoading] = useState(false);
+  const [deletingAllWorkouts, setDeletingAllWorkouts] = useState(false);
   const [historyItems, setHistoryItems] = useState<Workout[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState<string | null>(null);
@@ -270,6 +271,32 @@ export default function Training() {
     if (tab === "calendar") loadCalendar(calMonth);
     if (tab === "history") loadHistory();
   }, [tab, calMonth, loadCalendar, loadHistory]);
+
+  const deleteAllWorkouts = useCallback(() => {
+    Alert.alert(
+      "Vider le calendrier",
+      "Toutes les séances enregistrées seront supprimées. Cette action est irréversible.\n\nÊtes-vous sûr ?",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Supprimer tout",
+          style: "destructive",
+          onPress: async () => {
+            setDeletingAllWorkouts(true);
+            try {
+              await api("/workouts/all", { method: "DELETE" });
+              setCalDays({});
+              await loadCalendar(calMonth);
+            } catch (e) {
+              Alert.alert("Erreur", "Impossible de supprimer les séances.");
+            } finally {
+              setDeletingAllWorkouts(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [calMonth, loadCalendar]);
 
   // ---- Rest Timer ----
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -769,6 +796,16 @@ export default function Training() {
               loading={calLoading}
               onPrev={() => setCalMonth(addMonths(calMonth, -1))}
               onNext={() => setCalMonth(addMonths(calMonth, 1))}
+            />
+
+            <Button
+              title="Vider le calendrier"
+              variant="secondary"
+              loading={deletingAllWorkouts}
+              onPress={deleteAllWorkouts}
+              icon={<Ionicons name="trash-outline" size={15} color={colors.alert} />}
+              style={{ borderColor: colors.alert, marginTop: spacing.sm }}
+              testID="calendar-delete-all"
             />
           </>
         )}
@@ -1631,7 +1668,13 @@ function CalendarTrainingView({
           if (day === null) return <View key={idx} style={styles.calCellEmpty} />;
           const iso = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
           const info = days[iso];
-          const palette = info ? SESSION_COLOR[info.session_type] || SESSION_COLOR.volume : null;
+          // Only colorize sessions that have a recognized type — no fallback to volume
+          const knownPalette = info && info.session_type && SESSION_COLOR[info.session_type]
+            ? SESSION_COLOR[info.session_type]
+            : null;
+          // Completed sessions: full color. Planned but not completed: subtle outline only.
+          const palette = info?.completed ? knownPalette : null;
+          const plannedPalette = info && !info.completed ? knownPalette : null;
           const isToday = iso === todayISO;
           return (
             <View key={idx} style={styles.calCell}>
@@ -1640,13 +1683,20 @@ function CalendarTrainingView({
                   styles.calCellInner,
                   {
                     backgroundColor: palette ? palette.bg : colors.background,
-                    borderColor: palette ? palette.border : colors.border,
+                    borderColor: palette ? palette.border : plannedPalette ? plannedPalette.border : colors.border,
+                    borderWidth: plannedPalette && !palette ? 1.5 : 1,
+                    borderStyle: plannedPalette && !palette ? "dashed" : "solid",
                   },
                   isToday && styles.calToday,
                 ]}
                 testID={`cal-day-${iso}`}
               >
-                <Text style={{ fontSize: 13, fontWeight: palette ? "800" : "500", color: palette ? palette.fg : colors.textMuted }}>
+                <Text style={{
+                  fontSize: 13,
+                  fontWeight: palette ? "800" : "500",
+                  color: palette ? palette.fg : plannedPalette ? plannedPalette.fg : colors.textMuted,
+                  opacity: plannedPalette && !palette ? 0.6 : 1,
+                }}>
                   {day}
                 </Text>
                 {info?.completed && (
