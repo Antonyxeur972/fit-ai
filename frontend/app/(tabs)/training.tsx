@@ -1469,7 +1469,7 @@ function ProgramSummaryCard({
 }) {
   if (!program) {
     return (
-      <Card testID="program-summary-empty">
+      <GlassCard testID="program-summary-empty">
         <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
           <View style={[styles.focusBadge, { backgroundColor: colors.primaryPale }]}>
             <Ionicons name="rocket-outline" size={20} color={colors.primary} />
@@ -1482,12 +1482,12 @@ function ProgramSummaryCard({
             <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Créer</Text>
           </TouchableOpacity>
         </View>
-      </Card>
+      </GlassCard>
     );
   }
   const isTravel = (program as any).is_travel === true;
   return (
-    <Card testID="program-summary-card" style={{ borderColor: isTravel ? "#A85B0F" : colors.primary, borderWidth: 1.5 }}>
+    <GlassCard testID="program-summary-card" style={{ borderColor: isTravel ? "#A85B0F" : colors.primary, borderWidth: 1.5 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
         <View style={[styles.focusBadge, { backgroundColor: isTravel ? "#FCE3CB" : colors.primaryPale }]}>
           <Ionicons name={isTravel ? "airplane" : "rocket"} size={20} color={isTravel ? "#A85B0F" : colors.primary} />
