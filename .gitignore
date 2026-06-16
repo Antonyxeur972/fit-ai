@@ -83,3 +83,4 @@ android-sdk/.claude/worktrees/
 frontend/.metro-cache/
 backend/.env
 frontend/.env
+frontend/yarn.lock
