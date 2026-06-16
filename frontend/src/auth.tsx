@@ -74,12 +74,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         method: "POST",
         body: { session_id: sessionId },
         auth: false,
+        retries: 2,
       });
       await setToken(resp.session_token);
       setUser(resp.user);
     } catch (e: any) {
       console.warn("processSessionId failed", e);
-      setAuthError(e?.message || "Connexion échouée. Réessaie.");
+      setAuthError(e?.message || "Connexion échouée. Réessaie dans quelques secondes.");
     }
   }, []);
 
