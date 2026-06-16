@@ -11,6 +11,7 @@ import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { Card, Button, SectionTitle, Stat } from "@/src/components/UI";
 import { ShareCardModal } from "@/src/components/ShareCardModal";
+import { ProgramCarousel } from "@/src/components/ProgramCarousel";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type Exercise = { name: string; sets: number; reps: string; rest_s: number; checked?: boolean; is_recommended?: boolean };
@@ -416,17 +417,19 @@ export default function Training() {
     setEditorOpen(true);
   };
 
-  const createProgram = async () => {
+  const createProgram = async (overrides?: { goal_label?: string; frequency?: number; training_days?: number[]; split?: string; weeks?: number }) => {
     setCreatingProgram(true);
     try {
+      const dayDefaults: Record<number, number[]> = { 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4] };
+      const freq = overrides?.frequency ?? setupFreq;
       const created = await api<TrainingProgram>("/program/create", {
         method: "POST",
         body: {
-          weeks: setupWeeks,
-          frequency: setupFreq,
-          training_days: setupDays,
-          split: setupSplit,
-          goal_label: setupGoal,
+          weeks: overrides?.weeks ?? setupWeeks,
+          frequency: freq,
+          training_days: overrides?.training_days ?? dayDefaults[freq] ?? setupDays,
+          split: overrides?.split ?? setupSplit,
+          goal_label: overrides?.goal_label ?? setupGoal,
           block_weeks: setupBlocks,
         },
       });
@@ -745,18 +748,12 @@ export default function Training() {
             )}
           </Card>
         ) : !program ? (
-          <Card>
-            <SectionTitle title="Pas encore de programme" />
-            <Text style={[typography.small, { marginBottom: spacing.md }]}>
-              Configure ton programme : durée, fréquence et organisation des séances.
-            </Text>
-            <Button
-              title="Créer mon programme"
-              onPress={() => setProgramSetupOpen(true)}
-              testID="create-program-button"
-              icon={<Ionicons name="add-circle-outline" size={18} color="#fff" />}
-            />
-          </Card>
+          <ProgramCarousel
+            onSelectProgram={(goalLabel, freq, split) =>
+              createProgram({ goal_label: goalLabel, frequency: freq, split, weeks: 8 })
+            }
+            loading={creatingProgram}
+          />
         ) : null}
 
         {/* My Program (weeks) */}
@@ -1098,7 +1095,7 @@ export default function Training() {
 
             <Button
               title={creatingProgram ? "Création..." : `Créer mon programme (${setupWeeks} sem.)`}
-              onPress={createProgram}
+              onPress={() => createProgram()}
               loading={creatingProgram}
               icon={<Ionicons name="rocket" size={16} color="#fff" />}
               style={{ marginTop: spacing.lg }}
