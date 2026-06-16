@@ -770,7 +770,7 @@ export default function Training() {
           <>
             <GlassCard testID="cycle-generator-card">
               <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase", marginBottom:8}}>Cycle de périodisation</Text>
-              <Text style={[typography.small, { marginBottom: spacing.sm }]}>
+              <Text style={[typography.small, { marginBottom: spacing.sm, color:"rgba(255,255,255,0.6)" }]}>
                 Volume × Volume × Force × Puissance. Cycle paramétrable de 1 à 8 semaines.
               </Text>
               <View style={{ flexDirection: "row", gap: 8, marginBottom: spacing.sm }}>
@@ -781,7 +781,7 @@ export default function Training() {
                     style={[styles.cycleChip, cycleWeeks === n && styles.cycleChipOn]}
                     testID={`cycle-${n}w`}
                   >
-                    <Text style={[typography.small, { fontWeight: "700", color: cycleWeeks === n ? colors.primary : colors.textSecondary }]}>
+                    <Text style={[typography.small, { fontWeight: "700", color: cycleWeeks === n ? "#4ade80" : "rgba(255,255,255,0.6)" }]}>
                       {n} sem.
                     </Text>
                   </TouchableOpacity>
@@ -831,8 +831,8 @@ export default function Training() {
                       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
                         <View style={[styles.histDot, { backgroundColor: SESSION_COLOR[w.session_type || "volume"]?.fg || colors.primary }]} />
                         <View style={{ flex: 1 }}>
-                          <Text style={[typography.body, { fontWeight: "700" }]}>{w.focus || w.title}</Text>
-                          <Text style={typography.small}>
+                          <Text style={[typography.body, { fontWeight: "700", color:"#fff" }]}>{w.focus || w.title}</Text>
+                          <Text style={[typography.small, {color:"rgba(255,255,255,0.6)"}]}>
                             {new Date(w.date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "short" })} · {w.exercises.length} exercices · {w.duration_min} min
                           </Text>
                         </View>
@@ -1349,18 +1349,18 @@ function SessionTypeSelector({
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
+  safe: { flex: 1, backgroundColor: "transparent" },
   header: { padding: spacing.lg, paddingBottom: spacing.md },
-  title: { fontSize: 28, fontWeight: "700", color: colors.textMain, letterSpacing: -0.6, marginTop: 4 },
+  title: { fontSize: 28, fontWeight: "800", color: "#fff", letterSpacing: -0.6, marginTop: 4 },
   content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
-  focusBadge: { width: 44, height: 44, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center", marginRight: spacing.md },
-  exerciseRow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
+  focusBadge: { width: 44, height: 44, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.15)", alignItems: "center", justifyContent: "center", marginRight: spacing.md },
+  exerciseRow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.12)" },
   recoBadge: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: "#FBDDDB", borderRadius: radius.full, borderWidth: 1, borderColor: "#E58880" },
   recoBadgeTxt: { fontSize: 9, fontWeight: "900", color: "#A12A22", letterSpacing: 0.5 },
   exCheckReco: { borderColor: "#E58880", backgroundColor: "#FFF6F5" },
-  exerciseNum: { width: 32, height: 32, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center", marginRight: spacing.md },
-  weekRow: { flexDirection: "row", alignItems: "center", backgroundColor: colors.surface, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },
-  weekRowToday: { borderColor: colors.primary, backgroundColor: colors.primaryPale },
+  exerciseNum: { width: 32, height: 32, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.15)", alignItems: "center", justifyContent: "center", marginRight: spacing.md },
+  weekRow: { flexDirection: "row", alignItems: "center", backgroundColor: "rgba(255,255,255,0.08)", padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  weekRowToday: { borderColor: "#4ade80", backgroundColor: "rgba(74,222,128,0.1)" },
   statusDot: { width: 12, height: 12, borderRadius: radius.full },
   modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
   modalCard: { backgroundColor: colors.surface, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg },
@@ -1384,18 +1384,18 @@ const styles = StyleSheet.create({
   perfRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
   // Tabs
   tabRow: { flexDirection: "row", gap: 6, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
-  tabChip: { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  tabChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  tabText: { fontSize: 12, fontWeight: "700", color: colors.textSecondary },
-  tabTextActive: { color: colors.surface },
+  tabChip: { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.1)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)" },
+  tabChipActive: { backgroundColor: "#4ade80", borderColor: "#4ade80" },
+  tabText: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.6)" },
+  tabTextActive: { color: "#fff" },
   // Cycle
-  cycleChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
-  cycleChipOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
+  cycleChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  cycleChipOn: { backgroundColor: "rgba(74,222,128,0.15)", borderColor: "#4ade80" },
   // History
   histDot: { width: 8, height: 8, borderRadius: 4 },
   // Timer overlay
   timerOverlay: { position: "absolute", left: 0, right: 0, bottom: spacing.lg, alignItems: "center", padding: spacing.md, zIndex: 100, elevation: 10 },
-  timerCard: { backgroundColor: colors.surface, padding: spacing.md, borderRadius: radius.lg, alignItems: "center", borderWidth: 2, borderColor: colors.primary, width: "92%", maxWidth: 360, gap: 4 },
+  timerCard: { backgroundColor: "rgba(0,0,0,0.85)", padding: spacing.md, borderRadius: radius.lg, alignItems: "center", borderWidth: 2, borderColor: "#4ade80", width: "92%", maxWidth: 360, gap: 4 },
   timerBig: { fontSize: 40, fontWeight: "800", color: colors.primary, letterSpacing: -1 },
   timerProgressTrack: { height: 6, backgroundColor: colors.border, borderRadius: 3, width: "100%", overflow: "hidden" },
   timerProgressFill: { height: "100%", backgroundColor: colors.primary, borderRadius: 3 },
@@ -1403,26 +1403,26 @@ const styles = StyleSheet.create({
   timerBtnTxt: { fontSize: 13, fontWeight: "700", color: colors.primary },
   timerSaveCfg: { flexDirection: "row", gap: 4, alignItems: "center", paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, marginTop: 4 },
   // Calendar
-  calWrap: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
+  calWrap: { backgroundColor: "rgba(255,255,255,0.08)", borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
   calHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
-  calNavBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: colors.background },
+  calNavBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.1)" },
   calWeekRow: { flexDirection: "row", marginBottom: 4 },
   calGrid: { flexDirection: "row", flexWrap: "wrap" },
   calCell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: "center", justifyContent: "center", padding: 2 },
   calCellEmpty: { width: `${100 / 7}%`, aspectRatio: 1 },
   calCellInner: { width: "85%", aspectRatio: 1, borderRadius: radius.sm, alignItems: "center", justifyContent: "center", borderWidth: 1.5 },
-  calToday: { borderColor: colors.textMain, borderWidth: 2 },
+  calToday: { borderColor: "#fff", borderWidth: 2 },
   legendRow: { flexDirection: "row", gap: 12, flexWrap: "wrap", justifyContent: "center", marginVertical: spacing.sm },
   legendItem: { flexDirection: "row", alignItems: "center", gap: 4 },
   legendDot: { width: 10, height: 10, borderRadius: 5 },
   // Program
-  progressBar: { height: 4, backgroundColor: colors.background, borderRadius: 2, overflow: "hidden", marginTop: spacing.sm },
+  progressBar: { height: 4, backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 2, overflow: "hidden", marginTop: spacing.sm },
   progressFill: { height: "100%", backgroundColor: colors.primary, borderRadius: 2 },
   currentBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full },
   weekTypePill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.full, borderWidth: 1 },
-  programDayRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
-  programDayNum: { width: 32, height: 32, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: colors.primaryPale },
-  actionBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 8, borderRadius: radius.full, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.surface },
+  programDayRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.05)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  programDayNum: { width: 32, height: 32, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.15)" },
+  actionBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 8, borderRadius: radius.full, borderWidth: 1, borderColor: "#4ade80", backgroundColor: "rgba(74,222,128,0.1)" },
   // Setup modal
   setupOptionRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
   setupOption: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.md, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, flex: 1, minWidth: 90, alignItems: "center" },
@@ -1449,7 +1449,7 @@ function SessionLegend() {
       {Object.entries(SESSION_COLOR).map(([key, c]) => (
         <View key={key} style={styles.legendItem}>
           <View style={[styles.legendDot, { backgroundColor: c.fg }]} />
-          <Text style={[typography.small, { fontWeight: "700", fontSize: 11, color: colors.textSecondary, textTransform: "capitalize" }]}>
+          <Text style={[typography.small, { fontWeight: "700", fontSize: 11, color: "rgba(255,255,255,0.6)", textTransform: "capitalize" }]}>
             {key}
           </Text>
         </View>
@@ -1475,8 +1475,8 @@ function ProgramSummaryCard({
             <Ionicons name="rocket-outline" size={20} color={colors.primary} />
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={[typography.body, { fontWeight: "700" }]}>Objectif & programme</Text>
-            <Text style={typography.small}>Aucun programme défini. Crée le tien en 30s.</Text>
+            <Text style={[typography.body, { fontWeight: "700", color:"#fff" }]}>Objectif & programme</Text>
+            <Text style={[typography.small, {color:"rgba(255,255,255,0.6)"}]}>Aucun programme défini. Crée le tien en 30s.</Text>
           </View>
           <TouchableOpacity onPress={onCreate} style={[styles.editBtn, { borderColor: colors.primary }]} testID="summary-create">
             <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Créer</Text>
@@ -1496,8 +1496,8 @@ function ProgramSummaryCard({
           <Text style={[typography.caption, { color: isTravel ? "#A85B0F" : colors.primary, fontWeight: "700" }]}>
             {isTravel ? "Mode déplacement actif" : "Objectif & programme"}
           </Text>
-          <Text style={[typography.body, { fontWeight: "700" }]}>{program.goal_label} · {program.split.toUpperCase()} {program.frequency}j</Text>
-          <Text style={[typography.small, { marginTop: 2 }]}>
+          <Text style={[typography.body, { fontWeight: "700", color:"#fff" }]}>{program.goal_label} · {program.split.toUpperCase()} {program.frequency}j</Text>
+          <Text style={[typography.small, { marginTop: 2, color:"rgba(255,255,255,0.6)" }]}>
             Semaine <Text style={{ fontWeight: "800", color: colors.primary }}>{program.current_week}/{program.weeks_total}</Text>
           </Text>
         </View>
@@ -1550,14 +1550,14 @@ function ProgramWeekCard({
         <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <Text style={[typography.body, { fontWeight: "700" }]}>Semaine {week.week_index}</Text>
+              <Text style={[typography.body, { fontWeight: "700", color:"#fff" }]}>Semaine {week.week_index}</Text>
               {isCurrent && (
                 <View style={[styles.currentBadge, { backgroundColor: colors.primary }]}>
                   <Text style={[typography.small, { fontSize: 9, color: "#fff", fontWeight: "800" }]}>EN COURS</Text>
                 </View>
               )}
             </View>
-            <Text style={typography.small}>{week.days.length} séances · {week.days.map((d) => d.focus).join(" · ")}</Text>
+            <Text style={[typography.small, {color:"rgba(255,255,255,0.6)"}]}>{week.days.length} séances · {week.days.map((d) => d.focus).join(" · ")}</Text>
           </View>
           <View style={[styles.weekTypePill, { backgroundColor: palette.bg, borderColor: palette.border }]}>
             <Text style={{ fontSize: 11, fontWeight: "700", color: palette.fg, textTransform: "uppercase" }}>{week.session_type}</Text>
@@ -1578,7 +1578,7 @@ function ProgramWeekCard({
                 <Text style={[typography.small, { color: colors.primary, fontWeight: "800" }]}>J{d.day_index + 1}</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[typography.body, { fontWeight: "600" }]}>{d.focus}</Text>
+                <Text style={[typography.body, { fontWeight: "600", color:"#fff" }]}>{d.focus}</Text>
                 <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
                   {d.exercises.some((e) => e.is_recommended) && (
                     <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} />
@@ -1624,7 +1624,7 @@ function CalendarTrainingView({
         <TouchableOpacity onPress={onPrev} style={styles.calNavBtn} testID="cal-prev">
           <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
-        <Text style={[typography.body, { fontWeight: "700", textTransform: "capitalize" }]}>
+        <Text style={[typography.body, { fontWeight: "700", textTransform: "capitalize", color:"#fff" }]}>
           {MONTH_LABELS[month]} {year}{loading ? " ..." : ""}
         </Text>
         <TouchableOpacity onPress={onNext} style={styles.calNavBtn} testID="cal-next">

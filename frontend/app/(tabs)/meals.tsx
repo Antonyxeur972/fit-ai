@@ -701,8 +701,8 @@ export default function Meals() {
                 style={[styles.pastBtn, { flex: 1 }]}
                 testID="meals-past-button"
               >
-                <Ionicons name="calendar-outline" size={16} color={colors.textSecondary} />
-                <Text style={[typography.small, { color: colors.textSecondary, fontWeight: "600" }]}>
+                <Ionicons name="calendar-outline" size={16} color="rgba(255,255,255,0.6)" />
+                <Text style={[typography.small, { color: "rgba(255,255,255,0.6)", fontWeight: "600" }]}>
                   Jour passé
                 </Text>
               </TouchableOpacity>
@@ -721,16 +721,16 @@ export default function Meals() {
                   <View style={styles.emptyIcon}>
                     <Ionicons name="restaurant-outline" size={28} color={colors.primary} />
                   </View>
-                  <Text style={[typography.body, { fontWeight: "600", marginTop: spacing.md }]}>Aucun repas analysé</Text>
-                  <Text style={[typography.small, { textAlign: "center", marginTop: 6 }]}>Prends une photo de ton assiette pour démarrer.</Text>
+                  <Text style={[typography.body, { fontWeight: "600", marginTop: spacing.md, color:"#fff" }]}>Aucun repas analysé</Text>
+                  <Text style={[typography.small, { textAlign: "center", marginTop: 6, color:"rgba(255,255,255,0.6)" }]}>Prends une photo de ton assiette pour démarrer.</Text>
                 </View>
               </GlassCard>
             ) : (
               MEAL_TYPE_ORDER.filter((t) => todayGrouped[t]?.length).map((t) => (
                 <View key={t} style={{ gap: 8 }}>
                   <View style={styles.subHeader}>
-                    <Text style={typography.caption}>{MEAL_TYPE_LABEL[t]}</Text>
-                    <Text style={[typography.caption, { color: colors.primary, fontWeight: "700" }]}>
+                    <Text style={[typography.caption, {color:"rgba(255,255,255,0.6)"}]}>{MEAL_TYPE_LABEL[t]}</Text>
+                    <Text style={[typography.caption, { color: "#4ade80", fontWeight: "700" }]}>
                       {todayGrouped[t].reduce((s, m) => s + m.calories, 0)} kcal
                     </Text>
                   </View>
@@ -746,7 +746,7 @@ export default function Meals() {
             {hasArchivable > 0 && (
               <View style={styles.archiveBanner} testID="archive-banner">
                 <View style={{ flex: 1, gap: 4 }}>
-                  <Text style={[typography.body, { fontWeight: "700", color: colors.textMain }]}>
+                  <Text style={[typography.body, { fontWeight: "700", color: "#92400E" }]}>
                     {hasArchivable} jour{hasArchivable > 1 ? "s" : ""} à archiver
                   </Text>
                   <Text style={[typography.small]}>
@@ -781,7 +781,7 @@ export default function Meals() {
               ))
             )}
 
-            <Text style={[typography.small, { textAlign: "center", marginTop: spacing.lg, color: colors.textMuted }]}>
+            <Text style={[typography.small, { textAlign: "center", marginTop: spacing.lg, color: "rgba(255,255,255,0.4)" }]}>
               Politique : archivage auto à 7 jours, suppression auto à 14 jours.{"\n"}
               Le % de respect est conservé même après suppression.
             </Text>
@@ -801,12 +801,12 @@ export default function Meals() {
               onDayPress={(iso) => openDay(iso)}
               selectedDay={selectedDay}
             />
-            <Text style={[typography.small, { color: colors.textMuted, textAlign: "center", marginTop: spacing.xs }]}>
+            <Text style={[typography.small, { color: "rgba(255,255,255,0.4)", textAlign: "center", marginTop: spacing.xs }]}>
               Accès rétroactif sur 14 jours · tape un jour pour voir ses repas.
             </Text>
             <View style={{ flexDirection: "row", justifyContent: "center", gap: 18, marginTop: spacing.sm }}>
               <LegendDot color={colors.primary} label="Repas loggés" />
-              <LegendDot color={colors.border} label="Aucun" />
+              <LegendDot color="rgba(255,255,255,0.2)" label="Aucun" />
             </View>
           </>
         )}
@@ -1489,17 +1489,17 @@ function quickQtyOptions(f: Food): number[] {
 
 function MealCard({ meal, onDelete, onDuplicate }: { meal: Meal; onDelete: () => void; onDuplicate?: () => void }) {
   return (
-    <Card style={{ marginBottom: 0 }} testID={`meal-card-${meal.id}`}>
+    <GlassCard style={{ marginBottom: 0 }} testID={`meal-card-${meal.id}`}>
       <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
         <View style={localStyles.mealIcon}>
           <Ionicons name="leaf" size={20} color={colors.primary} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[typography.body, { fontWeight: "600" }]}>{meal.name}</Text>
-          <Text style={[typography.small, { marginTop: 2 }]}>P {meal.protein_g}g · G {meal.carbs_g}g · L {meal.fat_g}g</Text>
+          <Text style={[typography.body, { fontWeight: "600", color:"#fff" }]}>{meal.name}</Text>
+          <Text style={[typography.small, { marginTop: 2, color:"rgba(255,255,255,0.6)" }]}>P {meal.protein_g}g · G {meal.carbs_g}g · L {meal.fat_g}g</Text>
         </View>
         <View style={{ alignItems: "flex-end" }}>
-          <Text style={[typography.body, { fontWeight: "700" }]}>{meal.calories} <Text style={typography.small}>kcal</Text></Text>
+          <Text style={[typography.body, { fontWeight: "700", color:"#fff" }]}>{meal.calories} <Text style={[typography.small,{color:"rgba(255,255,255,0.6)"}]}>kcal</Text></Text>
           <View style={{ flexDirection: "row", gap: 12, marginTop: 6 }}>
             {onDuplicate && (
               <TouchableOpacity onPress={onDuplicate} testID={`meal-duplicate-${meal.id}`}>
@@ -1512,7 +1512,7 @@ function MealCard({ meal, onDelete, onDuplicate }: { meal: Meal; onDelete: () =>
           </View>
         </View>
       </View>
-    </Card>
+    </GlassCard>
   );
 }
 
@@ -1522,11 +1522,11 @@ function HistoryDayCard({ day, onDeleteMeal, onDuplicateDay }: { day: HistoryDay
   const pctColor = pct >= 80 ? colors.primary : pct >= 50 ? "#F59E0B" : colors.alert;
   const labelDate = new Date(day.date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "short" });
   return (
-    <Card testID={`history-day-${day.date}`}>
+    <GlassCard testID={`history-day-${day.date}`}>
       <TouchableOpacity onPress={() => setExpanded((v) => !v)} activeOpacity={0.7} style={{ flexDirection: "row", alignItems: "center" }}>
         <View style={{ flex: 1 }}>
-          <Text style={[typography.body, { fontWeight: "700", textTransform: "capitalize" }]}>{labelDate}</Text>
-          <Text style={typography.small}>
+          <Text style={[typography.body, { fontWeight: "700", textTransform: "capitalize", color:"#fff" }]}>{labelDate}</Text>
+          <Text style={[typography.small, {color:"rgba(255,255,255,0.6)"}]}>
             {day.compliance.consumed.toLocaleString("fr-FR")} / {day.compliance.target.toLocaleString("fr-FR")} kcal · {day.compliance.meals_count} repas
             {day.purged ? "  · supprimé" : ""}
           </Text>
@@ -1542,11 +1542,11 @@ function HistoryDayCard({ day, onDeleteMeal, onDuplicateDay }: { day: HistoryDay
         <View style={{ marginTop: spacing.md, gap: 6 }}>
           {day.meals.map((m) => (
             <View key={m.id} style={localStyles.histMealRow} testID={`history-meal-${m.id}`}>
-              <Text style={[typography.small, { color: colors.textSecondary, width: 70 }]}>
+              <Text style={[typography.small, { color: "rgba(255,255,255,0.6)", width: 70 }]}>
                 {m.meal_type ? MEAL_TYPE_LABEL[m.meal_type] : ""}
               </Text>
-              <Text style={[typography.body, { flex: 1 }]} numberOfLines={1}>{m.name}</Text>
-              <Text style={[typography.small, { fontWeight: "700" }]}>{m.calories} kcal</Text>
+              <Text style={[typography.body, { flex: 1, color:"#fff" }]} numberOfLines={1}>{m.name}</Text>
+              <Text style={[typography.small, { fontWeight: "700", color:"#fff" }]}>{m.calories} kcal</Text>
               <TouchableOpacity onPress={() => onDeleteMeal(m.id)} style={{ marginLeft: 8 }} testID={`history-delete-${m.id}`}>
                 <Ionicons name="trash-outline" size={14} color={colors.textMuted} />
               </TouchableOpacity>
@@ -1566,7 +1566,7 @@ function HistoryDayCard({ day, onDeleteMeal, onDuplicateDay }: { day: HistoryDay
           )}
         </View>
       )}
-    </Card>
+    </GlassCard>
   );
 }
 
@@ -1580,10 +1580,10 @@ function ModalStat({ label, value, unit }: { label: string; value: string; unit:
 }
 
 const localStyles = StyleSheet.create({
-  mealIcon: { width: 40, height: 40, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center", marginRight: spacing.md },
+  mealIcon: { width: 40, height: 40, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.15)", alignItems: "center", justifyContent: "center", marginRight: spacing.md },
   pctBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.full },
-  histMealRow: { flexDirection: "row", alignItems: "center", paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.border },
-  dupDayBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8, marginTop: 6, borderTopWidth: 1, borderTopColor: colors.border },
+  histMealRow: { flexDirection: "row", alignItems: "center", paddingVertical: 6, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.12)" },
+  dupDayBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8, marginTop: 6, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.12)" },
   ingredientChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.full, backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: colors.primary },
   recipeCard: { padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, marginBottom: spacing.sm, backgroundColor: colors.surface },
   recipeAddBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, marginTop: spacing.sm, paddingVertical: 8, borderRadius: radius.full, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primaryPale },
@@ -1645,7 +1645,7 @@ function CalendarMonthView({
         <TouchableOpacity onPress={onPrev} style={calStyles.navBtn} testID="cal-prev">
           <Ionicons name="chevron-back" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
-        <Text style={[typography.body, { fontWeight: "700", textTransform: "capitalize" }]}>
+        <Text style={[typography.body, { fontWeight: "700", textTransform: "capitalize", color:"#fff" }]}>
           {MONTH_LABELS[month]} {year}
         </Text>
         <TouchableOpacity
@@ -1659,7 +1659,7 @@ function CalendarMonthView({
       </View>
       <View style={calStyles.weekRow}>
         {WEEKDAY_LABELS.map((d, i) => (
-          <Text key={`${d}-${i}`} style={[typography.small, { fontSize: 11, textAlign: "center", flex: 1, color: colors.textMuted, fontWeight: "700" }]}>
+          <Text key={`${d}-${i}`} style={[typography.small, { fontSize: 11, textAlign: "center", flex: 1, color: "rgba(255,255,255,0.4)", fontWeight: "700" }]}>
             {d}
           </Text>
         ))}
@@ -1692,14 +1692,14 @@ function CalendarMonthView({
             >
               <Text style={[
                 calStyles.cellDay,
-                hasMeals && { color: colors.primary, fontWeight: "800" },
-                isSel && { color: colors.surface },
-                disabled && { color: colors.textMuted, opacity: 0.5 },
+                hasMeals && { color: "#4ade80", fontWeight: "800" },
+                isSel && { color: "#000" },
+                disabled && { color: "rgba(255,255,255,0.3)", opacity: 0.5 },
               ]}>
                 {day}
               </Text>
               {hasMeals && !isSel && (
-                <View style={[calStyles.cellDot, { backgroundColor: colors.primary }]} />
+                <View style={[calStyles.cellDot, { backgroundColor: "#4ade80" }]} />
               )}
             </TouchableOpacity>
           );
@@ -1710,18 +1710,18 @@ function CalendarMonthView({
 }
 
 const calStyles = StyleSheet.create({
-  wrap: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
+  wrap: { backgroundColor: "rgba(255,255,255,0.08)", borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
   header: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
-  navBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: colors.background },
+  navBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.1)" },
   weekRow: { flexDirection: "row", marginBottom: 4 },
   grid: { flexDirection: "row", flexWrap: "wrap" },
   cell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: "center", justifyContent: "center", padding: 2 },
   cellEmpty: { width: `${100 / 7}%`, aspectRatio: 1 },
   cellHasMeals: { },
-  cellSelected: { backgroundColor: colors.primary, borderRadius: radius.md },
-  cellToday: { borderWidth: 2, borderColor: colors.primary, borderRadius: radius.md },
+  cellSelected: { backgroundColor: "#4ade80", borderRadius: radius.md },
+  cellToday: { borderWidth: 2, borderColor: "#4ade80", borderRadius: radius.md },
   cellDisabled: {},
-  cellDay: { fontSize: 14, fontWeight: "600", color: colors.textMain },
+  cellDay: { fontSize: 14, fontWeight: "600", color: "rgba(255,255,255,0.8)" },
   cellDot: { width: 4, height: 4, borderRadius: 2, marginTop: 2 },
 });
 
@@ -1738,8 +1738,8 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl, paddingTop: spacing.sm },
   actions: { flexDirection: "row", gap: spacing.sm },
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FEF2F2", padding: spacing.md, borderRadius: radius.md },
-  emptyIcon: { width: 56, height: 56, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center" },
-  subHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },
+  emptyIcon: { width: 56, height: 56, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.15)", alignItems: "center", justifyContent: "center" },
+  subHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4, paddingVertical: 2 },
   archiveBanner: { flexDirection: "row", alignItems: "center", padding: spacing.md, gap: spacing.md, backgroundColor: "#FEF3C7", borderRadius: radius.md, borderWidth: 1, borderColor: "#FDE68A" },
   archiveBtn: { paddingHorizontal: 12, paddingVertical: 8, backgroundColor: colors.surface, borderRadius: radius.full, borderWidth: 1, borderColor: colors.primary },
   modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
