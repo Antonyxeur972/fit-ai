@@ -408,7 +408,7 @@ export default function ProfileTab() {
               Renseigne tes meilleurs efforts (charge × reps) pour calculer ton 1RM Epley. Tu peux aussi les enregistrer pendant tes séances dans Training.
             </Text>
           )}
-        </Card>
+        </GlassCard>
 
         {/* Body Avatar */}
         {composition?.available && composition.muscle_groups && (
