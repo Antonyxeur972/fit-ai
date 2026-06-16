@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
@@ -92,7 +92,7 @@ export default function ChallengesTab() {
   const selected = active.find((c) => c.id === selectedId) || null;
 
   return (
-    <SafeAreaView style={styles.root}>
+    <ScreenBackground bg="challenges">
       <View style={styles.header}>
         <Text style={typography.caption}>30 jours · à la maison</Text>
         <Text style={styles.title}>Challenges</Text>
@@ -221,12 +221,11 @@ export default function ChallengesTab() {
         </Text>
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
-    </SafeAreaView>
+    </ScreenBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.background },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
   title: { fontSize: 30, fontWeight: "800", color: colors.textMain },
   content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },

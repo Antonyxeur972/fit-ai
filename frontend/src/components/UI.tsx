@@ -58,7 +58,7 @@ export function Button({ title, onPress, loading, variant = "primary", disabled,
 export function SectionTitle({ title, action, testID }: { title: string; action?: ReactNode; testID?: string }) {
   return (
     <View style={styles.sectionRow} testID={testID}>
-      <Text style={[typography.caption, { color: colors.textSecondary }]}>{title}</Text>
+      <Text style={[typography.caption, { color: colors.primaryLight, fontWeight: "700" }]}>{title}</Text>
       {action}
     </View>
   );
@@ -99,7 +99,7 @@ export function ProgressRing({
   stroke = 14,
   progress, // 0-1
   color = colors.primary,
-  trackColor = colors.primaryPale,
+  trackColor = "rgba(255,255,255,0.15)",
   children,
 }: {
   size?: number;
@@ -159,10 +159,10 @@ export function MacroBar({
   return (
     <View testID={testID} style={{ marginBottom: spacing.md }}>
       <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 6 }}>
-        <Text style={[typography.small, { color: colors.textMain, fontWeight: "600" }]}>{label}</Text>
-        <Text style={typography.small}>
+        <Text style={[typography.small, { color: "#fff", fontWeight: "600" }]}>{label}</Text>
+        <Text style={[typography.small, { color: "rgba(255,255,255,0.72)" }]}>
           {current}g{" "}
-          <Text style={{ color: colors.textMuted }}>/ {target}g</Text>
+          <Text style={{ color: "rgba(255,255,255,0.42)" }}>/ {target}g</Text>
         </Text>
       </View>
       <View style={styles.macroTrack}>
@@ -241,7 +241,7 @@ export function LineChart1RM({
             <Polyline
               key={i}
               points={`${pad.left},${py.toFixed(1)} ${(pad.left + w).toFixed(1)},${py.toFixed(1)}`}
-              stroke={colors.border}
+              stroke="rgba(255,255,255,0.12)"
               strokeWidth={1}
               strokeDasharray="4 6"
             />
@@ -309,7 +309,7 @@ export function WeekBars({
         const h = (d.consumed / max) * 110;
         const ratio = target > 0 ? d.consumed / target : 0;
         const over = ratio > 1.05;
-        const bg = d.consumed === 0 ? colors.border : over ? colors.alert : colors.primary;
+        const bg = d.consumed === 0 ? "rgba(255,255,255,0.15)" : over ? colors.alert : colors.primary;
         const day = new Date(d.date).toLocaleDateString("fr-FR", { weekday: "short" });
         return (
           <View key={d.date} style={{ flex: 1, alignItems: "center" }}>
@@ -326,7 +326,7 @@ export function WeekBars({
                 }}
               />
             </View>
-            <Text style={[typography.caption, { marginTop: 6 }]}>{day.slice(0, 3)}</Text>
+            <Text style={[typography.caption, { marginTop: 6, color: "rgba(255,255,255,0.5)" }]}>{day.slice(0, 3)}</Text>
           </View>
         );
       })}
@@ -336,12 +336,12 @@ export function WeekBars({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.surface,
+    backgroundColor: colors.surface,  // rgba dark glass from theme
     borderRadius: radius.lg,
     padding: spacing.lg,
     borderWidth: 1,
-    borderColor: colors.border,
-    ...shadow.sm,
+    borderColor: colors.border,       // rgba(74,222,128,0.18) green glass border
+    overflow: "hidden",
   },
   btn: {
     minHeight: 52,
@@ -359,11 +359,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing.sm,
   },
-  statValue: { fontSize: 26, fontWeight: "700", color: colors.textMain, letterSpacing: -0.4 },
-  statUnit: { fontSize: 13, color: colors.textSecondary, fontWeight: "500" },
+  statValue: { fontSize: 26, fontWeight: "700", color: "#FFFFFF", letterSpacing: -0.4 },
+  statUnit: { fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: "500" },
   macroTrack: {
     height: 8,
-    backgroundColor: colors.primaryPale,
+    backgroundColor: "rgba(255,255,255,0.14)",
     borderRadius: radius.full,
     overflow: "hidden",
   },

@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
   Modal, RefreshControl, TextInput,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { useFocusEffect } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
@@ -643,7 +643,7 @@ export default function Meals() {
   const hasArchivable = historyBuckets.find((b) => b.label.startsWith("Plus ancien"))?.days.length || 0;
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]} testID="meals-screen">
+    <ScreenBackground bg="meals">
       <View style={styles.header}>
         <Text style={typography.caption}>Repas</Text>
         <Text style={styles.headerTitle}>{total.toLocaleString("fr-FR")} <Text style={styles.headerUnit}>{"kcal aujourd'hui"}</Text></Text>
@@ -1471,7 +1471,7 @@ export default function Meals() {
           </View>
         </View>
       </Modal>
-    </SafeAreaView>
+    </ScreenBackground>
   );
 }
 
@@ -1722,7 +1722,7 @@ const calStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
+
   header: { padding: spacing.lg, paddingBottom: spacing.sm },
   headerTitle: { fontSize: 32, fontWeight: "800", color: colors.textMain, letterSpacing: -1, marginTop: 4 },
   headerUnit: { fontSize: 14, color: colors.textSecondary, fontWeight: "500" },

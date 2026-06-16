@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Platform, Alert,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -12,6 +11,7 @@ import { useAuth } from "@/src/auth";
 import { Card, Button, SectionTitle, Stat } from "@/src/components/UI";
 import { ShareCardModal } from "@/src/components/ShareCardModal";
 import { ProgramCarousel } from "@/src/components/ProgramCarousel";
+import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type Exercise = { name: string; sets: number; reps: string; rest_s: number; checked?: boolean; is_recommended?: boolean };
@@ -611,7 +611,7 @@ export default function Training() {
   }, [library]);
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]} testID="training-screen">
+    <ScreenBackground bg="training">
       <View style={styles.header}>
         <Text style={typography.caption}>Programme</Text>
         <Text style={styles.title}>Ton entraînement</Text>
@@ -1330,7 +1330,7 @@ export default function Training() {
           ...(shareData || {}),
         }}
       />
-    </SafeAreaView>
+    </ScreenBackground>
   );
 }
 
@@ -1373,85 +1373,88 @@ function SessionTypeSelector({
   );
 }
 
+const GLASS = "rgba(10,28,16,0.72)";
+const GLASS_BORDER = "rgba(74,222,128,0.18)";
+const SHEET = "rgba(6,16,10,0.97)";
+
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
   header: { padding: spacing.lg, paddingBottom: spacing.md },
-  title: { fontSize: 28, fontWeight: "700", color: colors.textMain, letterSpacing: -0.6, marginTop: 4 },
+  title: { fontSize: 28, fontWeight: "800", color: "#FFFFFF", letterSpacing: -0.6, marginTop: 4 },
   content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
-  focusBadge: { width: 44, height: 44, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center", marginRight: spacing.md },
-  exerciseRow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
-  recoBadge: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: "#FBDDDB", borderRadius: radius.full, borderWidth: 1, borderColor: "#E58880" },
-  recoBadgeTxt: { fontSize: 9, fontWeight: "900", color: "#A12A22", letterSpacing: 0.5 },
-  exCheckReco: { borderColor: "#E58880", backgroundColor: "#FFF6F5" },
-  exerciseNum: { width: 32, height: 32, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center", marginRight: spacing.md },
-  weekRow: { flexDirection: "row", alignItems: "center", backgroundColor: colors.surface, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border },
-  weekRowToday: { borderColor: colors.primary, backgroundColor: colors.primaryPale },
+  focusBadge: { width: 44, height: 44, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.18)", alignItems: "center", justifyContent: "center", marginRight: spacing.md },
+  exerciseRow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" },
+  recoBadge: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: "rgba(161,42,34,0.25)", borderRadius: radius.full, borderWidth: 1, borderColor: "#E58880" },
+  recoBadgeTxt: { fontSize: 9, fontWeight: "900", color: "#F87171", letterSpacing: 0.5 },
+  exCheckReco: { borderColor: "#E58880", backgroundColor: "rgba(161,42,34,0.12)" },
+  exerciseNum: { width: 32, height: 32, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.18)", alignItems: "center", justifyContent: "center", marginRight: spacing.md },
+  weekRow: { flexDirection: "row", alignItems: "center", backgroundColor: GLASS, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER },
+  weekRowToday: { borderColor: colors.primaryLight, backgroundColor: "rgba(74,222,128,0.15)" },
   statusDot: { width: 12, height: 12, borderRadius: radius.full },
-  modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
-  modalCard: { backgroundColor: colors.surface, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg },
-  modalHandle: { width: 40, height: 4, backgroundColor: colors.border, borderRadius: 4, alignSelf: "center", marginBottom: spacing.md },
-  modalTitle: { fontSize: 22, fontWeight: "700", color: colors.textMain },
-  input: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textMain, marginTop: 6 },
+  modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "flex-end" },
+  modalCard: { backgroundColor: SHEET, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, borderWidth: 1, borderColor: GLASS_BORDER },
+  modalHandle: { width: 40, height: 4, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 4, alignSelf: "center", marginBottom: spacing.md },
+  modalTitle: { fontSize: 22, fontWeight: "700", color: "#FFFFFF" },
+  input: { backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: GLASS_BORDER, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: "#FFFFFF", marginTop: 6 },
   chip: { borderRadius: radius.full, alignSelf: "flex-start" },
-  editBtn: { flexDirection: "row", gap: 4, alignItems: "center", paddingHorizontal: 10, paddingVertical: 4, backgroundColor: colors.primaryPale, borderRadius: radius.full },
+  editBtn: { flexDirection: "row", gap: 4, alignItems: "center", paddingHorizontal: 10, paddingVertical: 4, backgroundColor: "rgba(74,222,128,0.15)", borderRadius: radius.full, borderWidth: 1, borderColor: GLASS_BORDER },
   typeRow: { flexDirection: "row", gap: 8, marginTop: 8 },
-  typeBig: { flex: 1, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surface },
-  typeBigActive: { borderColor: colors.primary, backgroundColor: colors.primaryPale },
-  typeBigLabel: { fontSize: 14, fontWeight: "700", color: colors.textMain },
-  typeBigReps: { fontSize: 12, color: colors.textSecondary, marginTop: 2 },
-  typeBigDesc: { fontSize: 11, color: colors.textMuted, marginTop: 4, lineHeight: 14 },
-  exCheck: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: 10, paddingHorizontal: 12, borderRadius: radius.md, marginBottom: 6, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  exCheckOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
-  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: colors.border, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface },
+  typeBig: { flex: 1, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: GLASS },
+  typeBigActive: { borderColor: colors.primaryLight, backgroundColor: "rgba(74,222,128,0.18)" },
+  typeBigLabel: { fontSize: 14, fontWeight: "700", color: "#FFFFFF" },
+  typeBigReps: { fontSize: 12, color: "rgba(255,255,255,0.6)", marginTop: 2 },
+  typeBigDesc: { fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4, lineHeight: 14 },
+  exCheck: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: 10, paddingHorizontal: 12, borderRadius: radius.md, marginBottom: 6, backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER },
+  exCheckOn: { backgroundColor: "rgba(74,222,128,0.18)", borderColor: colors.primaryLight },
+  checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: GLASS_BORDER, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)" },
   checkboxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  rmBox: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: colors.primaryPale, padding: spacing.md, borderRadius: radius.md, marginTop: spacing.md },
-  rmValue: { fontSize: 24, fontWeight: "800", color: colors.primary, marginTop: 2 },
-  perfRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border },
+  rmBox: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: "rgba(74,222,128,0.15)", padding: spacing.md, borderRadius: radius.md, marginTop: spacing.md, borderWidth: 1, borderColor: GLASS_BORDER },
+  rmValue: { fontSize: 24, fontWeight: "800", color: colors.primaryLight, marginTop: 2 },
+  perfRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" },
   // Tabs
   tabRow: { flexDirection: "row", gap: 6, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
-  tabChip: { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  tabChip: { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: radius.full, backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER },
   tabChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
-  tabText: { fontSize: 12, fontWeight: "700", color: colors.textSecondary },
-  tabTextActive: { color: colors.surface },
+  tabText: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.55)" },
+  tabTextActive: { color: "#FFFFFF" },
   // History
   histDot: { width: 8, height: 8, borderRadius: 4 },
   // Timer overlay
   timerOverlay: { position: "absolute", left: 0, right: 0, bottom: spacing.lg, alignItems: "center", padding: spacing.md, zIndex: 100, elevation: 10 },
-  timerCard: { backgroundColor: colors.surface, padding: spacing.md, borderRadius: radius.lg, alignItems: "center", borderWidth: 2, borderColor: colors.primary, width: "92%", maxWidth: 360, gap: 4 },
-  timerBig: { fontSize: 40, fontWeight: "800", color: colors.primary, letterSpacing: -1 },
-  timerProgressTrack: { height: 6, backgroundColor: colors.border, borderRadius: 3, width: "100%", overflow: "hidden" },
-  timerProgressFill: { height: "100%", backgroundColor: colors.primary, borderRadius: 3 },
-  timerBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: colors.primary },
-  timerBtnTxt: { fontSize: 13, fontWeight: "700", color: colors.primary },
-  timerSaveCfg: { flexDirection: "row", gap: 4, alignItems: "center", paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, marginTop: 4 },
+  timerCard: { backgroundColor: "rgba(6,20,10,0.97)", padding: spacing.md, borderRadius: radius.lg, alignItems: "center", borderWidth: 2, borderColor: colors.primaryLight, width: "92%", maxWidth: 360, gap: 4 },
+  timerBig: { fontSize: 40, fontWeight: "800", color: colors.primaryLight, letterSpacing: -1 },
+  timerProgressTrack: { height: 6, backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 3, width: "100%", overflow: "hidden" },
+  timerProgressFill: { height: "100%", backgroundColor: colors.primaryLight, borderRadius: 3 },
+  timerBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.15)", borderWidth: 1, borderColor: colors.primaryLight },
+  timerBtnTxt: { fontSize: 13, fontWeight: "700", color: colors.primaryLight },
+  timerSaveCfg: { flexDirection: "row", gap: 4, alignItems: "center", paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.full, backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER, marginTop: 4 },
   // Calendar
-  calWrap: { backgroundColor: colors.surface, borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: colors.border },
+  calWrap: { backgroundColor: GLASS, borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: GLASS_BORDER },
   calHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
-  calNavBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: colors.background },
+  calNavBtn: { width: 36, height: 36, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.1)" },
   calWeekRow: { flexDirection: "row", marginBottom: 4 },
   calGrid: { flexDirection: "row", flexWrap: "wrap" },
   calCell: { width: `${100 / 7}%`, aspectRatio: 1, alignItems: "center", justifyContent: "center", padding: 2 },
   calCellEmpty: { width: `${100 / 7}%`, aspectRatio: 1 },
   calCellInner: { width: "85%", aspectRatio: 1, borderRadius: radius.sm, alignItems: "center", justifyContent: "center", borderWidth: 1.5 },
-  calToday: { borderColor: colors.textMain, borderWidth: 2 },
+  calToday: { borderColor: "#FFFFFF", borderWidth: 2 },
   legendRow: { flexDirection: "row", gap: 12, flexWrap: "wrap", justifyContent: "center", marginVertical: spacing.sm },
   legendItem: { flexDirection: "row", alignItems: "center", gap: 4 },
   legendDot: { width: 10, height: 10, borderRadius: 5 },
   // Program
-  progressBar: { height: 4, backgroundColor: colors.background, borderRadius: 2, overflow: "hidden", marginTop: spacing.sm },
+  progressBar: { height: 4, backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 2, overflow: "hidden", marginTop: spacing.sm },
   progressFill: { height: "100%", backgroundColor: colors.primary, borderRadius: 2 },
   currentBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full },
   weekTypePill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.full, borderWidth: 1 },
-  programDayRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
-  programDayNum: { width: 32, height: 32, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: colors.primaryPale },
-  actionBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 8, borderRadius: radius.full, borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.surface },
+  programDayRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: GLASS_BORDER },
+  programDayNum: { width: 32, height: 32, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.18)" },
+  actionBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 8, borderRadius: radius.full, borderWidth: 1, borderColor: colors.primaryLight, backgroundColor: "rgba(74,222,128,0.15)" },
   // Setup modal
   setupOptionRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
-  setupOption: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.md, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, flex: 1, minWidth: 90, alignItems: "center" },
-  setupOptionOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
-  setupOptionLabel: { fontSize: 14, fontWeight: "700", color: colors.textSecondary },
-  setupOptionLabelOn: { color: colors.primary },
-  setupOptionSub: { fontSize: 10, color: colors.textMuted, marginTop: 2 },
+  setupOption: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: GLASS_BORDER, flex: 1, minWidth: 90, alignItems: "center" },
+  setupOptionOn: { backgroundColor: "rgba(74,222,128,0.18)", borderColor: colors.primaryLight },
+  setupOptionLabel: { fontSize: 14, fontWeight: "700", color: "rgba(255,255,255,0.6)" },
+  setupOptionLabelOn: { color: colors.primaryLight },
+  setupOptionSub: { fontSize: 10, color: "rgba(255,255,255,0.38)", marginTop: 2 },
 });
 
 // ----- Helpers / sub-components -----

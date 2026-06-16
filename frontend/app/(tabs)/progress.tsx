@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, Dimensions, Animated, PanResponder, Platform } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { useFocusEffect } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -127,7 +127,7 @@ export default function Progress() {
     .sort((a, b) => b.est_1rm - a.est_1rm);
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]} testID="progress-screen">
+    <ScreenBackground bg="progress">
       <View style={styles.header}>
         <Text style={typography.caption}>Progression</Text>
         <Text style={styles.title}>Ton évolution</Text>
@@ -350,7 +350,7 @@ export default function Progress() {
 
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
-    </SafeAreaView>
+    </ScreenBackground>
   );
 }
 
@@ -629,7 +629,7 @@ function DeltaSummary({ left, right }: { left?: Transfo; right?: Transfo }) {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
+
   header: { padding: spacing.lg, paddingBottom: spacing.md },
   title: { fontSize: 28, fontWeight: "700", color: colors.textMain, letterSpacing: -0.6, marginTop: 4 },
   content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },

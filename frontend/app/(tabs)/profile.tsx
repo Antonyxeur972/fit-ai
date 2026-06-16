@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, TextInput, Modal, Switch, Platform } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -255,7 +255,7 @@ export default function ProfileTab() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]} testID="profile-screen">
+    <ScreenBackground bg="profile">
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.userHeader}>
           {user?.picture ? (
@@ -715,7 +715,7 @@ export default function ProfileTab() {
           </KeyboardAwareScrollView>
         </View>
       </Modal>
-    </SafeAreaView>
+    </ScreenBackground>
   );
 }
 
@@ -765,7 +765,7 @@ function ForceLiftRow({
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
+
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
   userHeader: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.sm },
   avatar: { width: 64, height: 64, borderRadius: radius.full },

@@ -1,6 +1,5 @@
 import { useCallback, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, TextInput, Modal } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -11,6 +10,7 @@ import { Card, ProgressRing, MacroBar, SectionTitle, Stat, Button } from "@/src/
 import { ShareCardModal } from "@/src/components/ShareCardModal";
 import { Mascot } from "@/src/components/Mascot";
 import { StrengthSymbol } from "@/src/components/StrengthSymbol";
+import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { quoteForToday } from "@/src/lib/motivation";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
@@ -108,9 +108,9 @@ export default function Dashboard() {
 
   if (!data) {
     return (
-      <SafeAreaView style={styles.safe} edges={["top"]}>
+      <ScreenBackground bg="dashboard">
         <Text style={[typography.body, { padding: spacing.lg }]}>Chargement...</Text>
-      </SafeAreaView>
+      </ScreenBackground>
     );
   }
 
@@ -119,10 +119,11 @@ export default function Dashboard() {
   const today = new Date().toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]} testID="dashboard-screen">
+    <ScreenBackground bg="dashboard">
       <ScrollView
+        testID="dashboard-screen"
         contentContainerStyle={styles.content}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primaryLight} />}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.headerRow}>
@@ -153,14 +154,14 @@ export default function Dashboard() {
               strength={points && points.level_span > 0 ? Math.min(1, points.points_in_level / points.level_span) : 0.3}
             />
             <View style={{ flex: 1 }}>
-              <Text style={[typography.caption, { color: colors.primary, letterSpacing: 1.2, fontWeight: "800" }]}>
+              <Text style={[typography.caption, { color: colors.primaryLight, letterSpacing: 1.2, fontWeight: "800" }]}>
                 {points?.streak_days && points.streak_days > 1 ? `STREAK · ${points.streak_days}J` : "FORCE"}
               </Text>
-              <Text style={[typography.body, { fontWeight: "600", marginTop: 2, color: colors.textMain, lineHeight: 20 }]}>
+              <Text style={[typography.body, { fontWeight: "600", marginTop: 2, lineHeight: 20 }]}>
                 {quoteForToday(data.workout?.completed ? "post_workout" : "pre_workout")}
               </Text>
               {points && points.points_today > 0 ? (
-                <Text style={[typography.small, { marginTop: 4, color: colors.primary, fontWeight: "800" }]}>
+                <Text style={[typography.small, { marginTop: 4, color: colors.primaryLight, fontWeight: "800" }]}>
                   +{points.points_today} pts aujourd&apos;hui
                 </Text>
               ) : null}
@@ -181,7 +182,7 @@ export default function Dashboard() {
           <ProgressRing progress={progress} size={200} stroke={16} color={over ? colors.alert : colors.primary}>
             <Text style={typography.caption}>Restant</Text>
             <Text style={styles.bigNumber}>{Math.max(0, data.remaining_calories)}</Text>
-            <Text style={[typography.small, { color: colors.textSecondary }]}>
+            <Text style={typography.small}>
               {data.consumed_calories} / {data.target_calories} kcal
             </Text>
           </ProgressRing>
@@ -302,11 +303,11 @@ export default function Dashboard() {
                 </Text>
                 <Text style={typography.small}>{data.workout.duration_min} min · {data.workout.completed ? "Terminée" : "À faire"}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
+              <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.45)" />
             </TouchableOpacity>
           ) : (
             <TouchableOpacity onPress={() => router.push("/(tabs)/training")} style={{ marginTop: spacing.sm }}>
-              <Text style={[typography.body, { color: colors.primary, fontWeight: "600" }]}>
+              <Text style={[typography.body, { color: colors.primaryLight, fontWeight: "600" }]}>
                 Génère ton programme →
               </Text>
             </TouchableOpacity>
@@ -357,7 +358,7 @@ export default function Dashboard() {
                   style={styles.quickChip}
                   testID={`steps-quick-${n}`}
                 >
-                  <Text style={[typography.small, { color: colors.primary, fontWeight: "600" }]}>+{n.toLocaleString("fr-FR")}</Text>
+                  <Text style={[typography.small, { color: colors.primaryLight, fontWeight: "600" }]}>+{n.toLocaleString("fr-FR")}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -383,7 +384,7 @@ export default function Dashboard() {
           points_today: points?.points_today || 0,
         }}
       />
-    </SafeAreaView>
+    </ScreenBackground>
   );
 }
 
@@ -391,9 +392,9 @@ function BurnRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap;
   return (
     <View style={styles.burnRow}>
       <View style={styles.burnIcon}>
-        <Ionicons name={icon} size={16} color={colors.primary} />
+        <Ionicons name={icon} size={16} color={colors.primaryLight} />
       </View>
-      <Text style={[typography.body, { flex: 1, color: colors.textMain }]}>{label}</Text>
+      <Text style={[typography.body, { flex: 1 }]}>{label}</Text>
       <Text style={[typography.body, { fontWeight: "600" }]}>{value.toLocaleString("fr-FR")} <Text style={typography.small}>kcal</Text></Text>
     </View>
   );
@@ -402,11 +403,11 @@ function BurnRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap;
 function WeekMacroStat({ label, value, target, unit }: { label: string; value: number; target: number; unit?: string }) {
   const pct = target > 0 ? Math.round((value / target) * 100) : 0;
   const onTrack = pct >= 90 && pct <= 110;
-  const color = onTrack ? colors.primary : pct < 90 ? colors.textSecondary : colors.alert;
+  const color = onTrack ? colors.primaryLight : pct < 90 ? colors.textSecondary : colors.alert;
   return (
     <View style={{ alignItems: "center", flex: 1 }}>
-      <Text style={[typography.small, { fontSize: 10, color: colors.textMuted, fontWeight: "600" }]}>{label}</Text>
-      <Text style={[typography.body, { fontWeight: "700", marginTop: 2, color: colors.textMain }]}>
+      <Text style={[typography.caption, { fontWeight: "600" }]}>{label}</Text>
+      <Text style={[typography.body, { fontWeight: "700", marginTop: 2 }]}>
         {value.toLocaleString("fr-FR")}{unit ? <Text style={[typography.small, { fontSize: 11 }]}> {unit}</Text> : null}
       </Text>
       {target > 0 && (
@@ -419,47 +420,48 @@ function WeekMacroStat({ label, value, target, unit }: { label: string; value: n
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.md },
-  heroCard: { backgroundColor: colors.surface, gap: 0 },
-  hello: { fontSize: 26, fontWeight: "700", color: colors.textMain, letterSpacing: -0.4, marginTop: 2 },
+  heroCard: { gap: 0 },
+  hello: { fontSize: 26, fontWeight: "800", color: "#FFFFFF", letterSpacing: -0.5, marginTop: 2 },
   avatar: {
     width: 44, height: 44, borderRadius: radius.full,
-    backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center",
+    backgroundColor: "rgba(74,222,128,0.2)", borderWidth: 1, borderColor: "rgba(74,222,128,0.4)",
+    alignItems: "center", justifyContent: "center",
   },
-  bigNumber: { fontSize: 44, fontWeight: "800", color: colors.textMain, letterSpacing: -1.2 },
+  bigNumber: { fontSize: 44, fontWeight: "800", color: "#FFFFFF", letterSpacing: -1.2 },
   overTag: {
     flexDirection: "row", alignItems: "center", gap: 6,
-    backgroundColor: "#FEF2F2", paddingHorizontal: 12, paddingVertical: 6,
+    backgroundColor: "rgba(248,113,113,0.18)", borderWidth: 1, borderColor: "rgba(248,113,113,0.4)",
+    paddingHorizontal: 12, paddingVertical: 6,
     borderRadius: radius.full, marginTop: spacing.md,
   },
   burnedGrid: { gap: spacing.sm },
   burnRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 6 },
-  burnIcon: { width: 30, height: 30, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center" },
+  burnIcon: { width: 30, height: 30, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.15)", alignItems: "center", justifyContent: "center" },
   workoutRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.sm },
   workoutBadge: { width: 48, height: 48, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
-  workoutTitle: { fontSize: 15, fontWeight: "600", color: colors.textMain },
+  workoutTitle: { fontSize: 15, fontWeight: "600", color: "#FFFFFF" },
   addStepsBtn: {
     flexDirection: "row", alignItems: "center", gap: 4,
-    backgroundColor: colors.primaryPale, paddingHorizontal: 10, paddingVertical: 6,
-    borderRadius: radius.full,
+    backgroundColor: "rgba(74,222,128,0.15)", borderWidth: 1, borderColor: "rgba(74,222,128,0.3)",
+    paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.full,
   },
-  modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
-  modalCard: { backgroundColor: colors.surface, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg },
-  modalHandle: { width: 40, height: 4, backgroundColor: colors.border, borderRadius: 4, alignSelf: "center", marginBottom: spacing.md },
-  modalTitle: { fontSize: 22, fontWeight: "700", color: colors.textMain },
+  modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "flex-end" },
+  modalCard: { backgroundColor: colors.surfaceSheet, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, borderWidth: 1, borderColor: colors.border },
+  modalHandle: { width: 40, height: 4, backgroundColor: "rgba(255,255,255,0.25)", borderRadius: 4, alignSelf: "center", marginBottom: spacing.md },
+  modalTitle: { fontSize: 22, fontWeight: "700", color: "#FFFFFF" },
   stepInput: {
     marginTop: spacing.md, padding: spacing.md, fontSize: 22, fontWeight: "600",
-    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, color: colors.textMain,
-    backgroundColor: colors.surface,
+    borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, color: "#FFFFFF",
+    backgroundColor: "rgba(255,255,255,0.08)",
   },
   quickRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: spacing.md },
   quickChip: {
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.full,
-    backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: "#D5EAD8",
+    backgroundColor: "rgba(74,222,128,0.15)", borderWidth: 1, borderColor: "rgba(74,222,128,0.3)",
   },
   weekDaysRow: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: 6, height: 80 },
-  weekBarTrack: { width: 18, height: 60, backgroundColor: colors.background, borderRadius: radius.sm, overflow: "hidden", justifyContent: "flex-end", borderWidth: 1, borderColor: colors.border },
+  weekBarTrack: { width: 18, height: 60, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: radius.sm, overflow: "hidden", justifyContent: "flex-end", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
   weekBarFill: { width: "100%", borderTopLeftRadius: radius.sm, borderTopRightRadius: radius.sm },
 });
