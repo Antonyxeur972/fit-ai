@@ -652,8 +652,8 @@ export default function Training() {
                 <Ionicons name="barbell" size={20} color={colors.primary} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[typography.h3]}>{todayWorkout.focus}</Text>
-                <Text style={typography.small}>{todayWorkout.duration_min} min · {todayExercises.length} exercices</Text>
+                <Text style={[typography.h3, {color:"#fff"}]}>{todayWorkout.focus}</Text>
+                <Text style={[typography.small, {color:"rgba(255,255,255,0.6)"}]}>{todayWorkout.duration_min} min · {todayExercises.length} exercices</Text>
               </View>
             </View>
             {todayExercises.map((ex, i) => {
@@ -665,7 +665,7 @@ export default function Training() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                      <Text style={[typography.body, { fontWeight: "600", color: reco ? "#A12A22" : colors.textMain }]}>{ex.name}</Text>
+                      <Text style={[typography.body, { fontWeight: "600", color: reco ? "#A12A22" : "#fff" }]}>{ex.name}</Text>
                       {reco && (
                         <View style={styles.recoBadge}>
                           <Ionicons name="flame" size={9} color="#A12A22" />
@@ -673,7 +673,7 @@ export default function Training() {
                         </View>
                       )}
                     </View>
-                    <Text style={typography.small}>{ex.sets} × {ex.reps} · repos {ex.rest_s}s</Text>
+                    <Text style={[typography.small, {color:"rgba(255,255,255,0.6)"}]}>{ex.sets} × {ex.reps} · repos {ex.rest_s}s</Text>
                   </View>
                   <Ionicons name="add-circle-outline" size={22} color={reco ? "#A12A22" : colors.primary} />
                 </TouchableOpacity>
@@ -726,7 +726,7 @@ export default function Training() {
         ) : !program ? (
           <GlassCard>
             <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase", marginBottom:8}}>Pas encore de programme</Text>
-            <Text style={[typography.small, { marginBottom: spacing.md }]}>
+            <Text style={[typography.small, { marginBottom: spacing.md, color:"rgba(255,255,255,0.6)" }]}>
               Configure ton programme : durée, fréquence et organisation des séances.
             </Text>
             <Button

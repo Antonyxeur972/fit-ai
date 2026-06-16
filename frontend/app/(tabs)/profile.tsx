@@ -913,7 +913,7 @@ const styles = StyleSheet.create({
   logout: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: spacing.md, marginTop: spacing.md },
   tierBadge: { paddingHorizontal: 14, paddingVertical: 8, backgroundColor: colors.primary, borderRadius: radius.full },
   tierText: { color: "#fff", fontWeight: "800", fontSize: 13, letterSpacing: 0.5 },
-  scoreRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 },
+  scoreRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4, borderBottomWidth: 0 },
   scoreBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, minWidth: 50, alignItems: "center" },
   diagRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.12)" },
   modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
@@ -923,7 +923,7 @@ const styles = StyleSheet.create({
   input: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: colors.textMain, marginTop: 6 },
   mascotPlaceholder: {
     width: 88, height: 88, borderRadius: radius.full,
-    backgroundColor: colors.primaryPale, borderWidth: 1.5, borderColor: colors.primary,
+    backgroundColor: "rgba(74,222,128,0.15)", borderWidth: 1.5, borderColor: "#4ade80",
     alignItems: "center", justifyContent: "center",
   },
   notifRow: {

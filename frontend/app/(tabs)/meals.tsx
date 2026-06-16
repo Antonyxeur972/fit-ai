@@ -1726,15 +1726,15 @@ const calStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
+  safe: { flex: 1, backgroundColor: "transparent" },
   header: { padding: spacing.lg, paddingBottom: spacing.sm },
-  headerTitle: { fontSize: 32, fontWeight: "800", color: colors.textMain, letterSpacing: -1, marginTop: 4 },
-  headerUnit: { fontSize: 14, color: colors.textSecondary, fontWeight: "500" },
+  headerTitle: { fontSize: 32, fontWeight: "800", color: "#fff", letterSpacing: -1, marginTop: 4 },
+  headerUnit: { fontSize: 14, color: "rgba(255,255,255,0.6)", fontWeight: "500" },
   tabRow: { flexDirection: "row", gap: 8, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
-  tabChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, flexShrink: 0 },
-  tabChipActive: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
-  tabText: { fontSize: 13, color: colors.textSecondary, fontWeight: "600" },
-  tabTextActive: { color: colors.primary, fontWeight: "700" },
+  tabChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.1)", borderWidth: 1, borderColor: "rgba(255,255,255,0.15)", flexShrink: 0 },
+  tabChipActive: { backgroundColor: "rgba(74,222,128,0.15)", borderColor: "#4ade80" },
+  tabText: { fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: "600" },
+  tabTextActive: { color: "#4ade80", fontWeight: "700" },
   content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl, paddingTop: spacing.sm },
   actions: { flexDirection: "row", gap: spacing.sm },
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FEF2F2", padding: spacing.md, borderRadius: radius.md },
