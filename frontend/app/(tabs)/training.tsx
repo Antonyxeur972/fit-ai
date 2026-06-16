@@ -1530,7 +1530,7 @@ function ProgramSummaryCard({
           </>
         )}
       </View>
-    </Card>
+    </GlassCard>
   );
 }
 
@@ -1545,7 +1545,7 @@ function ProgramWeekCard({
 }) {
   const palette = SESSION_COLOR[week.session_type] || SESSION_COLOR.volume;
   return (
-    <Card style={{ marginBottom: 0, borderLeftWidth: 4, borderLeftColor: palette.fg }} testID={`program-week-${week.week_index}`}>
+    <GlassCard style={{ marginBottom: 0, borderLeftWidth: 4, borderLeftColor: palette.fg }} testID={`program-week-${week.week_index}`}>
       <TouchableOpacity onPress={onToggle} activeOpacity={0.7}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
           <View style={{ flex: 1 }}>
@@ -1593,7 +1593,7 @@ function ProgramWeekCard({
           ))}
         </View>
       )}
-    </Card>
+    </GlassCard>
   );
 }
 
