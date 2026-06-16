@@ -9,9 +9,11 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import * as Haptics from "expo-haptics";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
-import { Card, Button, SectionTitle, Stat } from "@/src/components/UI";
+import { GlassCard, ScreenBg, Button, Stat } from "@/src/components/UI";
 import { ShareCardModal } from "@/src/components/ShareCardModal";
 import { colors, spacing, typography, radius } from "@/src/theme";
+
+const BG_URI = "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&q=90";
 
 type Exercise = { name: string; sets: number; reps: string; rest_s: number; checked?: boolean; is_recommended?: boolean };
 type Workout = {
@@ -583,10 +585,11 @@ export default function Training() {
   }, [library]);
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]} testID="training-screen">
+    <ScreenBg uri={BG_URI}>
+    <SafeAreaView style={{flex:1, backgroundColor:"transparent"}} edges={["top"]} testID="training-screen">
       <View style={styles.header}>
-        <Text style={typography.caption}>Programme</Text>
-        <Text style={styles.title}>Ton entraînement</Text>
+        <Text style={[typography.caption, {color:"rgba(255,255,255,0.6)"}]}>Programme</Text>
+        <Text style={[styles.title, {color:"#fff", fontWeight:"800"}]}>Ton entraînement</Text>
       </View>
 
       {/* Tabs */}
@@ -615,26 +618,27 @@ export default function Training() {
         />
 
         {/* Activity card */}
-        <Card testID="activity-card">
-          <SectionTitle title="Activité du jour" action={
+        <GlassCard testID="activity-card">
+          <View style={{flexDirection:"row", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
+            <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase"}}>Activité du jour</Text>
             <TouchableOpacity onPress={() => setShowActivity(true)} testID="activity-edit-button">
-              <Text style={[typography.small, { color: colors.primary, fontWeight: "600" }]}>
+              <Text style={[typography.small, { color: "#4ade80", fontWeight: "600" }]}>
                 {activity?.steps || activity?.cardio_minutes ? "Modifier" : "Saisir"}
               </Text>
             </TouchableOpacity>
-          } />
+          </View>
           <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm }}>
             <Stat label="Pas" value={(activity?.steps || 0).toLocaleString("fr-FR")} testID="training-steps" />
             <Stat label="Cardio" value={activity?.cardio_minutes || 0} unit="min" align="center" testID="training-cardio-min" />
             <Stat label="Type" value={activity?.cardio_type || "—"} align="center" />
           </View>
-        </Card>
+        </GlassCard>
 
         {/* Today's workout */}
         {todayWorkout ? (
-          <Card testID="today-workout-card">
+          <GlassCard testID="today-workout-card">
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm }}>
-              <Text style={typography.caption}>Séance du jour</Text>
+              <Text style={[typography.caption, {color:"rgba(255,255,255,0.6)"}]}>Séance du jour</Text>
               <View style={{ flexDirection: "row", gap: 8 }}>
                 <TypeChip type={(todayWorkout.session_type as SessionKey) || "volume"} compact />
                 <TouchableOpacity onPress={() => openEditor(todayWorkout)} style={styles.editBtn} testID="edit-today-workout">
@@ -718,10 +722,10 @@ export default function Training() {
                 style={{ marginTop: spacing.sm }}
               />
             )}
-          </Card>
+          </GlassCard>
         ) : !program ? (
-          <Card>
-            <SectionTitle title="Pas encore de programme" />
+          <GlassCard>
+            <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase", marginBottom:8}}>Pas encore de programme</Text>
             <Text style={[typography.small, { marginBottom: spacing.md }]}>
               Configure ton programme : durée, fréquence et organisation des séances.
             </Text>
@@ -731,17 +735,18 @@ export default function Training() {
               testID="create-program-button"
               icon={<Ionicons name="add-circle-outline" size={18} color="#fff" />}
             />
-          </Card>
+          </GlassCard>
         ) : null}
 
         {/* My Program (weeks) */}
         {program && (
           <View testID="my-program-section">
-            <SectionTitle title="Mon programme" action={
+            <View style={{flexDirection:"row", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
+              <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase"}}>Mon programme</Text>
               <TouchableOpacity onPress={() => setProgramSetupOpen(true)} testID="reset-program">
-                <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Refaire</Text>
+                <Text style={[typography.small, { color: "#4ade80", fontWeight: "700" }]}>Refaire</Text>
               </TouchableOpacity>
-            } />
+            </View>
             <View style={{ gap: spacing.sm }}>
               {(program.weeks || []).map((w) => (
                 <ProgramWeekCard
@@ -763,8 +768,8 @@ export default function Training() {
 
         {tab === "calendar" && (
           <>
-            <Card testID="cycle-generator-card">
-              <SectionTitle title="Cycle de périodisation" />
+            <GlassCard testID="cycle-generator-card">
+              <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase", marginBottom:8}}>Cycle de périodisation</Text>
               <Text style={[typography.small, { marginBottom: spacing.sm }]}>
                 Volume × Volume × Force × Puissance. Cycle paramétrable de 1 à 8 semaines.
               </Text>
@@ -789,7 +794,7 @@ export default function Training() {
                 icon={<Ionicons name="layers-outline" size={16} color="#fff" />}
                 testID="cycle-generate-btn"
               />
-            </Card>
+            </GlassCard>
 
             <SessionLegend />
 
@@ -805,23 +810,23 @@ export default function Training() {
 
         {tab === "history" && (
           <>
-            <SectionTitle title="Historique des séances" />
+            <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase", marginBottom:8}}>Historique des séances</Text>
             {historyLoading ? (
               <Text style={typography.small}>Chargement...</Text>
             ) : historyItems.length === 0 ? (
-              <Card>
-                <Text style={[typography.body, { color: colors.textSecondary }]}>
+              <GlassCard>
+                <Text style={[typography.body, { color: "rgba(255,255,255,0.6)" }]}>
                   Aucune séance terminée pour le moment.
                 </Text>
-                <Text style={[typography.small, { marginTop: 4 }]}>
+                <Text style={[typography.small, { marginTop: 4, color:"rgba(255,255,255,0.6)" }]}>
                   Termine une séance pour la voir ici.
                 </Text>
-              </Card>
+              </GlassCard>
             ) : (
               historyItems.map((w) => {
                 const isOpen = historyExpanded === w.id;
                 return (
-                  <Card key={w.id} testID={`history-${w.id}`} style={{ marginBottom: 0 }}>
+                  <GlassCard key={w.id} testID={`history-${w.id}`} style={{ marginBottom: 0 }}>
                     <TouchableOpacity onPress={() => setHistoryExpanded(isOpen ? null : w.id)} activeOpacity={0.7}>
                       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
                         <View style={[styles.histDot, { backgroundColor: SESSION_COLOR[w.session_type || "volume"]?.fg || colors.primary }]} />
@@ -844,7 +849,7 @@ export default function Training() {
                         ))}
                       </View>
                     )}
-                  </Card>
+                  </GlassCard>
                 );
               })
             )}
@@ -1300,6 +1305,7 @@ export default function Training() {
         }}
       />
     </SafeAreaView>
+    </ScreenBg>
   );
 }
 

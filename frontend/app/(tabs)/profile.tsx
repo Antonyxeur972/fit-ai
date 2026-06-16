@@ -8,7 +8,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import Svg, { Path, Circle, Defs, LinearGradient, Stop } from "react-native-svg";
 import { useAuth } from "@/src/auth";
 import { api } from "@/src/api";
-import { Card, SectionTitle, Stat, Button } from "@/src/components/UI";
+import { GlassCard, ScreenBg, Stat, Button } from "@/src/components/UI";
 import { Silhouette, SILHOUETTE_LABELS } from "@/src/components/Silhouette";
 import { SilhouettePicker } from "@/src/components/SilhouettePicker";
 import { Mascot, MascotAnimal, MASCOT_LABELS } from "@/src/components/Mascot";
@@ -33,6 +33,8 @@ type BodyComp = {
 };
 
 type TransfoLite = { id: string; view?: string };
+
+const BG_URI = "https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=800&q=90";
 
 const GOAL_LABEL: Record<string, string> = { lose: "Perte de gras", maintain: "Maintien", gain: "Prise de muscle" };
 const MUSCLE_COLOR = (score: number) => score >= 100 ? colors.primary : score >= 50 ? "#F59E0B" : colors.alert;
@@ -263,7 +265,8 @@ export default function ProfileTab() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]} testID="profile-screen">
+    <ScreenBg uri={BG_URI}>
+    <SafeAreaView style={{flex:1, backgroundColor:"transparent"}} edges={["top"]} testID="profile-screen">
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.userHeader}>
           {user?.picture ? (
@@ -275,24 +278,25 @@ export default function ProfileTab() {
           )}
           <View style={{ flex: 1 }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-              <Text style={[typography.h3]}>{user?.name}</Text>
+              <Text style={[typography.h3, {color:"#fff"}]}>{user?.name}</Text>
               <TouchableOpacity onPress={() => { setNameInput(user?.name || ""); setNameModal(true); }} testID="edit-name-button">
                 <Ionicons name="pencil-outline" size={16} color={colors.primary} />
               </TouchableOpacity>
             </View>
-            <Text style={typography.small}>{user?.email}</Text>
+            <Text style={[typography.small, {color:"rgba(255,255,255,0.6)"}]}>{user?.email}</Text>
           </View>
         </View>
 
         {/* Phase 5: Mascot + Strength symbol */}
-        <Card testID="mascot-card">
-          <SectionTitle title="Ta mascotte" action={
+        <GlassCard testID="mascot-card">
+          <View style={{flexDirection:"row", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
+            <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase"}}>Ta mascotte</Text>
             <TouchableOpacity onPress={openMascot} testID="edit-mascot">
-              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>
+              <Text style={[typography.small, { color: "#4ade80", fontWeight: "700" }]}>
                 {user?.mascot ? "Changer" : "Choisir"}
               </Text>
             </TouchableOpacity>
-          } />
+          </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.sm }}>
             {user?.mascot?.animal ? (
               <Mascot animal={user.mascot.animal} evolution={evolution} size={88} color={colors.primary} strokeWidth={2} />
@@ -302,41 +306,42 @@ export default function ProfileTab() {
               </View>
             )}
             <View style={{ flex: 1 }}>
-              <Text style={typography.h3}>
+              <Text style={[typography.h3, {color:"#fff"}]}>
                 {user?.mascot?.animal ? MASCOT_LABELS[user.mascot.animal as MascotAnimal] : "Pas encore choisie"}
               </Text>
-              <Text style={[typography.small, { marginTop: 2 }]}>
+              <Text style={[typography.small, { marginTop: 2, color:"rgba(255,255,255,0.6)" }]}>
                 Elle évolue avec ta force, sans afficher un niveau chiffré.
               </Text>
             </View>
             <StrengthSymbol size={56} evolution={evolution} strength={strengthVal} />
           </View>
           {points && points.points_today > 0 ? (
-            <Text style={[typography.small, { marginTop: spacing.md, color: colors.primary, fontWeight: "800" }]}>
+            <Text style={[typography.small, { marginTop: spacing.md, color: "#4ade80", fontWeight: "800" }]}>
               +{points.points_today} pts aujourd&apos;hui · streak {points.streak_days}j
             </Text>
           ) : null}
-        </Card>
+        </GlassCard>
 
         {/* Phase 5: Notifications */}
-        <Card testID="notif-card">
-          <SectionTitle title="Rappels & notifs" action={
+        <GlassCard testID="notif-card">
+          <View style={{flexDirection:"row", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
+            <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase"}}>Rappels & notifs</Text>
             <TouchableOpacity onPress={() => setNotifModal(true)} testID="edit-notifs">
-              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>
+              <Text style={[typography.small, { color: "#4ade80", fontWeight: "700" }]}>
                 Gérer
               </Text>
             </TouchableOpacity>
-          } />
+          </View>
           {reminders.length === 0 ? (
-            <Text style={[typography.small, { marginTop: spacing.sm, color: colors.textMuted }]}>
+            <Text style={[typography.small, { marginTop: spacing.sm, color: "rgba(255,255,255,0.4)" }]}>
               Aucun rappel programmé. Crée tes propres horaires pour séance et check protéines.
             </Text>
           ) : (
             <View style={{ marginTop: spacing.sm, gap: 8 }}>
               {reminders.map((r) => (
                 <View key={r.id} style={styles.notifRow}>
-                  <Ionicons name={r.kind === "workout" ? "barbell-outline" : "nutrition-outline"} size={16} color={r.enabled ? colors.primary : colors.textMuted} />
-                  <Text style={[typography.body, { flex: 1, color: r.enabled ? colors.textMain : colors.textMuted }]}>
+                  <Ionicons name={r.kind === "workout" ? "barbell-outline" : "nutrition-outline"} size={16} color={r.enabled ? "#4ade80" : "rgba(255,255,255,0.4)"} />
+                  <Text style={[typography.body, { flex: 1, color: r.enabled ? "#fff" : "rgba(255,255,255,0.4)" }]}>
                     {r.kind === "workout" ? "Séance" : "Check protéines"} · {String(r.hour).padStart(2, "0")}:{String(r.minute).padStart(2, "0")}
                   </Text>
                   <View style={[styles.notifPill, { backgroundColor: r.enabled ? colors.primary : colors.border }]}>
@@ -348,17 +353,18 @@ export default function ProfileTab() {
               ))}
             </View>
           )}
-        </Card>
+        </GlassCard>
 
         {/* Silhouette + 1RM card (Phase 4) */}
-        <Card testID="silhouette-card">
-          <SectionTitle title="Ta silhouette" action={
+        <GlassCard testID="silhouette-card">
+          <View style={{flexDirection:"row", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
+            <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase"}}>Ta silhouette</Text>
             <TouchableOpacity onPress={openSilhouette} testID="edit-silhouette">
-              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>
+              <Text style={[typography.small, { color: "#4ade80", fontWeight: "700" }]}>
                 {user?.silhouette ? "Modifier" : "Choisir"}
               </Text>
             </TouchableOpacity>
-          } />
+          </View>
           <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.sm }}>
             <Silhouette
               sex={(user?.silhouette?.sex as any) || (profile.gender as any) || "male"}
@@ -367,37 +373,38 @@ export default function ProfileTab() {
               active
             />
             <View style={{ flex: 1 }}>
-              <Text style={[typography.h3]}>
+              <Text style={[typography.h3, {color:"#fff"}]}>
                 {SILHOUETTE_LABELS[user?.silhouette?.level || 3]}
               </Text>
-              <Text style={typography.small}>
+              <Text style={[typography.small, {color:"rgba(255,255,255,0.6)"}]}>
                 Niveau {user?.silhouette?.level || 3} sur 5 ·{" "}
                 {(user?.silhouette?.sex || profile.gender) === "female" ? "Femme" : "Homme"}
               </Text>
-              <Text style={[typography.small, { marginTop: 4, fontSize: 11, color: colors.textMuted }]}>
+              <Text style={[typography.small, { marginTop: 4, fontSize: 11, color: "rgba(255,255,255,0.4)" }]}>
                 {user?.silhouette
                   ? "Mise à jour rapide depuis ce profil."
                   : "Indique ta morphologie actuelle pour personnaliser tes objectifs."}
               </Text>
             </View>
           </View>
-        </Card>
+        </GlassCard>
 
-        <Card testID="force-card">
-          <SectionTitle title="Mes 1RM estimés" action={
+        <GlassCard testID="force-card">
+          <View style={{flexDirection:"row", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
+            <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase"}}>Mes 1RM estimés</Text>
             <TouchableOpacity onPress={openForce} testID="edit-force">
-              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>
+              <Text style={[typography.small, { color: "#4ade80", fontWeight: "700" }]}>
                 {user?.force_metrics?.squat || user?.force_metrics?.bench || user?.force_metrics?.deadlift ? "Mettre à jour" : "Estimer"}
               </Text>
             </TouchableOpacity>
-          } />
+          </View>
           <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm }}>
             <Stat label="Squat" value={user?.force_metrics?.squat ? user.force_metrics.squat.toFixed(0) : "—"} unit="kg" testID="force-squat" />
             <Stat label="Bench" value={user?.force_metrics?.bench ? user.force_metrics.bench.toFixed(0) : "—"} unit="kg" align="center" testID="force-bench" />
             <Stat label="Deadlift" value={user?.force_metrics?.deadlift ? user.force_metrics.deadlift.toFixed(0) : "—"} unit="kg" align="center" testID="force-dl" />
           </View>
           {!user?.force_metrics?.squat && !user?.force_metrics?.bench && !user?.force_metrics?.deadlift && (
-            <Text style={[typography.small, { marginTop: 8, color: colors.textMuted }]}>
+            <Text style={[typography.small, { marginTop: 8, color: "rgba(255,255,255,0.4)" }]}>
               Renseigne tes meilleurs efforts (charge × reps) pour calculer ton 1RM Epley. Tu peux aussi les enregistrer pendant tes séances dans Training.
             </Text>
           )}
@@ -405,24 +412,25 @@ export default function ProfileTab() {
 
         {/* Body Avatar */}
         {composition?.available && composition.muscle_groups && (
-          <Card testID="body-avatar-card">
-            <SectionTitle title="Ton avatar de force" action={
+          <GlassCard testID="body-avatar-card">
+            <View style={{flexDirection:"row", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
+              <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase"}}>Ton avatar de force</Text>
               <TouchableOpacity onPress={() => setAvatarOpen(true)} testID="avatar-detail">
-                <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Détails</Text>
+                <Text style={[typography.small, { color: "#4ade80", fontWeight: "700" }]}>Détails</Text>
               </TouchableOpacity>
-            } />
+            </View>
             <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.sm }}>
               <View style={{ flexDirection: "row", gap: 4 }}>
                 {transfoViews.front && (
                   <View style={{ alignItems: "center" }}>
                     <BodyAvatar groups={composition.muscle_groups} view="front" />
-                    <Text style={[typography.small, { fontSize: 10, marginTop: 4, color: colors.textMuted }]}>Face</Text>
+                    <Text style={[typography.small, { fontSize: 10, marginTop: 4, color: "rgba(255,255,255,0.4)" }]}>Face</Text>
                   </View>
                 )}
                 {transfoViews.back && (
                   <View style={{ alignItems: "center" }}>
                     <BodyAvatar groups={composition.muscle_groups} view="back" />
-                    <Text style={[typography.small, { fontSize: 10, marginTop: 4, color: colors.textMuted }]}>Dos</Text>
+                    <Text style={[typography.small, { fontSize: 10, marginTop: 4, color: "rgba(255,255,255,0.4)" }]}>Dos</Text>
                   </View>
                 )}
               </View>
@@ -431,7 +439,7 @@ export default function ProfileTab() {
                   <View key={g.group} style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
                       <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: MUSCLE_COLOR(g.score_pct) }} />
-                      <Text style={typography.small}>{g.group}</Text>
+                      <Text style={[typography.small, {color:"rgba(255,255,255,0.6)"}]}>{g.group}</Text>
                     </View>
                     <Text style={[typography.small, { color: MUSCLE_COLOR(g.score_pct), fontWeight: "700" }]}>{g.score_pct}%</Text>
                   </View>
@@ -439,22 +447,23 @@ export default function ProfileTab() {
               </View>
             </View>
             {!transfoViews.back && (
-              <Text style={[typography.small, { marginTop: spacing.sm, color: colors.textMuted, fontSize: 11 }]}>
+              <Text style={[typography.small, { marginTop: spacing.sm, color: "rgba(255,255,255,0.4)", fontSize: 11 }]}>
                 Ajoute une photo « Dos » dans Progression pour voir ton avatar de dos.
               </Text>
             )}
-          </Card>
+          </GlassCard>
         )}
 
         {/* Body composition */}
-        <Card testID="body-comp-card">
-          <SectionTitle title="Composition corporelle" action={
+        <GlassCard testID="body-comp-card">
+          <View style={{flexDirection:"row", justifyContent:"space-between", alignItems:"center", marginBottom:8}}>
+            <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase"}}>Composition corporelle</Text>
             <TouchableOpacity onPress={() => setMeasureModal(true)} testID="edit-measures">
-              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>
+              <Text style={[typography.small, { color: "#4ade80", fontWeight: "700" }]}>
                 {composition?.body_fat?.has_measurements ? "Modifier" : "Mesurer"}
               </Text>
             </TouchableOpacity>
-          } />
+          </View>
           {composition?.available && composition.body_fat ? (
             <>
               <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm }}>
@@ -462,38 +471,38 @@ export default function ProfileTab() {
                 <Stat label="Masse maigre" value={composition.body_fat.lean_kg} unit="kg" align="center" />
                 <Stat label="Muscle estimé" value={composition.body_fat.muscle_kg_est} unit="kg" align="center" />
               </View>
-              <Text style={[typography.small, { marginTop: 8, color: colors.textMuted }]}>
+              <Text style={[typography.small, { marginTop: 8, color: "rgba(255,255,255,0.4)" }]}>
                 Méthode : {composition.body_fat.method}
                 {!composition.body_fat.has_measurements && " — Ajoute tour de taille + cou pour plus de précision."}
               </Text>
             </>
           ) : (
-            <Text style={[typography.small, { marginTop: spacing.sm }]}>Profil incomplet.</Text>
+            <Text style={[typography.small, { marginTop: spacing.sm, color:"rgba(255,255,255,0.6)" }]}>Profil incomplet.</Text>
           )}
-        </Card>
+        </GlassCard>
 
         {/* Strength level */}
         {composition?.strength && (
-          <Card testID="strength-card">
-            <SectionTitle title="Niveau de force" />
+          <GlassCard testID="strength-card">
+            <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase", marginBottom:8}}>Niveau de force</Text>
             <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.sm }}>
               <View style={styles.tierBadge}>
                 <Text style={styles.tierText}>{composition.strength.overall_tier}</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[typography.h2, { lineHeight: 32 }]}>
-                  {composition.strength.overall_score_pct}<Text style={[typography.small, { fontSize: 14 }]}> /100</Text>
+                <Text style={[typography.h2, { lineHeight: 32, color:"#fff" }]}>
+                  {composition.strength.overall_score_pct}<Text style={[typography.small, { fontSize: 14, color:"rgba(255,255,255,0.6)" }]}> /100</Text>
                 </Text>
-                <Text style={typography.small}>Score global vs benchmarks intermédiaire</Text>
+                <Text style={[typography.small, {color:"rgba(255,255,255,0.6)"}]}>Score global vs benchmarks intermédiaire</Text>
               </View>
             </View>
             <View style={{ marginTop: spacing.md, gap: 6 }}>
               {composition.strength.scores.filter((s) => s.best_1rm > 0).slice(0, 5).map((s) => (
                 <View key={s.exercise} style={styles.scoreRow}>
-                  <Text style={[typography.small, { flex: 1, color: colors.textMain, fontWeight: "600" }]} numberOfLines={1}>
+                  <Text style={[typography.small, { flex: 1, color: "#fff", fontWeight: "600" }]} numberOfLines={1}>
                     {s.exercise}
                   </Text>
-                  <Text style={[typography.small, { color: colors.textSecondary }]}>
+                  <Text style={[typography.small, { color: "rgba(255,255,255,0.6)" }]}>
                     {s.best_1rm} / {s.target_for_intermediate} kg
                   </Text>
                   <View style={[styles.scoreBadge, { backgroundColor: MUSCLE_COLOR(s.score_pct) + "20" }]}>
@@ -502,20 +511,20 @@ export default function ProfileTab() {
                 </View>
               ))}
               {composition.strength.scores.every((s) => s.best_1rm === 0) && (
-                <Text style={typography.small}>Log tes premières perfs dans Training pour activer ton score.</Text>
+                <Text style={[typography.small, {color:"rgba(255,255,255,0.6)"}]}>Log tes premières perfs dans Training pour activer ton score.</Text>
               )}
             </View>
-          </Card>
+          </GlassCard>
         )}
 
-        <Card testID="profile-targets-card">
-          <SectionTitle title="Tes objectifs" />
+        <GlassCard testID="profile-targets-card">
+          <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase", marginBottom:8}}>Tes objectifs</Text>
           <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm }}>
             <Stat label="Calories" value={profile.daily_calories?.toLocaleString("fr-FR") || "—"} unit="kcal" />
             <Stat label="BMR" value={profile.bmr?.toLocaleString("fr-FR") || "—"} unit="kcal" align="center" />
             <Stat label="Objectif" value={profile.goal ? GOAL_LABEL[profile.goal] || profile.goal : "—"} align="center" valueStyle={{ fontSize: 14 }} />
           </View>
-        </Card>
+        </GlassCard>
 
         <Button
           title="Modifier mon profil"
@@ -776,6 +785,7 @@ export default function ProfileTab() {
         </View>
       </Modal>
     </SafeAreaView>
+    </ScreenBg>
   );
 }
 
@@ -896,7 +906,7 @@ function BodyAvatar({ groups, size = 110, view = "front" }: { groups: { group: s
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
+  safe: { flex: 1, backgroundColor: "transparent" },
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
   userHeader: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.sm },
   avatar: { width: 64, height: 64, borderRadius: radius.full },
@@ -905,7 +915,7 @@ const styles = StyleSheet.create({
   tierText: { color: "#fff", fontWeight: "800", fontSize: 13, letterSpacing: 0.5 },
   scoreRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 },
   scoreBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, minWidth: 50, alignItems: "center" },
-  diagRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
+  diagRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.12)" },
   modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.4)", justifyContent: "flex-end" },
   modalCard: { backgroundColor: colors.surface, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg },
   modalHandle: { width: 40, height: 4, backgroundColor: colors.border, borderRadius: 4, alignSelf: "center", marginBottom: spacing.md },
@@ -919,8 +929,8 @@ const styles = StyleSheet.create({
   notifRow: {
     flexDirection: "row", alignItems: "center", gap: 8,
     paddingVertical: 8, paddingHorizontal: 10,
-    backgroundColor: colors.background, borderRadius: radius.md,
-    borderWidth: 1, borderColor: colors.border,
+    backgroundColor: "rgba(255,255,255,0.08)", borderRadius: radius.md,
+    borderWidth: 1, borderColor: "rgba(255,255,255,0.12)",
   },
   notifPill: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full },
   reminderRow: {

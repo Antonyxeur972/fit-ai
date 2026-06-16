@@ -9,8 +9,10 @@ import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { api } from "@/src/api";
-import { Card, Button, SectionTitle } from "@/src/components/UI";
+import { GlassCard, ScreenBg, Button } from "@/src/components/UI";
 import { colors, spacing, typography, radius } from "@/src/theme";
+
+const BG_URI = "https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=800&q=90";
 
 type Meal = {
   id: string;
@@ -643,10 +645,11 @@ export default function Meals() {
   const hasArchivable = historyBuckets.find((b) => b.label.startsWith("Plus ancien"))?.days.length || 0;
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]} testID="meals-screen">
+    <ScreenBg uri={BG_URI}>
+    <SafeAreaView style={{flex:1, backgroundColor:"transparent"}} edges={["top"]} testID="meals-screen">
       <View style={styles.header}>
-        <Text style={typography.caption}>Repas</Text>
-        <Text style={styles.headerTitle}>{total.toLocaleString("fr-FR")} <Text style={styles.headerUnit}>{"kcal aujourd'hui"}</Text></Text>
+        <Text style={[typography.caption, {color:"rgba(255,255,255,0.6)"}]}>Repas</Text>
+        <Text style={[styles.headerTitle, {color:"#fff"}]}>{total.toLocaleString("fr-FR")} <Text style={[styles.headerUnit, {color:"rgba(255,255,255,0.6)"}]}>{"kcal aujourd'hui"}</Text></Text>
       </View>
 
       {/* Sticky tab chips */}
@@ -713,7 +716,7 @@ export default function Meals() {
             )}
 
             {todayMeals.length === 0 ? (
-              <Card testID="meals-empty">
+              <GlassCard testID="meals-empty">
                 <View style={{ alignItems: "center", padding: spacing.lg }}>
                   <View style={styles.emptyIcon}>
                     <Ionicons name="restaurant-outline" size={28} color={colors.primary} />
@@ -721,7 +724,7 @@ export default function Meals() {
                   <Text style={[typography.body, { fontWeight: "600", marginTop: spacing.md }]}>Aucun repas analysé</Text>
                   <Text style={[typography.small, { textAlign: "center", marginTop: 6 }]}>Prends une photo de ton assiette pour démarrer.</Text>
                 </View>
-              </Card>
+              </GlassCard>
             ) : (
               MEAL_TYPE_ORDER.filter((t) => todayGrouped[t]?.length).map((t) => (
                 <View key={t} style={{ gap: 8 }}>
@@ -759,13 +762,13 @@ export default function Meals() {
             )}
 
             {historyBuckets.length === 0 ? (
-              <Card>
-                <Text style={[typography.body, { textAlign: "center" }]}>{"Aucun historique pour l'instant."}</Text>
-              </Card>
+              <GlassCard>
+                <Text style={[typography.body, { textAlign: "center", color:"rgba(255,255,255,0.6)" }]}>{"Aucun historique pour l'instant."}</Text>
+              </GlassCard>
             ) : (
               historyBuckets.map((bucket) => (
                 <View key={bucket.label} style={{ gap: spacing.sm }} testID={`history-bucket-${bucket.label}`}>
-                  <SectionTitle title={bucket.label} />
+                  <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase", marginBottom:8}}>{bucket.label}</Text>
                   {bucket.days.map((d) => (
                     <HistoryDayCard
                       key={d.date}
@@ -1472,6 +1475,7 @@ export default function Meals() {
         </View>
       </Modal>
     </SafeAreaView>
+    </ScreenBg>
   );
 }
 

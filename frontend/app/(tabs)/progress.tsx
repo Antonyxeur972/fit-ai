@@ -6,8 +6,9 @@ import * as ImagePicker from "expo-image-picker";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
-import { Card, Button, SectionTitle, WeekBars, LineChart1RM } from "@/src/components/UI";
+import { GlassCard, ScreenBg, Button, WeekBars, LineChart1RM } from "@/src/components/UI";
 import { colors, spacing, typography, radius } from "@/src/theme";
+const BG_URI = "https://images.unsplash.com/photo-1571731956672-f2b94d7dd0cb?w=800&q=90";
 
 type Transfo = {
   id: string;
@@ -127,17 +128,18 @@ export default function Progress() {
     .sort((a, b) => b.est_1rm - a.est_1rm);
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top"]} testID="progress-screen">
+    <ScreenBg uri={BG_URI}>
+    <SafeAreaView style={{flex:1, backgroundColor:"transparent"}} edges={["top"]} testID="progress-screen">
       <View style={styles.header}>
-        <Text style={typography.caption}>Progression</Text>
-        <Text style={styles.title}>Ton évolution</Text>
+        <Text style={[typography.caption, {color:"rgba(255,255,255,0.6)"}]}>Progression</Text>
+        <Text style={[styles.title, {color:"#fff", fontWeight:"800"}]}>Ton évolution</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* 1RM Progression — THE addictive number */}
-        <Card testID="rm-card">
+        <GlassCard testID="rm-card">
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm }}>
-            <Text style={typography.caption}>Force · Progression 1RM</Text>
+            <Text style={[typography.caption, {color:"rgba(255,255,255,0.6)"}]}>Force · Progression 1RM</Text>
             {exerciseList.length > 0 && (
               <View style={styles.flashChip}>
                 <Ionicons name="flash" size={12} color={colors.primary} />
@@ -151,10 +153,10 @@ export default function Progress() {
               <View style={styles.emptyIcon}>
                 <Ionicons name="trending-up" size={28} color={colors.primary} />
               </View>
-              <Text style={[typography.body, { fontWeight: "600", marginTop: spacing.md }]}>
+              <Text style={[typography.body, { fontWeight: "600", marginTop: spacing.md, color:"#fff" }]}>
                 {"Aucune perf enregistrée"}
               </Text>
-              <Text style={[typography.small, { textAlign: "center", marginTop: 6 }]}>
+              <Text style={[typography.small, { textAlign: "center", marginTop: 6, color:"rgba(255,255,255,0.6)" }]}>
                 {"Tape sur un exercice dans Training → enregistre charge × reps. Ta courbe 1RM commence ici."}
               </Text>
             </View>
@@ -162,11 +164,11 @@ export default function Progress() {
             <>
               {selectedExercise && (
                 <View style={{ marginBottom: spacing.sm }}>
-                  <Text style={[typography.h2, { lineHeight: 32 }]}>
-                    {selectedBest?.est_1rm.toFixed(1)} <Text style={[typography.small, { fontSize: 14 }]}>kg</Text>
+                  <Text style={[typography.h2, { lineHeight: 32, color:"#fff" }]}>
+                    {selectedBest?.est_1rm.toFixed(1)} <Text style={[typography.small, { fontSize: 14, color:"rgba(255,255,255,0.6)" }]}>kg</Text>
                   </Text>
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
-                    <Text style={[typography.small, { color: colors.textSecondary }]}>
+                    <Text style={[typography.small, { color: "rgba(255,255,255,0.6)" }]}>
                       Record · {selectedExercise}
                     </Text>
                     {trend && (
@@ -226,42 +228,42 @@ export default function Progress() {
               </ScrollView>
             </>
           )}
-        </Card>
+        </GlassCard>
 
         {/* Week chart */}
-        <Card testID="week-card">
-          <SectionTitle title="Calories cette semaine" />
+        <GlassCard testID="week-card">
+          <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase", marginBottom:8}}>Calories cette semaine</Text>
           {week && <WeekBars days={week.days} target={week.target} testID="week-bars" />}
-          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border }}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.12)" }}>
             <View>
-              <Text style={typography.caption}>Moyenne</Text>
-              <Text style={[typography.h3, { marginTop: 4 }]}>{(week?.avg_consumed || 0).toLocaleString("fr-FR")} <Text style={typography.small}>kcal</Text></Text>
+              <Text style={[typography.caption, {color:"rgba(255,255,255,0.6)"}]}>Moyenne</Text>
+              <Text style={[typography.h3, { marginTop: 4, color:"#fff" }]}>{(week?.avg_consumed || 0).toLocaleString("fr-FR")} <Text style={[typography.small,{color:"rgba(255,255,255,0.6)"}]}>kcal</Text></Text>
             </View>
             <View>
-              <Text style={typography.caption}>Objectif</Text>
-              <Text style={[typography.h3, { marginTop: 4, color: colors.primary }]}>{(week?.target || 0).toLocaleString("fr-FR")} <Text style={typography.small}>kcal</Text></Text>
+              <Text style={[typography.caption, {color:"rgba(255,255,255,0.6)"}]}>Objectif</Text>
+              <Text style={[typography.h3, { marginTop: 4, color: "#4ade80" }]}>{(week?.target || 0).toLocaleString("fr-FR")} <Text style={[typography.small,{color:"rgba(255,255,255,0.6)"}]}>kcal</Text></Text>
             </View>
           </View>
-        </Card>
+        </GlassCard>
 
         {/* Week activity totals */}
-        <Card testID="activity-totals-card">
-          <SectionTitle title="Activité de la semaine" />
+        <GlassCard testID="activity-totals-card">
+          <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase", marginBottom:8}}>Activité de la semaine</Text>
           <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm }}>
             <View>
-              <Text style={typography.caption}>Pas totaux</Text>
-              <Text style={[typography.h3, { marginTop: 4 }]}>{totalWeekSteps.toLocaleString("fr-FR")}</Text>
+              <Text style={[typography.caption, {color:"rgba(255,255,255,0.6)"}]}>Pas totaux</Text>
+              <Text style={[typography.h3, { marginTop: 4, color:"#fff" }]}>{totalWeekSteps.toLocaleString("fr-FR")}</Text>
             </View>
             <View>
-              <Text style={typography.caption}>Cardio</Text>
-              <Text style={[typography.h3, { marginTop: 4 }]}>{totalCardioMin} <Text style={typography.small}>min</Text></Text>
+              <Text style={[typography.caption, {color:"rgba(255,255,255,0.6)"}]}>Cardio</Text>
+              <Text style={[typography.h3, { marginTop: 4, color:"#fff" }]}>{totalCardioMin} <Text style={[typography.small,{color:"rgba(255,255,255,0.6)"}]}>min</Text></Text>
             </View>
           </View>
-        </Card>
+        </GlassCard>
 
         {/* Private photo gallery */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: spacing.sm }}>
-          <SectionTitle title="Galerie privée" />
+          <Text style={{fontSize:10, color:"#4ade80", fontWeight:"800", letterSpacing:1.5, textTransform:"uppercase", marginBottom:8}}>Galerie privée</Text>
           <View style={styles.privacyChip}>
             <Ionicons name="lock-closed" size={10} color={colors.primary} />
             <Text style={[typography.small, { color: colors.primary, fontWeight: "700", fontSize: 10 }]}>Privé · sans IA</Text>
@@ -275,7 +277,7 @@ export default function Progress() {
           testID="transfo-date-pick"
         >
           <Ionicons name="calendar-outline" size={16} color={colors.primary} />
-          <Text style={[typography.body, { color: colors.textMain, fontWeight: "600" }]}>
+          <Text style={[typography.body, { color: "#fff", fontWeight: "600" }]}>
             {uploadDate.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}
           </Text>
           <Text style={[typography.small, { marginLeft: "auto", color: colors.primary, fontWeight: "700" }]}>Modifier</Text>
@@ -315,25 +317,25 @@ export default function Progress() {
 
         {uploading && (
           <View style={[styles.uploadingRow]}>
-            <ActivityIndicator color={colors.primary} />
-            <Text style={typography.small}>Envoi en cours...</Text>
+            <ActivityIndicator color="#4ade80" />
+            <Text style={[typography.small, {color:"rgba(255,255,255,0.6)"}]}>Envoi en cours...</Text>
           </View>
         )}
 
         {transfos.length === 0 ? (
-          <Card>
+          <GlassCard>
             <View style={{ alignItems: "center", padding: spacing.lg }}>
               <View style={styles.emptyIcon}>
                 <Ionicons name="image-outline" size={28} color={colors.primary} />
               </View>
-              <Text style={[typography.body, { fontWeight: "600", marginTop: spacing.md }]}>
+              <Text style={[typography.body, { fontWeight: "600", marginTop: spacing.md, color:"#fff" }]}>
                 Documente ta progression
               </Text>
-              <Text style={[typography.small, { textAlign: "center", marginTop: 6 }]}>
+              <Text style={[typography.small, { textAlign: "center", marginTop: 6, color:"rgba(255,255,255,0.6)" }]}>
                 {"Toutes les 2-4 semaines, ajoute une photo. Galerie 100 % privée, sans IA."}
               </Text>
             </View>
-          </Card>
+          </GlassCard>
         ) : (
           <PhotoGallery
             transfos={transfos}
@@ -351,6 +353,7 @@ export default function Progress() {
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
     </SafeAreaView>
+    </ScreenBg>
   );
 }
 
@@ -416,8 +419,8 @@ function PhotoGallery({
               style={[styles.galleryModeChip, isOn && styles.galleryModeChipOn]}
               testID={`gallery-mode-${m.v}`}
             >
-              <Ionicons name={m.icon} size={14} color={isOn ? colors.primary : colors.textSecondary} />
-              <Text style={[typography.small, { fontWeight: "700", color: isOn ? colors.primary : colors.textSecondary }]}>
+              <Ionicons name={m.icon} size={14} color={isOn ? "#4ade80" : "rgba(255,255,255,0.6)"} />
+              <Text style={[typography.small, { fontWeight: "700", color: isOn ? "#4ade80" : "rgba(255,255,255,0.6)" }]}>
                 {m.label}
               </Text>
             </TouchableOpacity>
@@ -432,7 +435,7 @@ function PhotoGallery({
               <SwipeRevealPhoto base64={t.image_base64} width={colWidth - 12} height={(colWidth - 12) * 1.45} />
               <View style={styles.gridFooter}>
                 <View style={{ flex: 1 }}>
-                  <Text style={[typography.small, { fontWeight: "700", color: colors.textMain }]}>
+                  <Text style={[typography.small, { fontWeight: "700", color: "#fff" }]}>
                     {formatDate(t)}
                   </Text>
                   {t.weight_kg ? (
@@ -449,7 +452,7 @@ function PhotoGallery({
       )}
 
       {mode === "compare" && (
-        <Card testID="gallery-compare">
+        <GlassCard testID="gallery-compare">
           {transfos.length < 2 ? (
             <Text style={[typography.small, { textAlign: "center", paddingVertical: spacing.md }]}>
               Ajoute au moins 2 photos pour activer le comparatif.
@@ -478,7 +481,7 @@ function PhotoGallery({
               />
             </>
           )}
-        </Card>
+        </GlassCard>
       )}
     </View>
   );
@@ -567,8 +570,8 @@ function ComparePane({
   return (
     <View style={{ flex: 1, gap: 6 }}>
       <View style={styles.compareLabelRow}>
-        <Text style={[typography.small, { fontWeight: "800", color: colors.textMain }]}>{label}</Text>
-        <Text style={[typography.small, { fontSize: 10, color: colors.textMuted }]}>{dateStr}</Text>
+        <Text style={[typography.small, { fontWeight: "800", color: "#fff" }]}>{label}</Text>
+        <Text style={[typography.small, { fontSize: 10, color: "rgba(255,255,255,0.4)" }]}>{dateStr}</Text>
       </View>
       <SwipeRevealPhoto base64={t.image_base64} width={width} height={width * 1.4} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4 }}>
@@ -608,16 +611,16 @@ function DeltaSummary({ left, right }: { left?: Transfo; right?: Transfo }) {
   return (
     <View style={styles.deltaRow}>
       <View style={{ flex: 1 }}>
-        <Text style={typography.caption}>Période</Text>
-        <Text style={[typography.h3, { marginTop: 2 }]}>{daysApart} <Text style={typography.small}>jours</Text></Text>
+        <Text style={[typography.caption, {color:"rgba(255,255,255,0.6)"}]}>Période</Text>
+        <Text style={[typography.h3, { marginTop: 2, color:"#fff" }]}>{daysApart} <Text style={[typography.small,{color:"rgba(255,255,255,0.6)"}]}>jours</Text></Text>
       </View>
       {deltaKg !== null && (
         <View style={{ alignItems: "flex-end" }}>
-          <Text style={typography.caption}>Variation de poids</Text>
+          <Text style={[typography.caption, {color:"rgba(255,255,255,0.6)"}]}>Variation de poids</Text>
           <Text
             style={[
               typography.h3,
-              { marginTop: 2, color: deltaKg < 0 ? colors.primary : deltaKg > 0 ? "#A85B0F" : colors.textMain },
+              { marginTop: 2, color: deltaKg < 0 ? "#4ade80" : deltaKg > 0 ? "#A85B0F" : "#fff" },
             ]}
           >
             {deltaKg > 0 ? "+" : ""}{deltaKg.toFixed(1)} <Text style={typography.small}>kg</Text>
@@ -629,20 +632,20 @@ function DeltaSummary({ left, right }: { left?: Transfo; right?: Transfo }) {
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
+  safe: { flex: 1, backgroundColor: "transparent" },
   header: { padding: spacing.lg, paddingBottom: spacing.md },
   title: { fontSize: 28, fontWeight: "700", color: colors.textMain, letterSpacing: -0.6, marginTop: 4 },
   content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
-  emptyIcon: { width: 56, height: 56, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center" },
-  transfoImg: { width: 96, height: 128, borderRadius: radius.md, backgroundColor: colors.border },
+  emptyIcon: { width: 56, height: 56, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.15)", alignItems: "center", justifyContent: "center" },
+  transfoImg: { width: 96, height: 128, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.12)" },
   uploadingRow: { flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", paddingVertical: spacing.sm },
-  flashChip: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, backgroundColor: colors.primaryPale },
+  flashChip: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.15)" },
   trendChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full },
-  chartEmpty: { width: 320, height: 100, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.border, borderStyle: "dashed", borderRadius: radius.md, paddingHorizontal: spacing.lg },
-  exerciseChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, flexShrink: 0, alignItems: "center" },
-  exerciseChipOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
-  exerciseChipText: { fontSize: 12, color: colors.textSecondary, fontWeight: "600", maxWidth: 130 },
-  exerciseChipKg: { fontSize: 10, color: colors.textMuted, fontWeight: "700", marginTop: 1 },
+  chartEmpty: { width: 320, height: 100, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", borderStyle: "dashed", borderRadius: radius.md, paddingHorizontal: spacing.lg },
+  exerciseChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.1)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", flexShrink: 0, alignItems: "center" },
+  exerciseChipOn: { backgroundColor: "rgba(74,222,128,0.15)", borderColor: "#4ade80" },
+  exerciseChipText: { fontSize: 12, color: "rgba(255,255,255,0.6)", fontWeight: "600", maxWidth: 130 },
+  exerciseChipKg: { fontSize: 10, color: "rgba(255,255,255,0.4)", fontWeight: "700", marginTop: 1 },
   viewChipsRow: { flexDirection: "row", gap: 8, marginTop: -spacing.sm },
   viewChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   viewChipOn: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
@@ -655,9 +658,9 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 12,
     paddingHorizontal: 14,
-    backgroundColor: colors.surface,
+    backgroundColor: "rgba(255,255,255,0.1)",
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "rgba(255,255,255,0.2)",
     borderRadius: radius.md,
   },
   hideBtn: {
@@ -675,19 +678,19 @@ const styles = StyleSheet.create({
   thumbHidden: {
     width: "100%",
     height: "100%",
-    backgroundColor: colors.primaryPale,
+    backgroundColor: "rgba(74,222,128,0.15)",
     alignItems: "center",
     justifyContent: "center",
   },
-  galleryModeChip: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  galleryModeChipOn: { borderColor: colors.primary, backgroundColor: colors.primaryPale },
+  galleryModeChip: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8, borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.1)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  galleryModeChipOn: { borderColor: "#4ade80", backgroundColor: "rgba(74,222,128,0.15)" },
   gridWrap: { flexDirection: "row", flexWrap: "wrap", gap: 16 },
-  gridItem: { backgroundColor: colors.surface, borderRadius: radius.md, padding: 6, borderWidth: 1, borderColor: colors.border, gap: 4 },
+  gridItem: { backgroundColor: "rgba(255,255,255,0.1)", borderRadius: radius.md, padding: 6, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", gap: 4 },
   gridFooter: { flexDirection: "row", alignItems: "center", paddingHorizontal: 4, paddingBottom: 2 },
-  privacyChip: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: colors.primary },
+  privacyChip: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.15)", borderWidth: 1, borderColor: "#4ade80" },
   compareLabelRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  thumb: { width: 36, height: 36, borderRadius: radius.sm, borderWidth: 1, borderColor: colors.border, overflow: "hidden" },
+  thumb: { width: 36, height: 36, borderRadius: radius.sm, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", overflow: "hidden" },
   thumbOn: { borderColor: colors.primary, borderWidth: 2 },
   thumbImg: { width: "100%", height: "100%" },
-  deltaRow: { flexDirection: "row", justifyContent: "space-between", marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border },
+  deltaRow: { flexDirection: "row", justifyContent: "space-between", marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.12)" },
 });
