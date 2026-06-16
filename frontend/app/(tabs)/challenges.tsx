@@ -4,8 +4,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
-import { Card, Button, SectionTitle } from "@/src/components/UI";
+import { GlassCard, ScreenBg, Button, SectionTitle } from "@/src/components/UI";
 import { colors, spacing, typography, radius } from "@/src/theme";
+
+const BG_URI = "https://images.unsplash.com/photo-1549060279-7e168fcee0c2?w=800&q=90";
 
 type ChallengeDay = {
   day_index: number;
@@ -92,15 +94,16 @@ export default function ChallengesTab() {
   const selected = active.find((c) => c.id === selectedId) || null;
 
   return (
-    <SafeAreaView style={styles.root}>
+    <ScreenBg uri={BG_URI}>
+      <SafeAreaView style={styles.root}>
       <View style={styles.header}>
-        <Text style={typography.caption}>30 jours · à la maison</Text>
+        <Text style={styles.dateText}>30 jours · à la maison</Text>
         <Text style={styles.title}>Challenges</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {loading && active.length === 0 ? (
-          <ActivityIndicator color={colors.primary} style={{ marginTop: 40 }} />
+          <ActivityIndicator color="#4ade80" style={{ marginTop: 40 }} />
         ) : null}
 
         {/* Active challenges chips */}
@@ -113,12 +116,12 @@ export default function ChallengesTab() {
                 style={[styles.activeChip, selectedId === c.id && styles.activeChipOn]}
                 testID={`challenge-tab-${c.type}`}
               >
-                <Ionicons name={(c.icon as any) || "flame"} size={14} color={selectedId === c.id ? colors.surface : colors.primary} />
-                <Text style={[typography.small, { fontWeight: "700", color: selectedId === c.id ? colors.surface : colors.primary }]}>
+                <Ionicons name={(c.icon as any) || "flame"} size={14} color={selectedId === c.id ? "#fff" : "#4ade80"} />
+                <Text style={{ fontSize: 13, fontWeight: "700", color: selectedId === c.id ? "#fff" : "#4ade80" }}>
                   {c.name}
                 </Text>
-                <View style={[styles.streakBadge, selectedId === c.id && { backgroundColor: colors.surface }]}>
-                  <Text style={{ fontSize: 10, fontWeight: "800", color: selectedId === c.id ? colors.primary : colors.surface }}>
+                <View style={[styles.streakBadge, selectedId === c.id && { backgroundColor: "rgba(255,255,255,0.2)" }]}>
+                  <Text style={{ fontSize: 10, fontWeight: "800", color: "#fff" }}>
                     🔥 {c.streak}
                   </Text>
                 </View>
@@ -129,46 +132,38 @@ export default function ChallengesTab() {
 
         {/* Selected challenge detail */}
         {selected && (
-          <Card testID={`challenge-detail-${selected.type}`}>
+          <GlassCard testID={`challenge-detail-${selected.type}`}>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
               <View style={{ flex: 1 }}>
-                <Text style={[typography.h3]}>{selected.name}</Text>
-                <Text style={typography.small}>
+                <Text style={[typography.h3, { color: "#fff" }]}>{selected.name}</Text>
+                <Text style={{ fontSize: 13, color: "rgba(255,255,255,0.55)" }}>
                   {selected.completed_count}/30 jours · niveau {selected.level} · streak {selected.streak}
                 </Text>
               </View>
               <TouchableOpacity onPress={() => abandon(selected.id)} testID={`challenge-abandon-${selected.id}`}>
-                <Ionicons name="trash-outline" size={18} color={colors.textMuted} />
+                <Ionicons name="trash-outline" size={18} color="rgba(255,255,255,0.4)" />
               </TouchableOpacity>
             </View>
 
-            {/* Progress bar day 1 → 30 */}
             <View style={styles.progressTrack}>
               <View style={[styles.progressFill, { width: `${(selected.completed_count / 30) * 100}%` }]} />
             </View>
 
-            {/* 30 days grid */}
             <View style={styles.daysGrid}>
               {selected.days.map((d) => (
                 <TouchableOpacity
                   key={d.day_index}
                   onPress={() => !d.completed && !d.is_rest && checkDay(selected.id, d.day_index)}
                   disabled={d.completed || d.is_rest}
-                  style={[
-                    styles.dayCell,
-                    d.is_rest && styles.dayCellRest,
-                    d.completed && styles.dayCellDone,
-                  ]}
+                  style={[styles.dayCell, d.is_rest && styles.dayCellRest, d.completed && styles.dayCellDone]}
                   testID={`challenge-day-${d.day_index}`}
                 >
-                  <Text style={[styles.dayCellNum, d.completed && { color: colors.surface }]}>
-                    {d.day_index + 1}
-                  </Text>
-                  <Text style={[styles.dayCellReps, d.completed && { color: colors.surface }]}>
+                  <Text style={[styles.dayCellNum, d.completed && { color: "#fff" }]}>{d.day_index + 1}</Text>
+                  <Text style={[styles.dayCellReps, d.completed && { color: "#fff" }]}>
                     {d.is_rest ? "Repos" : `×${d.target_reps}`}
                   </Text>
                   {d.completed && (
-                    <Ionicons name="checkmark" size={11} color={colors.surface} style={{ position: "absolute", top: 2, right: 2 }} />
+                    <Ionicons name="checkmark" size={11} color="#fff" style={{ position: "absolute", top: 2, right: 2 }} />
                   )}
                 </TouchableOpacity>
               ))}
@@ -176,32 +171,32 @@ export default function ChallengesTab() {
 
             {selected.completed_count >= 30 - selected.days.filter((d) => d.is_rest).length && (
               <View style={styles.endCard} testID="challenge-completed-card">
-                <Ionicons name="trophy" size={28} color={colors.primary} />
-                <Text style={[typography.h3, { marginTop: 4 }]}>Challenge terminé !</Text>
-                <Text style={[typography.small, { textAlign: "center", marginTop: 4 }]}>
+                <Ionicons name="trophy" size={28} color="#4ade80" />
+                <Text style={[typography.h3, { marginTop: 4, color: "#fff" }]}>Challenge terminé !</Text>
+                <Text style={{ fontSize: 13, color: "rgba(255,255,255,0.6)", textAlign: "center", marginTop: 4 }}>
                   Jour 1: {selected.days[0]?.target_reps} reps → Jour 30: {selected.days[29]?.target_reps} reps
                 </Text>
-                <Text style={[typography.small, { color: colors.primary, fontWeight: "700", marginTop: 4 }]}>
+                <Text style={{ fontSize: 13, color: "#4ade80", fontWeight: "700", marginTop: 4 }}>
                   +{Math.round(((selected.days[29]?.target_reps || 0) / Math.max(1, selected.days[0]?.target_reps || 1) - 1) * 100)}% de progression
                 </Text>
               </View>
             )}
-          </Card>
+          </GlassCard>
         )}
 
         {/* Available blueprints */}
-        <SectionTitle title="Démarrer un challenge" />
+        <Text style={styles.sectionLabel}>Démarrer un challenge</Text>
         {blueprints.map((bp) => {
           const alreadyActive = active.some((c) => c.type === bp.type && c.active);
           return (
-            <Card key={bp.type} style={{ marginBottom: 0 }}>
+            <GlassCard key={bp.type}>
               <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
                 <View style={styles.bpIcon}>
-                  <Ionicons name={(bp.icon as any) || "flame"} size={22} color={colors.primary} />
+                  <Ionicons name={(bp.icon as any) || "flame"} size={22} color="#4ade80" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={[typography.body, { fontWeight: "700" }]}>{bp.name}</Text>
-                  <Text style={typography.small}>{bp.muscle} · à la maison · 30 jours</Text>
+                  <Text style={{ fontSize: 15, fontWeight: "700", color: "#fff" }}>{bp.name}</Text>
+                  <Text style={{ fontSize: 13, color: "rgba(255,255,255,0.5)" }}>{bp.muscle} · à la maison · 30 jours</Text>
                 </View>
                 <Button
                   title={alreadyActive ? "En cours" : "Démarrer"}
@@ -212,35 +207,38 @@ export default function ChallengesTab() {
                   testID={`challenge-start-${bp.type}`}
                 />
               </View>
-            </Card>
+            </GlassCard>
           );
         })}
 
-        <Text style={[typography.small, { textAlign: "center", marginTop: spacing.lg, color: colors.textMuted }]}>
+        <Text style={{ fontSize: 13, textAlign: "center", marginTop: spacing.lg, color: "rgba(255,255,255,0.35)" }}>
           Les jours validés s&apos;ajoutent à ton historique d&apos;entraînement.
         </Text>
         <View style={{ height: spacing.xxl }} />
       </ScrollView>
-    </SafeAreaView>
+      </SafeAreaView>
+    </ScreenBg>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.background },
+  root: { flex: 1, backgroundColor: "transparent" },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
-  title: { fontSize: 30, fontWeight: "800", color: colors.textMain },
+  dateText: { fontSize: 10, color: "rgba(255,255,255,0.55)", letterSpacing: 1.5, textTransform: "uppercase", fontWeight: "600" },
+  title: { fontSize: 30, fontWeight: "800", color: "#fff" },
+  sectionLabel: { fontSize: 10, color: "#4ade80", fontWeight: "800", letterSpacing: 1.5, textTransform: "uppercase" },
   content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
-  activeChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.primary },
-  activeChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
-  streakBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full, backgroundColor: colors.primary },
-  progressTrack: { height: 6, backgroundColor: colors.background, borderRadius: 3, marginTop: spacing.sm, overflow: "hidden" },
-  progressFill: { height: "100%", backgroundColor: colors.primary, borderRadius: 3 },
+  activeChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 8, borderRadius: radius.full, backgroundColor: "rgba(0,25,0,0.5)", borderWidth: 1, borderColor: "rgba(74,222,128,0.4)" },
+  activeChipOn: { backgroundColor: "#16a34a", borderColor: "#4ade80" },
+  streakBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.3)" },
+  progressTrack: { height: 6, backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 3, marginTop: spacing.sm, overflow: "hidden" },
+  progressFill: { height: "100%", backgroundColor: "#4ade80", borderRadius: 3 },
   daysGrid: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: spacing.md },
-  dayCell: { width: "13.5%", aspectRatio: 1, alignItems: "center", justifyContent: "center", borderRadius: radius.sm, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border },
-  dayCellRest: { backgroundColor: colors.primaryPale, borderColor: "#D5EAD8" },
-  dayCellDone: { backgroundColor: colors.primary, borderColor: colors.primary },
-  dayCellNum: { fontSize: 11, fontWeight: "800", color: colors.textMain },
-  dayCellReps: { fontSize: 9, color: colors.textMuted, fontWeight: "600", marginTop: 1 },
-  endCard: { alignItems: "center", padding: spacing.lg, marginTop: spacing.md, backgroundColor: colors.primaryPale, borderRadius: radius.lg, borderWidth: 1, borderColor: "#D5EAD8" },
-  bpIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center" },
+  dayCell: { width: "13.5%", aspectRatio: 1, alignItems: "center", justifyContent: "center", borderRadius: radius.sm, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  dayCellRest: { backgroundColor: "rgba(74,222,128,0.12)", borderColor: "rgba(74,222,128,0.25)" },
+  dayCellDone: { backgroundColor: "#16a34a", borderColor: "#4ade80" },
+  dayCellNum: { fontSize: 11, fontWeight: "800", color: "rgba(255,255,255,0.8)" },
+  dayCellReps: { fontSize: 9, color: "rgba(255,255,255,0.4)", fontWeight: "600", marginTop: 1 },
+  endCard: { alignItems: "center", padding: spacing.lg, marginTop: spacing.md, backgroundColor: "rgba(74,222,128,0.15)", borderRadius: radius.lg, borderWidth: 1, borderColor: "rgba(74,222,128,0.3)" },
+  bpIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: "rgba(74,222,128,0.15)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(74,222,128,0.25)" },
 });
