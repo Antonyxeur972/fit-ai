@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
-  Modal, Image, Dimensions, Pressable,
+  Modal, ImageBackground, Dimensions, Pressable,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -128,15 +128,15 @@ export function ProgramCarousel({ onSelectProgram, loading }: Props) {
       >
         {PROGRAMS.map((p) => (
           <TouchableOpacity key={p.id} activeOpacity={0.88} onPress={() => openProgram(p)} style={styles.cardWrap}>
-            <View style={[styles.card, { width: CARD_W, height: CARD_H }]}>
-              <Image
-                source={{ uri: p.imageUrl }}
-                style={StyleSheet.absoluteFill}
-                resizeMode="cover"
-              />
+            <ImageBackground
+              source={{ uri: p.imageUrl }}
+              style={[styles.card, { width: CARD_W, height: CARD_H }]}
+              imageStyle={styles.cardImage}
+              resizeMode="cover"
+            >
               <LinearGradient
-                colors={["transparent", "rgba(0,0,0,0.18)", "rgba(0,0,0,0.78)"]}
-                locations={[0, 0.35, 1]}
+                colors={[p.cardGrad[0] + "55", "transparent", p.cardGrad[1] + "CC"]}
+                locations={[0, 0.4, 1]}
                 style={StyleSheet.absoluteFill}
               />
               <View style={styles.cardBadge}>
@@ -150,7 +150,7 @@ export function ProgramCarousel({ onSelectProgram, loading }: Props) {
                   <Ionicons name="arrow-forward" size={13} color="#fff" />
                 </View>
               </View>
-            </View>
+            </ImageBackground>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -164,10 +164,14 @@ export function ProgramCarousel({ onSelectProgram, loading }: Props) {
             {step === 0 && selected && (
               <>
                 {/* Header image strip */}
-                <View style={[styles.sheetHero, { height: 160 }]}>
-                  <Image source={{ uri: selected.imageUrl }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+                <ImageBackground
+                  source={{ uri: selected.imageUrl }}
+                  style={[styles.sheetHero, { height: 160 }]}
+                  imageStyle={{ borderTopLeftRadius: 28, borderTopRightRadius: 28 }}
+                  resizeMode="cover"
+                >
                   <LinearGradient
-                    colors={[selected.cardGrad[0] + "CC", selected.cardGrad[1] + "99"]}
+                    colors={[selected.cardGrad[0] + "CC", selected.cardGrad[1] + "AA"]}
                     style={StyleSheet.absoluteFill}
                   />
                   <View style={styles.sheetHeroContent}>
@@ -175,7 +179,7 @@ export function ProgramCarousel({ onSelectProgram, loading }: Props) {
                     <Text style={styles.sheetTitle}>{selected.title}</Text>
                     <Text style={styles.sheetTagline}>{selected.tagline}</Text>
                   </View>
-                </View>
+                </ImageBackground>
 
                 <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}>
                   <Text style={styles.descText}>{selected.description}</Text>
@@ -317,6 +321,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     overflow: "hidden",
     justifyContent: "flex-end",
+  },
+  cardImage: {
+    borderRadius: 20,
   },
   cardBadge: {
     position: "absolute",
