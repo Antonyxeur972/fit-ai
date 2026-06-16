@@ -41,6 +41,11 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 log = logging.getLogger("fitness")
 
 
+@app.get("/api/health")
+async def health():
+    return {"status": "ok"}
+
+
 # --- Helpers ---
 def now_utc() -> datetime:
     return datetime.now(timezone.utc)

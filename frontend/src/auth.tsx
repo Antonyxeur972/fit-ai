@@ -66,21 +66,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Process session_id from redirect URL: hand it straight to backend (one-shot).
+  // Process session_id from redirect URL: retry up to 3 times with exponential backoff.
   const processSessionId = useCallback(async (sessionId: string) => {
-    try {
-      setAuthError(null);
-      const resp = await api<{ session_token: string; user: AppUser }>("/auth/session", {
-        method: "POST",
-        body: { session_id: sessionId },
-        auth: false,
-      });
-      await setToken(resp.session_token);
-      setUser(resp.user);
-    } catch (e: any) {
-      console.warn("processSessionId failed", e);
-      setAuthError(e?.message || "Connexion échouée. Réessaie.");
+    setAuthError(null);
+    let lastErr: any;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, attempt * 2000));
+        const resp = await api<{ session_token: string; user: AppUser }>("/auth/session", {
+          method: "POST",
+          body: { session_id: sessionId },
+          auth: false,
+        });
+        await setToken(resp.session_token);
+        setUser(resp.user);
+        return;
+      } catch (e: any) {
+        console.warn(`processSessionId attempt ${attempt + 1} failed`, e);
+        lastErr = e;
+      }
     }
+    setAuthError(lastErr?.message || "Connexion échouée. Réessaie.");
+  }, []);
+
+  // Pre-warm the Render backend so it's ready before the user taps "Sign in".
+  useEffect(() => {
+    fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/health`).catch(() => {});
   }, []);
 
   useEffect(() => {
