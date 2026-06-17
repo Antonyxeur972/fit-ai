@@ -13,8 +13,8 @@ export default function TabsLayout() {
         tabBarInactiveTintColor: "rgba(255,255,255,0.38)",
         tabBarLabelStyle: { fontSize: 10, fontWeight: "700", letterSpacing: 0.3 },
         tabBarStyle: {
-          backgroundColor: "rgba(6,15,9,0.97)",
-          borderTopColor: "rgba(74,222,128,0.15)",
+          backgroundColor: "rgba(4,12,6,0.97)",
+          borderTopColor: colors.border,
           borderTopWidth: 1,
           height: 64 + insets.bottom,
           paddingTop: 8,
