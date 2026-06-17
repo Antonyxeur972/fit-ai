@@ -1,24 +1,24 @@
-// Design system — FIT AI vivid nature theme
+// Design system — FIT AI dark/photo theme
 export const colors = {
   // Core backgrounds
-  background: "#040D06",
-  surface: "rgba(5,22,12,0.48)",         // glass card — much more transparent
-  surfaceAlt: "rgba(3,14,8,0.36)",       // secondary glass
-  surfaceSheet: "rgba(4,14,10,0.96)",    // modal sheet (near-opaque)
+  background: "#060F09",
+  surface: "rgba(10,28,16,0.72)",       // glass card
+  surfaceAlt: "rgba(6,18,10,0.55)",     // secondary glass
+  surfaceSheet: "rgba(6,16,10,0.97)",   // modal sheet (near-opaque)
 
-  // Brand greens — vivid lime like reference image
-  primary: "#22c55e",                    // button fill, interactive (was dark #2D7C3E)
-  primaryLight: "#86efac",              // accent labels, active icons (was #4ADE80)
-  primaryPale: "rgba(34,197,94,0.15)",  // subtle fills, chip bg
+  // Brand greens
+  primary: "#2D7C3E",                   // button fill, interactive
+  primaryLight: "#4ADE80",             // accent labels, active icons
+  primaryPale: "rgba(74,222,128,0.12)", // subtle fills, chip bg
 
   // Text — all on dark backgrounds
   textMain: "#FFFFFF",
-  textSecondary: "rgba(255,255,255,0.75)",
-  textMuted: "rgba(255,255,255,0.45)",
+  textSecondary: "rgba(255,255,255,0.72)",
+  textMuted: "rgba(255,255,255,0.40)",
 
   // Borders
-  border: "rgba(100,255,120,0.25)",
-  borderBright: "rgba(100,255,120,0.48)",
+  border: "rgba(74,222,128,0.18)",
+  borderBright: "rgba(74,222,128,0.40)",
 
   // Semantic
   alert: "#F87171",
@@ -68,23 +68,24 @@ export const typography = {
 };
 
 // ─── Screen backgrounds ────────────────────────────────────────────────────────
-// Bright outdoor / nature fitness photos — vivid and alive like the reference
+// One URL per screen — each resolves to a high-quality 800px fitness photo.
+// ImageBackground + LinearGradient overlay defined in ScreenBackground component.
 export const SCREEN_BACKGROUNDS: Record<string, string> = {
-  dashboard:  "https://images.unsplash.com/photo-1483721310020-03333e577078?w=800&q=85&fit=crop",
-  training:   "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=85&fit=crop",
-  meals:      "https://images.unsplash.com/photo-1490645935967-10de6ba17061?w=800&q=85&fit=crop",
+  // Images matching the ChatGPT mockup: runner in forest / food / gym / woman hiking / athlete / mountain hiker
+  dashboard:  "https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&q=85&fit=crop",
+  training:   "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=800&q=85&fit=crop",
+  meals:      "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=800&q=85&fit=crop",
   progress:   "https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=800&q=85&fit=crop",
-  challenges: "https://images.unsplash.com/photo-1549060279-7e168fcee0c2?w=800&q=85&fit=crop",
-  profile:    "https://images.unsplash.com/photo-1541534741688-6078c6bfb5c5?w=800&q=85&fit=crop",
+  challenges: "https://images.unsplash.com/photo-1551632811-561732d1e306?w=800&q=85&fit=crop",
+  profile:    "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=85&fit=crop",
 };
 
-// Light green-nature overlays — photo clearly visible like reference image
-// sandwich: slight top darkening → very light mid (photo vivid) → readable bottom
+// Overlays: dark top/bottom for readability, light middle so the photo is clearly visible
 export const SCREEN_OVERLAYS: Record<string, readonly [string, string, string, string]> = {
-  dashboard:  ["rgba(0,15,5,0.40)",  "rgba(0,25,10,0.16)", "rgba(0,20,8,0.20)",  "rgba(0,10,4,0.70)"],
-  training:   ["rgba(0,12,5,0.42)",  "rgba(0,20,8,0.18)",  "rgba(0,18,6,0.22)",  "rgba(0,8,3,0.72)"],
-  meals:      ["rgba(0,15,5,0.38)",  "rgba(0,28,12,0.16)", "rgba(0,22,10,0.18)", "rgba(0,10,4,0.70)"],
-  progress:   ["rgba(0,15,5,0.40)",  "rgba(0,25,10,0.16)", "rgba(0,20,8,0.20)",  "rgba(0,10,4,0.72)"],
-  challenges: ["rgba(0,15,5,0.42)",  "rgba(0,25,10,0.18)", "rgba(0,20,8,0.22)",  "rgba(0,10,4,0.72)"],
-  profile:    ["rgba(0,12,5,0.38)",  "rgba(0,22,10,0.16)", "rgba(0,18,8,0.18)",  "rgba(0,8,3,0.70)"],
+  dashboard:  ["rgba(4,14,8,0.62)",  "rgba(12,50,24,0.22)", "rgba(12,50,24,0.18)", "rgba(4,12,8,0.78)"],
+  training:   ["rgba(4,12,8,0.65)",  "rgba(10,40,20,0.24)", "rgba(10,40,20,0.20)", "rgba(4,10,7,0.80)"],
+  meals:      ["rgba(4,14,8,0.60)",  "rgba(14,55,26,0.20)", "rgba(14,55,26,0.16)", "rgba(4,12,8,0.78)"],
+  progress:   ["rgba(4,12,8,0.62)",  "rgba(12,50,24,0.22)", "rgba(12,50,24,0.18)", "rgba(4,12,8,0.80)"],
+  challenges: ["rgba(4,14,8,0.62)",  "rgba(12,50,24,0.22)", "rgba(12,50,24,0.18)", "rgba(4,12,8,0.78)"],
+  profile:    ["rgba(4,12,8,0.60)",  "rgba(10,42,22,0.20)", "rgba(10,42,22,0.16)", "rgba(4,10,7,0.78)"],
 };

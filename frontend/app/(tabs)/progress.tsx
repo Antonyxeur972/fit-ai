@@ -129,14 +129,15 @@ export default function Progress() {
   return (
     <ScreenBackground bg="progress">
       <View style={styles.header}>
-        <Text style={styles.title}>Progression</Text>
+        <Text style={typography.caption}>Progression</Text>
+        <Text style={styles.title}>Ton évolution</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* 1RM Progression — THE addictive number */}
         <Card testID="rm-card">
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm }}>
-            <Text style={[typography.h3, { fontSize: 17 }]}>Évolution 1RM</Text>
+            <Text style={typography.caption}>Force · Progression 1RM</Text>
             {exerciseList.length > 0 && (
               <View style={styles.flashChip}>
                 <Ionicons name="flash" size={12} color={colors.primary} />
@@ -630,7 +631,7 @@ function DeltaSummary({ left, right }: { left?: Transfo; right?: Transfo }) {
 const styles = StyleSheet.create({
 
   header: { padding: spacing.lg, paddingBottom: spacing.md },
-  title: { fontSize: 32, fontWeight: "800", color: colors.textMain, letterSpacing: -0.6 },
+  title: { fontSize: 28, fontWeight: "700", color: colors.textMain, letterSpacing: -0.6, marginTop: 4 },
   content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
   emptyIcon: { width: 56, height: 56, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center" },
   transfoImg: { width: 96, height: 128, borderRadius: radius.md, backgroundColor: colors.border },

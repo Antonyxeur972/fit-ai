@@ -254,111 +254,27 @@ export default function ProfileTab() {
     }
   };
 
-  const memberSince: string | null = null; // created_at not exposed in AppUser yet
-
-  const levelLabel = (() => {
-    const lvl = points?.level || 1;
-    if (lvl >= 20) return "Élite";
-    if (lvl >= 10) return "Athlète avancé";
-    if (lvl >= 5) return "Intermédiaire";
-    return "Débutant";
-  })();
-
   return (
     <ScreenBackground bg="profile">
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Header row */}
-        <View style={styles.pageHeader}>
-          <Text style={styles.pageTitle}>Profil</Text>
-          <TouchableOpacity onPress={() => router.push("/onboarding")} testID="edit-profile-button">
-            <Ionicons name="settings-outline" size={22} color={colors.primaryLight} />
-          </TouchableOpacity>
-        </View>
-
-        {/* Profile hero card */}
-        <Card testID="profile-hero-card">
-          <View style={{ alignItems: "center", paddingVertical: spacing.sm }}>
-            {user?.picture ? (
-              <Image source={{ uri: user.picture }} style={styles.avatarLarge} />
-            ) : (
-              <View style={[styles.avatarLarge, { backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center" }]}>
-                <Ionicons name="person" size={36} color={colors.primary} />
-              </View>
-            )}
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginTop: spacing.md }}>
-              <Text style={[typography.h2]}>{user?.name}</Text>
+        <View style={styles.userHeader}>
+          {user?.picture ? (
+            <Image source={{ uri: user.picture }} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, { backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center" }]}>
+              <Ionicons name="person" size={28} color={colors.primary} />
+            </View>
+          )}
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <Text style={[typography.h3]}>{user?.name}</Text>
               <TouchableOpacity onPress={() => { setNameInput(user?.name || ""); setNameModal(true); }} testID="edit-name-button">
                 <Ionicons name="pencil-outline" size={16} color={colors.primary} />
               </TouchableOpacity>
             </View>
-            <View style={styles.levelRow}>
-              <View style={styles.levelBadge}>
-                <Text style={styles.levelBadgeText}>Niveau {points?.level || 1}</Text>
-              </View>
-              <Text style={[typography.small, { color: colors.textSecondary, fontWeight: "600" }]}>{levelLabel}</Text>
-            </View>
-            {memberSince && (
-              <Text style={[typography.small, { color: colors.textMuted, marginTop: spacing.sm }]}>
-                Membre depuis {memberSince}
-              </Text>
-            )}
+            <Text style={typography.small}>{user?.email}</Text>
           </View>
-        </Card>
-
-        {/* Mes statistiques — 4 stats grid */}
-        <Card testID="profile-stats-card">
-          <Text style={[typography.caption, { marginBottom: spacing.md }]}>Mes statistiques</Text>
-          <View style={styles.statsGrid}>
-            <View style={styles.statGridItem}>
-              <View style={styles.statGridIcon}>
-                <Ionicons name="barbell-outline" size={18} color={colors.primary} />
-              </View>
-              <Text style={styles.statGridValue}>{points?.points_total ? Math.floor(points.points_total / 10) : "—"}</Text>
-              <Text style={styles.statGridLabel}>Entraînements</Text>
-            </View>
-            <View style={styles.statGridItem}>
-              <View style={styles.statGridIcon}>
-                <Ionicons name="walk-outline" size={18} color={colors.primary} />
-              </View>
-              <Text style={styles.statGridValue}>—</Text>
-              <Text style={styles.statGridLabel}>Pas / jour</Text>
-            </View>
-            <View style={styles.statGridItem}>
-              <View style={styles.statGridIcon}>
-                <Ionicons name="flame-outline" size={18} color={colors.primary} />
-              </View>
-              <Text style={styles.statGridValue}>{profile.daily_calories || "—"}</Text>
-              <Text style={styles.statGridLabel}>Cal / jour</Text>
-            </View>
-            <View style={styles.statGridItem}>
-              <View style={styles.statGridIcon}>
-                <Ionicons name="time-outline" size={18} color={colors.primary} />
-              </View>
-              <Text style={styles.statGridValue}>—</Text>
-              <Text style={styles.statGridLabel}>Min / jour</Text>
-            </View>
-          </View>
-        </Card>
-
-        {/* Menu list */}
-        <Card testID="profile-menu-card">
-          {[
-            { label: "Paramètres", icon: "settings-outline" as const, onPress: () => router.push("/onboarding") },
-            { label: "Objectifs", icon: "flag-outline" as const, onPress: () => router.push("/onboarding") },
-            { label: "Préférences", icon: "options-outline" as const, onPress: () => setNotifModal(true) },
-            { label: "Aide & Support", icon: "help-circle-outline" as const, onPress: () => {} },
-          ].map((item, i, arr) => (
-            <TouchableOpacity
-              key={item.label}
-              onPress={item.onPress}
-              style={[styles.menuRow, i < arr.length - 1 && styles.menuRowBorder]}
-            >
-              <Ionicons name={item.icon} size={20} color={colors.primaryLight} />
-              <Text style={[typography.body, { flex: 1, fontWeight: "600" }]}>{item.label}</Text>
-              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-            </TouchableOpacity>
-          ))}
-        </Card>
+        </View>
 
         {/* Phase 5: Mascot + Strength symbol */}
         <Card testID="mascot-card">
@@ -554,7 +470,7 @@ export default function ProfileTab() {
           title="Modifier mon profil"
           variant="secondary"
           onPress={() => router.push("/onboarding")}
-          testID="edit-profile-onboarding-button"
+          testID="edit-profile-button"
           icon={<Ionicons name="create-outline" size={18} color={colors.primary} />}
         />
 
@@ -851,26 +767,6 @@ function ForceLiftRow({
 const styles = StyleSheet.create({
 
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
-  pageHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.md },
-  pageTitle: { fontSize: 32, fontWeight: "800", color: colors.textMain, letterSpacing: -0.6 },
-  avatarLarge: { width: 80, height: 80, borderRadius: radius.full },
-  levelRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginTop: spacing.sm },
-  levelBadge: {
-    paddingHorizontal: 12, paddingVertical: 4, borderRadius: radius.full,
-    backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: colors.primary,
-  },
-  levelBadgeText: { fontSize: 12, fontWeight: "800", color: colors.primary },
-  statsGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.md },
-  statGridItem: { flex: 1, minWidth: "40%", alignItems: "center", gap: 4 },
-  statGridIcon: {
-    width: 40, height: 40, borderRadius: radius.full,
-    backgroundColor: colors.primaryPale, borderWidth: 1, borderColor: colors.primary,
-    alignItems: "center", justifyContent: "center",
-  },
-  statGridValue: { fontSize: 18, fontWeight: "700", color: colors.textMain },
-  statGridLabel: { fontSize: 11, color: colors.textMuted, textAlign: "center" },
-  menuRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: 14 },
-  menuRowBorder: { borderBottomWidth: 1, borderBottomColor: colors.border },
   userHeader: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.sm },
   avatar: { width: 64, height: 64, borderRadius: radius.full },
   logout: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: spacing.md, marginTop: spacing.md },

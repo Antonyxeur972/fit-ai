@@ -126,13 +126,10 @@ export default function Dashboard() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primaryLight} />}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header: greeting */}
         <View style={styles.headerRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.hello}>Salut {user?.name?.split(" ")[0]} 👋</Text>
-            <Text style={[typography.small, { color: colors.textSecondary, marginTop: 2 }]}>
-              Prêt à dépasser tes limites aujourd&apos;hui ?
-            </Text>
+          <View>
+            <Text style={typography.caption}>{today}</Text>
+            <Text style={styles.hello}>Salut {user?.name?.split(" ")[0]}</Text>
           </View>
           {user?.mascot?.animal ? (
             <Mascot
@@ -147,45 +144,6 @@ export default function Dashboard() {
             </View>
           )}
         </View>
-
-        {/* Hero card: calories ring + 3 quick stats */}
-        <Card style={{ alignItems: "center", paddingVertical: spacing.xl }} testID="dashboard-calorie-card">
-          <ProgressRing progress={progress} size={200} stroke={16} color={over ? colors.alert : colors.primary}>
-            <Text style={typography.caption}>Calories restantes</Text>
-            <Text style={styles.bigNumber}>{Math.max(0, data.remaining_calories)}</Text>
-            <Text style={typography.small}>
-              {data.consumed_calories} / {data.target_calories} kcal
-            </Text>
-          </ProgressRing>
-          {over && (
-            <View style={styles.overTag}>
-              <Ionicons name="alert-circle" size={14} color={colors.alert} />
-              <Text style={[typography.small, { color: colors.alert, fontWeight: "600" }]}>
-                Tu as dépassé ton objectif de {data.consumed_calories - data.target_calories} kcal
-              </Text>
-            </View>
-          )}
-          {/* 3 quick stats row inside the hero card */}
-          <View style={styles.heroStatsRow}>
-            <View style={styles.heroStat}>
-              <Ionicons name="walk-outline" size={16} color={colors.primaryLight} />
-              <Text style={styles.heroStatValue}>{data.activity.steps.toLocaleString("fr-FR")}</Text>
-              <Text style={styles.heroStatLabel}>Pas du jour</Text>
-            </View>
-            <View style={styles.heroStatDivider} />
-            <View style={styles.heroStat}>
-              <Ionicons name="barbell-outline" size={16} color={colors.primaryLight} />
-              <Text style={styles.heroStatValue}>{data.workout?.duration_min ?? "—"}</Text>
-              <Text style={styles.heroStatLabel}>Entraînement min</Text>
-            </View>
-            <View style={styles.heroStatDivider} />
-            <View style={styles.heroStat}>
-              <Ionicons name="moon-outline" size={16} color={colors.primaryLight} />
-              <Text style={styles.heroStatValue}>— h</Text>
-              <Text style={styles.heroStatLabel}>Sommeil</Text>
-            </View>
-          </View>
-        </Card>
 
         {/* Phase 5: Quote + Strength + Share */}
         <Card style={styles.heroCard} testID="dashboard-hero-card">
@@ -219,9 +177,28 @@ export default function Dashboard() {
           />
         </Card>
 
+        {/* Calorie ring */}
+        <Card style={{ alignItems: "center", paddingVertical: spacing.xl }} testID="dashboard-calorie-card">
+          <ProgressRing progress={progress} size={200} stroke={16} color={over ? colors.alert : colors.primary}>
+            <Text style={typography.caption}>Restant</Text>
+            <Text style={styles.bigNumber}>{Math.max(0, data.remaining_calories)}</Text>
+            <Text style={typography.small}>
+              {data.consumed_calories} / {data.target_calories} kcal
+            </Text>
+          </ProgressRing>
+          {over && (
+            <View style={styles.overTag}>
+              <Ionicons name="alert-circle" size={14} color={colors.alert} />
+              <Text style={[typography.small, { color: colors.alert, fontWeight: "600" }]}>
+                Tu as dépassé ton objectif de {data.consumed_calories - data.target_calories} kcal
+              </Text>
+            </View>
+          )}
+        </Card>
+
         {/* Macros */}
         <Card testID="dashboard-macros-card">
-          <SectionTitle title="MACROS DU JOUR" />
+          <SectionTitle title="Macros aujourd'hui" />
           <MacroBar
             label="Protéines"
             current={data.macros.protein_g}
@@ -446,22 +423,7 @@ const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
   headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.md },
   heroCard: { gap: 0 },
-  hello: { fontSize: 28, fontWeight: "800", color: "#FFFFFF", letterSpacing: -0.5 },
-  heroStatsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: spacing.lg,
-    paddingTop: spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: colors.border,
-    width: "100%",
-    gap: spacing.sm,
-  },
-  heroStat: { flex: 1, alignItems: "center", gap: 4 },
-  heroStatDivider: { width: 1, height: 36, backgroundColor: colors.border },
-  heroStatValue: { fontSize: 17, fontWeight: "700", color: "#FFFFFF" },
-  heroStatLabel: { fontSize: 10, color: colors.textMuted, textAlign: "center" },
+  hello: { fontSize: 26, fontWeight: "800", color: "#FFFFFF", letterSpacing: -0.5, marginTop: 2 },
   avatar: {
     width: 44, height: 44, borderRadius: radius.full,
     backgroundColor: "rgba(74,222,128,0.2)", borderWidth: 1, borderColor: "rgba(74,222,128,0.4)",
