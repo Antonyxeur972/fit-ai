@@ -613,8 +613,7 @@ export default function Training() {
   return (
     <ScreenBackground bg="training">
       <View style={styles.header}>
-        <Text style={typography.caption}>Programme</Text>
-        <Text style={styles.title}>Ton entraînement</Text>
+        <Text style={styles.title}>Séance du jour</Text>
       </View>
 
       {/* Tabs */}
@@ -1379,7 +1378,7 @@ const SHEET = "rgba(6,16,10,0.97)";
 
 const styles = StyleSheet.create({
   header: { padding: spacing.lg, paddingBottom: spacing.md },
-  title: { fontSize: 28, fontWeight: "800", color: "#FFFFFF", letterSpacing: -0.6, marginTop: 4 },
+  title: { fontSize: 32, fontWeight: "800", color: "#FFFFFF", letterSpacing: -0.6 },
   content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
   focusBadge: { width: 44, height: 44, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.18)", alignItems: "center", justifyContent: "center", marginRight: spacing.md },
   exerciseRow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" },

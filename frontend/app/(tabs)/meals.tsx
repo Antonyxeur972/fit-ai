@@ -645,8 +645,10 @@ export default function Meals() {
   return (
     <ScreenBackground bg="meals">
       <View style={styles.header}>
-        <Text style={typography.caption}>Repas</Text>
-        <Text style={styles.headerTitle}>{total.toLocaleString("fr-FR")} <Text style={styles.headerUnit}>{"kcal aujourd'hui"}</Text></Text>
+        <Text style={styles.headerTitle}>Repas</Text>
+        <Text style={[typography.small, { color: colors.textSecondary, marginTop: 2 }]}>
+          {total.toLocaleString("fr-FR")} kcal aujourd&apos;hui
+        </Text>
       </View>
 
       {/* Sticky tab chips */}
