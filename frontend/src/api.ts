@@ -29,7 +29,13 @@ async function fetchWithRetry(url: string, init: RequestInit, retries: number): 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       if (attempt > 0) await new Promise((r) => setTimeout(r, 1500 * attempt));
-      return await fetch(url, init);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      try {
+        return await fetch(url, { ...init, signal: controller.signal });
+      } finally {
+        clearTimeout(timeout);
+      }
     } catch (e) {
       lastErr = e;
     }

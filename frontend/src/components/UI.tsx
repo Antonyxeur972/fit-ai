@@ -1,7 +1,36 @@
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ViewStyle, TextStyle } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ViewStyle, TextStyle, ImageBackground } from "react-native";
 import { ReactNode } from "react";
-import Svg, { Circle, Defs, LinearGradient, Stop, Path, Polyline } from "react-native-svg";
+import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
+import Svg, { Circle, Defs, LinearGradient as SvgLinearGradient, Stop, Path, Polyline } from "react-native-svg";
 import { colors, radius, spacing, shadow, typography } from "../theme";
+
+// --- GlassCard (dark glassmorphism) ---
+export function GlassCard({ children, style, testID }: { children: ReactNode; style?: ViewStyle; testID?: string }) {
+  return (
+    <BlurView intensity={18} tint="dark" style={[glassCardStyle.card, style]} testID={testID}>
+      {children}
+    </BlurView>
+  );
+}
+const glassCardStyle = StyleSheet.create({
+  card: { borderRadius: 20, overflow: "hidden", borderWidth: 1, borderColor: "rgba(100,255,100,0.15)", padding: 16 },
+});
+
+// --- ScreenBg (nature background + gradient overlay) ---
+export function ScreenBg({ children, uri, style }: { children: ReactNode; uri: string; style?: ViewStyle }) {
+  return (
+    <View style={[{ flex: 1 }, style]}>
+      <ImageBackground source={{ uri }} style={StyleSheet.absoluteFill} resizeMode="cover" />
+      <LinearGradient
+        colors={["rgba(0,15,0,0.60)", "rgba(0,20,0,0.28)", "rgba(0,15,0,0.52)", "rgba(0,8,0,0.97)"]}
+        locations={[0, 0.25, 0.6, 0.88]}
+        style={StyleSheet.absoluteFill}
+      />
+      {children}
+    </View>
+  );
+}
 
 // --- Card ---
 export function Card({ children, style, testID }: { children: ReactNode; style?: ViewStyle; testID?: string }) {
@@ -117,10 +146,10 @@ export function ProgressRing({
     <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
       <Svg width={size} height={size}>
         <Defs>
-          <LinearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
+          <SvgLinearGradient id="grad" x1="0" y1="0" x2="1" y2="1">
             <Stop offset="0" stopColor={colors.primaryLight} />
             <Stop offset="1" stopColor={colors.primary} />
-          </LinearGradient>
+          </SvgLinearGradient>
         </Defs>
         <Circle cx={size / 2} cy={size / 2} r={r} stroke={trackColor} strokeWidth={stroke} fill="none" />
         <Circle
@@ -229,10 +258,10 @@ export function LineChart1RM({
     <View testID={testID} style={{ width, height }}>
       <Svg width={width} height={height}>
         <Defs>
-          <LinearGradient id="rmgrad" x1="0" y1="0" x2="0" y2="1">
+          <SvgLinearGradient id="rmgrad" x1="0" y1="0" x2="0" y2="1">
             <Stop offset="0" stopColor={color} stopOpacity={0.25} />
             <Stop offset="1" stopColor={color} stopOpacity={0} />
-          </LinearGradient>
+          </SvgLinearGradient>
         </Defs>
         {/* gridlines */}
         {yLabels.map((y, i) => {

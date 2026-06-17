@@ -66,7 +66,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Process session_id from redirect URL: hand it straight to backend (one-shot).
+  // Pre-warm the backend before the user clicks "Sign in"
+  useEffect(() => {
+    fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/health`).catch(() => {});
+  }, []);
+
+  // Process session_id from redirect URL: api retries x2 with backoff + clear error on start.
   const processSessionId = useCallback(async (sessionId: string) => {
     try {
       setAuthError(null);

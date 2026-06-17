@@ -36,6 +36,11 @@ client = AsyncIOMotorClient(MONGO_URL, tlsCAFile=certifi.where())
 db = client[DB_NAME]
 
 app = FastAPI(title="Performance Fitness API")
+
+@app.get("/api/health")
+async def health():
+    return {"status": "ok"}
+
 api = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
