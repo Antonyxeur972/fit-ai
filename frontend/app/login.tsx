@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { View, Text, StyleSheet, Image } from "react-native";
+import { View, Text, StyleSheet, Image, ImageBackground } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -37,13 +37,18 @@ export default function Login() {
   };
 
   return (
-    <SafeAreaView style={styles.safe} edges={["top", "bottom"]} testID="login-screen">
+    <ImageBackground
+      source={{ uri: "https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&q=85&fit=crop" }}
+      style={{ flex: 1 }}
+      resizeMode="cover"
+    >
       <LinearGradient
-        colors={["#E8F5E9", "#FAFAF8", "#FAFAF8"]}
+        colors={["rgba(4,14,8,0.78)", "rgba(6,28,14,0.40)", "rgba(4,12,8,0.88)"]}
         style={StyleSheet.absoluteFillObject}
         start={{ x: 0.1, y: 0 }}
-        end={{ x: 0.9, y: 0.7 }}
+        end={{ x: 0.9, y: 1 }}
       />
+      <SafeAreaView style={styles.safe} edges={["top", "bottom"]} testID="login-screen">
       <View style={styles.container}>
         <View style={styles.brandRow}>
           <View style={styles.heroLeaf}>
@@ -88,12 +93,13 @@ export default function Login() {
           {"En continuant, tu acceptes nos conditions d'utilisation. Tes données restent privées."}
         </Text>
       </View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
+  safe: { flex: 1 },
   container: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.xl },
   heroLeaf: {
     width: 44,

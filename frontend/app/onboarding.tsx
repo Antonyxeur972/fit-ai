@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, TextInput, TouchableOpacity, ImageBackground } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useRouter } from "expo-router";
@@ -132,6 +133,15 @@ export default function Onboarding() {
   };
 
   return (
+    <ImageBackground
+      source={{ uri: "https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=800&q=85&fit=crop" }}
+      style={{ flex: 1 }}
+      resizeMode="cover"
+    >
+      <LinearGradient
+        colors={["rgba(4,14,8,0.82)", "rgba(6,28,14,0.55)", "rgba(4,12,8,0.90)"]}
+        style={StyleSheet.absoluteFillObject}
+      />
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]} testID="onboarding-screen">
       <View style={styles.header}>
         <Text style={typography.caption}>Étape {step + 1} sur {STEPS_COUNT}</Text>
@@ -323,6 +333,7 @@ export default function Onboarding() {
         />
       </View>
     </SafeAreaView>
+    </ImageBackground>
   );
 }
 
@@ -414,7 +425,7 @@ function LiftRow({
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.background },
+  safe: { flex: 1 },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, gap: spacing.sm },
   progressTrack: { height: 6, backgroundColor: colors.primaryPale, borderRadius: radius.full, overflow: "hidden" },
   progressFill: { height: "100%", backgroundColor: colors.primary, borderRadius: radius.full },
