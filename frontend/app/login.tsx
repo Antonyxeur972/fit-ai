@@ -59,7 +59,7 @@ export default function Login() {
 
         <View style={styles.previewCard}>
           <Image
-            source={{ uri: "https://images.unsplash.com/photo-1518617840859-acd542e13a99?crop=entropy&cs=srgb&fm=jpg&w=900&q=80" }}
+            source={{ uri: "https://images.unsplash.com/photo-1551632811-561732d1e306?crop=entropy&cs=srgb&fm=jpg&w=900&q=80" }}
             style={styles.previewImg}
           />
           <View style={styles.previewOverlay}>
