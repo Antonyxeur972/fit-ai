@@ -11,6 +11,8 @@ import { ShareCardModal } from "@/src/components/ShareCardModal";
 import { Mascot } from "@/src/components/Mascot";
 import { StrengthSymbol } from "@/src/components/StrengthSymbol";
 import { ScreenBackground } from "@/src/components/ScreenBackground";
+import { HydrationCard } from "@/src/components/HydrationCard";
+import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { quoteForToday } from "@/src/lib/motivation";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
@@ -126,11 +128,14 @@ export default function Dashboard() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primaryLight} />}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.headerRow}>
-          <View>
-            <Text style={typography.caption}>{today}</Text>
-            <Text style={styles.hello}>Salut {user?.name?.split(" ")[0]}</Text>
-          </View>
+        <View style={styles.heroStage}>
+          <View style={styles.headerRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.heroDate}>{today}</Text>
+              <Text style={styles.hello}>Bonjour,{"\n"}{user?.name?.split(" ")[0]} !</Text>
+              <Text style={styles.heroSubtitle}>Prête à te dépasser aujourd&apos;hui ?</Text>
+              <MotivationalScript style={styles.heroScript}>déploie ton énergie.</MotivationalScript>
+            </View>
           {user?.mascot?.animal ? (
             <Mascot
               animal={user.mascot.animal}
@@ -143,10 +148,10 @@ export default function Dashboard() {
               <Ionicons name="leaf" size={20} color={colors.primary} />
             </View>
           )}
-        </View>
+          </View>
 
-        {/* Phase 5: Quote + Strength + Share */}
-        <Card style={styles.heroCard} testID="dashboard-hero-card">
+          {/* Phase 5: Quote + Strength + Share */}
+          <Card style={styles.heroCard} testID="dashboard-hero-card">
           <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
             <StrengthSymbol
               size={62}
@@ -175,7 +180,10 @@ export default function Dashboard() {
             testID="dashboard-share-button"
             style={{ marginTop: spacing.md }}
           />
-        </Card>
+          </Card>
+        </View>
+
+        <HydrationCard />
 
         {/* Calorie ring */}
         <Card style={{ alignItems: "center", paddingVertical: spacing.xl }} testID="dashboard-calorie-card">
@@ -420,10 +428,14 @@ function WeekMacroStat({ label, value, target, unit }: { label: string; value: n
 }
 
 const styles = StyleSheet.create({
-  content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
-  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.md },
-  heroCard: { gap: 0 },
-  hello: { fontSize: 26, fontWeight: "800", color: "#FFFFFF", letterSpacing: -0.5, marginTop: 2 },
+  content: { padding: spacing.lg, gap: spacing.md, paddingBottom: 130 },
+  heroStage: { minHeight: 390, justifyContent: "space-between", paddingTop: spacing.sm },
+  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  heroCard: { gap: 0, backgroundColor: "rgba(3,22,15,0.58)", borderColor: "rgba(255,255,255,0.18)" },
+  heroDate: { ...typography.caption, color: "rgba(255,255,255,0.84)", textTransform: "capitalize", fontWeight: "600" },
+  hello: { fontSize: 39, lineHeight: 41, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0, marginTop: spacing.sm, maxWidth: 220 },
+  heroSubtitle: { ...typography.body, color: "rgba(255,255,255,0.82)", marginTop: spacing.sm, maxWidth: 220, lineHeight: 21 },
+  heroScript: { fontSize: 25, lineHeight: 29, marginTop: spacing.sm, maxWidth: 245 },
   avatar: {
     width: 44, height: 44, borderRadius: radius.full,
     backgroundColor: "rgba(74,222,128,0.2)", borderWidth: 1, borderColor: "rgba(74,222,128,0.4)",

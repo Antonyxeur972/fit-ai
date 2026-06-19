@@ -38,7 +38,7 @@ export default function Login() {
 
   return (
     <ImageBackground
-      source={{ uri: "https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&q=85&fit=crop" }}
+      source={require("../assets/images/fitai-hero-dashboard-hd.png")}
       style={{ flex: 1 }}
       resizeMode="cover"
     >
@@ -64,7 +64,7 @@ export default function Login() {
 
         <View style={styles.previewCard}>
           <Image
-            source={{ uri: "https://images.unsplash.com/photo-1518617840859-acd542e13a99?crop=entropy&cs=srgb&fm=jpg&w=900&q=80" }}
+            source={require("../assets/images/fitai-hero-activities-hd.png")}
             style={styles.previewImg}
           />
           <View style={styles.previewOverlay}>

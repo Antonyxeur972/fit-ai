@@ -134,7 +134,7 @@ export default function Onboarding() {
 
   return (
     <ImageBackground
-      source={{ uri: "https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=800&q=85&fit=crop" }}
+      source={require("../assets/images/fitai-hero-program-hd.png")}
       style={{ flex: 1 }}
       resizeMode="cover"
     >

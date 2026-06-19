@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, TextInput, Modal, Switch, Platform } from "react-native";
 import { ScreenBackground } from "@/src/components/ScreenBackground";
+import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -273,6 +274,7 @@ export default function ProfileTab() {
               </TouchableOpacity>
             </View>
             <Text style={typography.small}>{user?.email}</Text>
+            <MotivationalScript style={styles.profileScript}>deviens ta meilleure version.</MotivationalScript>
           </View>
         </View>
 
@@ -766,9 +768,10 @@ function ForceLiftRow({
 
 const styles = StyleSheet.create({
 
-  content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
-  userHeader: { flexDirection: "row", alignItems: "center", gap: spacing.md, marginBottom: spacing.sm },
-  avatar: { width: 64, height: 64, borderRadius: radius.full },
+  content: { padding: spacing.lg, gap: spacing.md, paddingBottom: 130 },
+  userHeader: { minHeight: 250, flexDirection: "row", alignItems: "flex-end", gap: spacing.md, paddingBottom: spacing.lg, marginBottom: spacing.sm },
+  avatar: { width: 72, height: 72, borderRadius: radius.full, borderWidth: 2, borderColor: "rgba(255,255,255,0.72)" },
+  profileScript: { fontSize: 20, lineHeight: 24, marginTop: 5 },
   logout: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: spacing.md, marginTop: spacing.md },
   tierBadge: { paddingHorizontal: 14, paddingVertical: 8, backgroundColor: colors.primary, borderRadius: radius.full },
   tierText: { color: "#fff", fontWeight: "800", fontSize: 13, letterSpacing: 0.5 },

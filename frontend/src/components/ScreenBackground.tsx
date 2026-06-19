@@ -1,5 +1,5 @@
 import { ReactNode } from "react";
-import { ImageBackground, StyleSheet } from "react-native";
+import { ImageBackground, StyleSheet, View } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { SCREEN_BACKGROUNDS, SCREEN_OVERLAYS } from "../theme";
@@ -15,20 +15,17 @@ type Props = {
 
 /**
  * Wraps a full-screen view with:
- *   1. Fixed ImageBackground (sport photo from Unsplash CDN)
+ *   1. Fixed ImageBackground (local illustrated artwork)
  *   2. LinearGradient dark-green overlay for readability
  *   3. SafeAreaView container for content
- *
- * The photo stays fixed; ScrollView content scrolls over it.
- * If the photo fails to load, the gradient alone still looks great.
  */
 export function ScreenBackground({ bg, children, edges = ["top"] }: Props) {
-  const url = SCREEN_BACKGROUNDS[bg];
+  const source = SCREEN_BACKGROUNDS[bg];
   const overlay = SCREEN_OVERLAYS[bg] ?? SCREEN_OVERLAYS.dashboard;
 
   return (
     <ImageBackground
-      source={{ uri: url }}
+      source={source}
       style={styles.root}
       resizeMode="cover"
     >
@@ -37,6 +34,12 @@ export function ScreenBackground({ bg, children, edges = ["top"] }: Props) {
         locations={[0, 0.35, 0.65, 1]}
         style={StyleSheet.absoluteFill}
       />
+      <LinearGradient
+        colors={["rgba(0,0,0,0)", "rgba(3,12,8,0.55)"]}
+        locations={[0.35, 1]}
+        style={StyleSheet.absoluteFill}
+      />
+      <View style={styles.glow} />
       <SafeAreaView style={styles.safe} edges={edges}>
         {children}
       </SafeAreaView>
@@ -47,4 +50,14 @@ export function ScreenBackground({ bg, children, edges = ["top"] }: Props) {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#060F09" },
   safe: { flex: 1 },
+  glow: {
+    position: "absolute",
+    left: -80,
+    right: -80,
+    bottom: -140,
+    height: 260,
+    backgroundColor: "rgba(142,234,47,0.10)",
+    borderTopLeftRadius: 180,
+    borderTopRightRadius: 180,
+  },
 });
