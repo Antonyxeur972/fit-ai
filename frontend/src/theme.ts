@@ -71,13 +71,13 @@ export const typography = {
 // One URL per screen — each resolves to a high-quality 800px fitness photo.
 // ImageBackground + LinearGradient overlay defined in ScreenBackground component.
 export const SCREEN_BACKGROUNDS: Record<string, string> = {
-  // Images matching the ChatGPT mockup: runner in forest / food / gym / woman hiking / athlete / mountain hiker
-  dashboard:  "https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?w=800&q=85&fit=crop",
-  training:   "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=800&q=85&fit=crop",
-  meals:      "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?w=800&q=85&fit=crop",
-  progress:   "https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=800&q=85&fit=crop",
-  challenges: "https://images.unsplash.com/photo-1551632811-561732d1e306?w=800&q=85&fit=crop",
-  profile:    "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800&q=85&fit=crop",
+  // Images matching the mockup: forest runner / fruit flatlay / gym barbell / mountain hikers / sunset athlete / sunrise hiker
+  dashboard:  "https://images.unsplash.com/photo-1743794191035-dd0234b8b9a0?w=800&q=85&fit=crop",
+  training:   "https://images.unsplash.com/photo-1541600278744-d4cba88bb2c7?w=800&q=85&fit=crop",
+  meals:      "https://images.unsplash.com/photo-1576021182211-9ea8dced3690?w=800&q=85&fit=crop",
+  progress:   "https://images.unsplash.com/photo-1570050413350-a8839a97098a?w=800&q=85&fit=crop",
+  challenges: "https://images.unsplash.com/photo-1762375212956-46c0a0964336?w=800&q=85&fit=crop",
+  profile:    "https://images.unsplash.com/photo-1663168059921-c1f4e3077578?w=800&q=85&fit=crop",
 };
 
 // Overlays: dark top/bottom for readability, light middle so the photo is clearly visible
