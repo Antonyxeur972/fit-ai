@@ -23,7 +23,7 @@ const PROGRAMS = [
     emoji: "💪",
     accent: "#1A52A0",
     cardGrad: ["#0F2D5E", "#1D4ED8"] as const,
-    imageUrl: "https://images.unsplash.com/photo-1581009137042-c552e485697a?w=420&q=80&fit=crop",
+    imageUrl: "https://images.unsplash.com/photo-1551632811-561732d1e306?w=420&q=80&fit=crop",
     tagline: "Construire du muscle",
     description:
       "La prise de masse est un cycle axé sur la construction musculaire maximale. On augmente le volume d'entraînement avec des séries de 8–15 répétitions et une progression régulière des charges.",
@@ -43,7 +43,7 @@ const PROGRAMS = [
     emoji: "🔥",
     accent: "#C2410C",
     cardGrad: ["#7C2D12", "#EA580C"] as const,
-    imageUrl: "https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=420&q=80&fit=crop",
+    imageUrl: "https://images.unsplash.com/photo-1607962837359-5e7e89f86776?w=420&q=80&fit=crop",
     tagline: "Révéler ta forme",
     description:
       "La sèche combine entraînement intense et cardio ciblé pour fondre la masse grasse tout en préservant le muscle. Idéal pour sculpter une silhouette définie et révéler les abdominaux.",
@@ -63,7 +63,7 @@ const PROGRAMS = [
     emoji: "⚡",
     accent: "#047857",
     cardGrad: ["#064E3B", "#059669"] as const,
-    imageUrl: "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=420&q=80&fit=crop",
+    imageUrl: "https://images.unsplash.com/photo-1486218119243-13883505764c?w=420&q=80&fit=crop",
     tagline: "Développer chaque muscle",
     description:
       "L'hypertrophie cible la croissance musculaire contrôlée, groupe par groupe. On alterne charges lourdes et répétitions modérées pour forcer l'adaptation et développer une physique équilibrée.",
