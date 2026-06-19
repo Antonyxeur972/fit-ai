@@ -71,15 +71,15 @@ export const typography = {
 // One URL per screen — each resolves to a high-quality 800px fitness photo.
 // ImageBackground + LinearGradient overlay defined in ScreenBackground component.
 export const SCREEN_BACKGROUNDS: Record<string, string> = {
-  // Images matching the mockup: woman atop mountain (Accueil) / man running forest light (Entraînement) /
-  // silhouette running hill sunset (Programme) / woman running nature path (Progression) /
-  // golden mountain landscape (Défis) / woman hiking with backpack (Activités Outdoor)
+  // Images matching the mockup: woman atop mountain (Dashboard) / man running forest light (Entraînement) /
+  // silhouette running hill sunset (Programme) / woman hiking with backpack (Progression) /
+  // golden mountain landscape (Défis) / woman running nature path (Profil)
   dashboard:  "https://images.unsplash.com/photo-1645817849968-35ad0b3f36b9?w=800&q=85&fit=crop",
   training:   "https://images.unsplash.com/photo-1733667917418-f4b7ea5a80c4?w=800&q=85&fit=crop",
   meals:      "https://images.unsplash.com/photo-1726521812762-32386ad8842a?w=800&q=85&fit=crop",
-  progress:   "https://images.unsplash.com/photo-1631899477678-9d3c5aeded2d?w=800&q=85&fit=crop",
+  progress:   "https://images.unsplash.com/photo-1723764881665-5b40cea01c9b?w=800&q=85&fit=crop",
   challenges: "https://images.unsplash.com/photo-1743309411498-a0f4f4b96b65?w=800&q=85&fit=crop",
-  profile:    "https://images.unsplash.com/photo-1723764881665-5b40cea01c9b?w=800&q=85&fit=crop",
+  profile:    "https://images.unsplash.com/photo-1631899477678-9d3c5aeded2d?w=800&q=85&fit=crop",
 };
 
 // Overlays: dark top/bottom for readability, light middle so the photo is clearly visible
