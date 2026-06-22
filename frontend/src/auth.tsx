@@ -12,6 +12,8 @@ export type AppUser = {
   name: string;
   picture?: string | null;
   onboarded: boolean;
+  pact_signed?: boolean;
+  subscription_status?: "none" | "active" | "expired";
   silhouette?: { sex: "male" | "female"; level: number } | null;
   force_metrics?: {
     at?: string;

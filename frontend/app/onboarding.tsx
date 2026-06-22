@@ -123,7 +123,7 @@ export default function Onboarding() {
         await api("/workouts/generate", { method: "POST" });
       } catch {}
       await refreshUser();
-      router.replace("/(tabs)/dashboard");
+      router.replace("/paywall/motivation");
     } catch (e) {
       console.warn("profile submit", e);
     } finally {

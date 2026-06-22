@@ -296,6 +296,22 @@ class NotifPrefsRequest(BaseModel):
     reminders: List[NotifReminder]
 
 
+class MotivationAnswersIn(BaseModel):
+    why_now: str = ""
+    biggest_obstacle: str = ""
+    cost_of_inaction: str = ""
+    deep_goal: str = ""
+    determination: int = 5  # 1..10
+
+
+class PactIn(BaseModel):
+    full_name: str
+
+
+class RevenueCatWebhookPayload(BaseModel):
+    event: Dict[str, Any] = Field(default_factory=dict)
+
+
 class ChallengeStartRequest(BaseModel):
     type: str  # "pushups" | "abs" | "squats"
 
@@ -1349,6 +1365,7 @@ async def auth_session(body: SessionLoginRequest):
             "name": user["name"],
             "picture": user.get("picture"),
             "onboarded": bool(user.get("onboarded", False)),
+            "pact_signed": bool(user.get("pact_signed", False)),
         },
     }
 
@@ -1366,6 +1383,8 @@ async def auth_me(authorization: Optional[str] = Header(default=None)):
         "force_metrics": user.get("force_metrics"),
         "mascot": user.get("mascot"),
         "notif_prefs": user.get("notif_prefs"),
+        "pact_signed": bool(user.get("pact_signed", False)),
+        "subscription_status": user.get("subscription_status", "none"),
     }
 
 
@@ -1410,6 +1429,69 @@ async def update_notif_prefs(
         {"user_id": user["user_id"]}, {"$set": {"notif_prefs": {"reminders": cleaned}}}
     )
     return {"notif_prefs": {"reminders": cleaned}}
+
+
+# ---- PAYWALL: motivation questionnaire, digital pact, subscription status ----
+
+@api.put("/users/me/motivation")
+async def update_motivation(
+    body: MotivationAnswersIn, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    answers = {
+        "why_now": body.why_now.strip()[:500],
+        "biggest_obstacle": body.biggest_obstacle.strip()[:500],
+        "cost_of_inaction": body.cost_of_inaction.strip()[:500],
+        "deep_goal": body.deep_goal.strip()[:500],
+        "determination": max(1, min(10, int(body.determination))),
+    }
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"motivation_answers": answers, "motivation_completed_at": now_utc().isoformat()}},
+    )
+    return {"motivation_answers": answers}
+
+
+@api.put("/users/me/pact")
+async def sign_pact(body: PactIn, authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    name = body.full_name.strip()[:120]
+    if not name:
+        raise HTTPException(400, "Signature requise")
+    signed_at = now_utc().isoformat()
+    await db.users.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"pact_signed": True, "pact_name": name, "pact_signed_at": signed_at}},
+    )
+    return {"pact_signed": True, "pact_name": name, "pact_signed_at": signed_at}
+
+
+# RevenueCat event types that grant vs revoke the "pro" entitlement.
+# https://www.revenuecat.com/docs/integrations/webhooks/event-types-and-fields
+ACTIVE_RC_EVENTS = {"INITIAL_PURCHASE", "RENEWAL", "UNCANCELLATION", "PRODUCT_CHANGE", "TRANSFER"}
+INACTIVE_RC_EVENTS = {"EXPIRATION", "CANCELLATION", "BILLING_ISSUE"}
+
+
+@api.post("/webhooks/revenuecat")
+async def revenuecat_webhook(
+    payload: RevenueCatWebhookPayload, authorization: Optional[str] = Header(default=None)
+):
+    """Keeps subscription_status in sync server-side. Configure this URL + the
+    same secret (REVENUECAT_WEBHOOK_SECRET env var) in the RevenueCat dashboard
+    once the project is created."""
+    secret = os.environ.get("REVENUECAT_WEBHOOK_SECRET", "")
+    if secret and authorization != f"Bearer {secret}":
+        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+    event = payload.event or {}
+    app_user_id = event.get("app_user_id")
+    event_type = event.get("type")
+    if not app_user_id:
+        return {"ok": True}
+    if event_type in ACTIVE_RC_EVENTS:
+        await db.users.update_one({"user_id": app_user_id}, {"$set": {"subscription_status": "active"}})
+    elif event_type in INACTIVE_RC_EVENTS:
+        await db.users.update_one({"user_id": app_user_id}, {"$set": {"subscription_status": "expired"}})
+    return {"ok": True}
 
 
 # ---- POINTS / LEVELS ----

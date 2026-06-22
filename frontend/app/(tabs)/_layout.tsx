@@ -1,10 +1,23 @@
-import { Tabs } from "expo-router";
+import { useEffect } from "react";
+import { Tabs, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "@/src/theme";
+import { useSubscription } from "@/src/subscription";
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { isPro, loading, ready } = useSubscription();
+
+  // If the subscription expires/is cancelled while the user is already
+  // inside the app, send them back to the paywall instead of leaving them
+  // with access they no longer pay for.
+  useEffect(() => {
+    if (!ready || loading || isPro) return;
+    router.replace("/paywall/offer");
+  }, [ready, loading, isPro, router]);
+
   return (
     <Tabs
       screenOptions={{

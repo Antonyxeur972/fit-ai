@@ -16,11 +16,12 @@ export default function Login() {
 
   const displayError = error || authError;
 
-  // If sign-in succeeded (user set by deep-link processing), route to next screen.
+  // If sign-in succeeded (user set by deep-link processing), let the root
+  // index screen decide where to go next (onboarding / paywall / dashboard).
   useEffect(() => {
     if (authLoading) return;
     if (user) {
-      router.replace(user.onboarded ? "/(tabs)/dashboard" : "/onboarding");
+      router.replace("/");
     }
   }, [user, authLoading, router]);
 
