@@ -146,7 +146,7 @@ export default function Paywall() {
 
   return (
     <ImageBackground
-      source={require("../assets/images/fitai-hero-program-hd.png")}
+      source={require("../assets/images/fitai-hero-activities-hd.png")}
       style={styles.background}
       imageStyle={styles.backgroundImage}
       resizeMode="cover"
@@ -279,7 +279,8 @@ export default function Paywall() {
                 onChangeText={setPromoCode}
                 autoCapitalize="none"
                 autoCorrect={false}
-                placeholder="fit.ai.972"
+                secureTextEntry
+                placeholder="Code promo"
                 placeholderTextColor="rgba(255,255,255,0.36)"
                 style={styles.promoInput}
                 testID="paywall-promo-input"
