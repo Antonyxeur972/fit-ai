@@ -12,10 +12,10 @@ const { width: SW } = Dimensions.get("window");
 const CARD_W = Math.min(SW * 0.72, 280);
 const CARD_H = CARD_W * 1.35;
 
-type Split = "ppl" | "fullbody" | "split";
-type Freq = 3 | 4 | 5;
+export type Split = "ppl" | "fullbody" | "split";
+export type Freq = 3 | 4 | 5;
 
-const PROGRAMS = [
+export const PROGRAMS = [
   {
     id: "masse",
     goal_label: "Masse",

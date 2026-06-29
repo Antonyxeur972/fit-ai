@@ -13,7 +13,8 @@
       "infoPlist": {
         "NSCameraUsageDescription": "Prendre des photos de tes repas et progressions",
         "NSPhotoLibraryUsageDescription": "Sélectionner photos de repas et transformations",
-        "NSPhotoLibraryAddUsageDescription": "Enregistrer ta story de performance dans tes photos"
+        "NSPhotoLibraryAddUsageDescription": "Enregistrer ta story de performance dans tes photos",
+        "NSMotionUsageDescription": "Synchroniser tes pas depuis le podomètre du téléphone"
       }
     },
     "android": {
@@ -32,7 +33,9 @@
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.READ_MEDIA_IMAGES",
         "android.permission.RECORD_AUDIO",
-        "android.permission.MODIFY_AUDIO_SETTINGS"
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.ACTIVITY_RECOGNITION",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -74,6 +77,16 @@
     },
     "extra": {
       "router": {},
+      "subscriptions": {
+        "ios": {
+          "monthly": "fitai_premium_monthly",
+          "annual": "fitai_premium_annual"
+        },
+        "android": {
+          "monthly": "fitai_premium_monthly",
+          "annual": "fitai_premium_annual"
+        }
+      },
       "eas": {
         "projectId": "79f780f1-9e98-428e-9a0f-f977ff18df71"
       }

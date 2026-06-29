@@ -1,10 +1,40 @@
-import { Tabs } from "expo-router";
+import { Tabs, useRouter } from "expo-router";
+import { useEffect } from "react";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAuth } from "@/src/auth";
+import { hasSignedCommitment } from "@/src/lib/commitment";
+import { getSubscriptionState } from "@/src/lib/subscription";
 import { colors } from "@/src/theme";
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { user, loading } = useAuth();
+
+  useEffect(() => {
+    let mounted = true;
+    const guard = async () => {
+      if (loading) return;
+      if (!user) {
+        router.replace("/login");
+        return;
+      }
+      if (!user.onboarded) {
+        router.replace("/onboarding");
+        return;
+      }
+      const subscription = await getSubscriptionState();
+      if (!mounted || subscription.active) return;
+      const signed = await hasSignedCommitment();
+      if (mounted) router.replace(signed ? "/paywall" : "/commitment");
+    };
+    guard();
+    return () => {
+      mounted = false;
+    };
+  }, [loading, router, user]);
+
   return (
     <Tabs
       screenOptions={{

@@ -11,6 +11,8 @@ import { Button, Card } from "@/src/components/UI";
 import { SilhouettePicker } from "@/src/components/SilhouettePicker";
 import { MascotPicker } from "@/src/components/MascotPicker";
 import { MascotAnimal } from "@/src/components/Mascot";
+import { getOrStartPaywallOffer } from "@/src/lib/subscription";
+import { schedulePreSubscriptionNudges } from "@/src/lib/notifications";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type Step = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -124,7 +126,11 @@ export default function Onboarding() {
         await api("/workouts/generate", { method: "POST" });
       } catch {}
       await refreshUser();
-      router.replace("/(tabs)/dashboard");
+      try {
+        const offer = await getOrStartPaywallOffer();
+        await schedulePreSubscriptionNudges(offer.expiresAt, offer.revealedAt);
+      } catch {}
+      router.replace("/commitment");
     } catch (e) {
       console.warn("profile submit", e);
     } finally {
@@ -134,17 +140,22 @@ export default function Onboarding() {
 
   return (
     <ImageBackground
-      source={require("../assets/images/fitai-hero-program-hd.png")}
-      style={{ flex: 1 }}
+      source={require("../assets/images/fitai-signup-hero-main.png")}
+      style={styles.background}
+      imageStyle={styles.backgroundImage}
       resizeMode="cover"
     >
       <LinearGradient
-        colors={["rgba(4,14,8,0.82)", "rgba(6,28,14,0.55)", "rgba(4,12,8,0.90)"]}
+        colors={["rgba(8,16,12,0.34)", "rgba(7,22,13,0.24)", "rgba(3,8,5,0.90)"]}
+        locations={[0, 0.40, 1]}
         style={StyleSheet.absoluteFillObject}
       />
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]} testID="onboarding-screen">
       <View style={styles.header}>
-        <Text style={typography.caption}>Étape {step + 1} sur {STEPS_COUNT}</Text>
+        <View style={styles.headerTop}>
+          <Text style={styles.brand}>FIT AI</Text>
+          <Text style={styles.headerStep}>{step + 1}/{STEPS_COUNT}</Text>
+        </View>
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, { width: `${((step + 1) / STEPS_COUNT) * 100}%` }]} />
         </View>
@@ -158,9 +169,9 @@ export default function Onboarding() {
       >
         {step === 0 && (
           <>
-            <Text style={styles.title}>Salut {user?.name?.split(" ")[0] || ""} 👋</Text>
+            <Text style={styles.title}>Salut {user?.name?.split(" ")[0] || ""}</Text>
             <Text style={styles.subtitle}>
-              On a besoin de quelques infos pour calculer tes vrais besoins. Pas de motivation fluffy, juste de la science.
+              On pose ici un profil précis, propre et exploitable pour que tout le reste garde la même cohérence.
             </Text>
             <Card style={{ marginTop: spacing.lg }}>
               <Text style={[typography.caption, { marginBottom: spacing.md }]}>Genre</Text>
@@ -425,41 +436,46 @@ function LiftRow({
 }
 
 const styles = StyleSheet.create({
+  background: { flex: 1, backgroundColor: "#06100B" },
+  backgroundImage: { transform: [{ scale: 1.02 }] },
   safe: { flex: 1 },
   header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, gap: spacing.sm },
-  progressTrack: { height: 6, backgroundColor: colors.primaryPale, borderRadius: radius.full, overflow: "hidden" },
+  headerTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  brand: { color: colors.textMain, fontSize: 20, fontWeight: "600", letterSpacing: 0.6 },
+  headerStep: { color: "rgba(255,255,255,0.76)", fontSize: 12, fontWeight: "600" },
+  progressTrack: { height: 8, backgroundColor: "rgba(255,255,255,0.16)", borderRadius: radius.full, overflow: "hidden" },
   progressFill: { height: "100%", backgroundColor: colors.primary, borderRadius: radius.full },
   content: { padding: spacing.lg, paddingBottom: 120 },
-  title: { fontSize: 28, fontWeight: "700", color: colors.textMain, letterSpacing: -0.6 },
-  subtitle: { ...typography.body, color: colors.textSecondary, marginTop: spacing.sm, lineHeight: 22 },
+  title: { fontSize: 31, fontWeight: "600", color: colors.textMain, letterSpacing: 0, lineHeight: 36 },
+  subtitle: { ...typography.body, color: "rgba(255,255,255,0.78)", marginTop: spacing.sm, lineHeight: 23 },
   row: { flexDirection: "row", gap: spacing.sm },
   choice: {
     flex: 1,
     paddingVertical: spacing.md,
     borderRadius: radius.md,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "rgba(255,255,255,0.20)",
     alignItems: "center",
     flexDirection: "row",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: colors.surface,
+    backgroundColor: "rgba(7,18,15,0.84)",
   },
-  choiceActive: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
+  choiceActive: { backgroundColor: "rgba(182,255,63,0.18)", borderColor: colors.primary },
   choiceText: { fontSize: 15, color: colors.textMain, fontWeight: "600" },
   inputRow: {
     flexDirection: "row",
     alignItems: "center",
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "rgba(255,255,255,0.18)",
     borderRadius: radius.md,
     paddingHorizontal: spacing.md,
-    backgroundColor: colors.surface,
+    backgroundColor: "rgba(7,18,15,0.84)",
   },
   input: { flex: 1, fontSize: 22, color: colors.textMain, paddingVertical: 14, fontWeight: "600" },
   inputUnit: { fontSize: 14, color: colors.textSecondary, fontWeight: "500" },
   optionCard: {
-    backgroundColor: colors.surface,
+    backgroundColor: "rgba(7,18,15,0.84)",
     borderRadius: radius.lg,
     padding: spacing.lg,
     flexDirection: "row",
@@ -468,9 +484,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  optionCardActive: { borderColor: colors.primary, backgroundColor: colors.primaryPale },
+  optionCardActive: { borderColor: colors.primary, backgroundColor: "rgba(182,255,63,0.18)" },
   optionCardSmall: {
-    backgroundColor: colors.surface,
+    backgroundColor: "rgba(7,18,15,0.84)",
     borderRadius: radius.md,
     padding: spacing.md,
     flexDirection: "row",
@@ -483,7 +499,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: radius.full,
-    backgroundColor: colors.primaryPale,
+    backgroundColor: "rgba(182,255,63,0.18)",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -494,8 +510,8 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     gap: spacing.sm,
     borderTopWidth: 1,
-    borderTopColor: colors.border,
-    backgroundColor: colors.surface,
+    borderTopColor: "rgba(255,255,255,0.14)",
+    backgroundColor: "rgba(4,14,12,0.88)",
   },
   liftRow: {
     flexDirection: "row",
@@ -507,9 +523,9 @@ const styles = StyleSheet.create({
   liftInputWrap: {
     width: 60,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: "rgba(255,255,255,0.16)",
     borderRadius: radius.sm,
-    backgroundColor: colors.background,
+    backgroundColor: "rgba(7,18,15,0.92)",
     paddingHorizontal: 8,
   },
   liftInput: { fontSize: 15, paddingVertical: 8, color: colors.textMain, fontWeight: "700" },
