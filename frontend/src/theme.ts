@@ -1,15 +1,20 @@
-// Design system — FIT AI dark/photo theme
+import type { ImageSourcePropType } from "react-native";
+
+// Design system — FIT AI dark/illustrated theme
 export const colors = {
   // Core backgrounds
-  background: "#060F09",
-  surface: "rgba(10,28,16,0.72)",       // glass card
-  surfaceAlt: "rgba(6,18,10,0.55)",     // secondary glass
-  surfaceSheet: "rgba(6,16,10,0.97)",   // modal sheet (near-opaque)
+  background: "#04120B",
+  surface: "rgba(7,28,18,0.62)",        // glass card
+  surfaceAlt: "rgba(5,22,14,0.48)",     // secondary glass
+  surfaceSheet: "rgba(5,18,12,0.97)",   // modal sheet (near-opaque)
 
   // Brand greens
-  primary: "#2D7C3E",                   // button fill, interactive
-  primaryLight: "#4ADE80",             // accent labels, active icons
-  primaryPale: "rgba(74,222,128,0.12)", // subtle fills, chip bg
+  primary: "#8EEA2F",                   // button fill, interactive
+  primaryDark: "#47A91E",
+  primaryLight: "#B6FF3F",             // accent labels, active icons
+  primaryPale: "rgba(182,255,63,0.14)", // subtle fills, chip bg
+  aqua: "#35D6E8",
+  amber: "#FFB33F",
 
   // Text — all on dark backgrounds
   textMain: "#FFFFFF",
@@ -17,8 +22,8 @@ export const colors = {
   textMuted: "rgba(255,255,255,0.40)",
 
   // Borders
-  border: "rgba(74,222,128,0.18)",
-  borderBright: "rgba(74,222,128,0.40)",
+  border: "rgba(182,255,63,0.16)",
+  borderBright: "rgba(182,255,63,0.44)",
 
   // Semantic
   alert: "#F87171",
@@ -36,8 +41,9 @@ export const spacing = {
 
 export const radius = {
   sm: 8,
-  md: 16,
-  lg: 24,
+  md: 14,
+  lg: 20,
+  xl: 28,
   full: 9999,
 };
 
@@ -59,35 +65,31 @@ export const shadow = {
 };
 
 export const typography = {
-  h1: { fontSize: 32, fontWeight: "700" as const, letterSpacing: -0.6, color: colors.textMain },
-  h2: { fontSize: 24, fontWeight: "700" as const, letterSpacing: -0.4, color: colors.textMain },
+  h1: { fontSize: 34, fontWeight: "800" as const, letterSpacing: 0, color: colors.textMain },
+  h2: { fontSize: 25, fontWeight: "800" as const, letterSpacing: 0, color: colors.textMain },
   h3: { fontSize: 20, fontWeight: "600" as const, color: colors.textMain },
   body: { fontSize: 15, color: colors.textMain },
   small: { fontSize: 13, color: colors.textSecondary },
-  caption: { fontSize: 11, color: colors.textMuted, letterSpacing: 1.5, textTransform: "uppercase" as const },
+  caption: { fontSize: 12, color: colors.textSecondary, letterSpacing: 0 },
 };
 
 // ─── Screen backgrounds ────────────────────────────────────────────────────────
-// One URL per screen — each resolves to a high-quality 800px fitness photo.
-// ImageBackground + LinearGradient overlay defined in ScreenBackground component.
-export const SCREEN_BACKGROUNDS: Record<string, string> = {
-  // Images matching the mockup: woman atop mountain (Dashboard) / man running forest light (Entraînement) /
-  // silhouette running hill sunset (Programme) / woman hiking with backpack (Progression) /
-  // golden mountain landscape (Défis) / woman running nature path (Profil)
-  dashboard:  "https://images.unsplash.com/photo-1645817849968-35ad0b3f36b9?w=800&q=85&fit=crop",
-  training:   "https://images.unsplash.com/photo-1733667917418-f4b7ea5a80c4?w=800&q=85&fit=crop",
-  meals:      "https://images.unsplash.com/photo-1726521812762-32386ad8842a?w=800&q=85&fit=crop",
-  progress:   "https://images.unsplash.com/photo-1723764881665-5b40cea01c9b?w=800&q=85&fit=crop",
-  challenges: "https://images.unsplash.com/photo-1743309411498-a0f4f4b96b65?w=800&q=85&fit=crop",
-  profile:    "https://images.unsplash.com/photo-1631899477678-9d3c5aeded2d?w=800&q=85&fit=crop",
+// Local illustrated backgrounds extracted from the ChatGPT-generated reference.
+export const SCREEN_BACKGROUNDS: Record<string, ImageSourcePropType> = {
+  dashboard: require("../assets/images/fitai-hero-dashboard-hd.png"),
+  training: require("../assets/images/fitai-hero-program-hd.png"),
+  meals: require("../assets/images/fitai-hero-meals-hd.png"),
+  progress: require("../assets/images/fitai-hero-progress-hd.png"),
+  challenges: require("../assets/images/fitai-hero-activities-hd.png"),
+  profile: require("../assets/images/fitai-hero-progress-hd.png"),
 };
 
 // Overlays: dark top/bottom for readability, light middle so the photo is clearly visible
 export const SCREEN_OVERLAYS: Record<string, readonly [string, string, string, string]> = {
-  dashboard:  ["rgba(4,14,8,0.62)",  "rgba(12,50,24,0.22)", "rgba(12,50,24,0.18)", "rgba(4,12,8,0.78)"],
-  training:   ["rgba(4,12,8,0.65)",  "rgba(10,40,20,0.24)", "rgba(10,40,20,0.20)", "rgba(4,10,7,0.80)"],
-  meals:      ["rgba(4,14,8,0.60)",  "rgba(14,55,26,0.20)", "rgba(14,55,26,0.16)", "rgba(4,12,8,0.78)"],
-  progress:   ["rgba(4,12,8,0.62)",  "rgba(12,50,24,0.22)", "rgba(12,50,24,0.18)", "rgba(4,12,8,0.80)"],
-  challenges: ["rgba(4,14,8,0.62)",  "rgba(12,50,24,0.22)", "rgba(12,50,24,0.18)", "rgba(4,12,8,0.78)"],
-  profile:    ["rgba(4,12,8,0.60)",  "rgba(10,42,22,0.20)", "rgba(10,42,22,0.16)", "rgba(4,10,7,0.78)"],
+  dashboard:  ["rgba(3,16,12,0.18)", "rgba(3,18,12,0.05)", "rgba(4,20,13,0.30)", "rgba(2,12,8,0.96)"],
+  training:   ["rgba(2,14,12,0.22)", "rgba(2,16,12,0.05)", "rgba(4,18,12,0.28)", "rgba(2,11,8,0.96)"],
+  meals:      ["rgba(3,16,12,0.22)", "rgba(3,18,12,0.08)", "rgba(4,20,13,0.32)", "rgba(2,12,8,0.96)"],
+  progress:   ["rgba(2,14,12,0.18)", "rgba(2,16,12,0.06)", "rgba(4,18,12,0.32)", "rgba(2,11,8,0.96)"],
+  challenges: ["rgba(2,14,12,0.14)", "rgba(2,16,12,0.04)", "rgba(4,18,12,0.28)", "rgba(2,11,8,0.96)"],
+  profile:    ["rgba(2,14,12,0.20)", "rgba(2,16,12,0.06)", "rgba(4,18,12,0.32)", "rgba(2,11,8,0.96)"],
 };

@@ -8,13 +8,13 @@ import { colors, radius, spacing, shadow, typography } from "../theme";
 // --- GlassCard (dark glassmorphism) ---
 export function GlassCard({ children, style, testID }: { children: ReactNode; style?: ViewStyle; testID?: string }) {
   return (
-    <BlurView intensity={18} tint="dark" style={[glassCardStyle.card, style]} testID={testID}>
+    <BlurView intensity={24} tint="dark" style={[glassCardStyle.card, style]} testID={testID}>
       {children}
     </BlurView>
   );
 }
 const glassCardStyle = StyleSheet.create({
-  card: { borderRadius: 20, overflow: "hidden", borderWidth: 1, borderColor: "rgba(100,255,100,0.15)", padding: 16 },
+  card: { borderRadius: radius.lg, overflow: "hidden", borderWidth: 1, borderColor: colors.border, padding: 16, backgroundColor: colors.surface },
 });
 
 // --- ScreenBg (nature background + gradient overlay) ---
@@ -35,9 +35,9 @@ export function ScreenBg({ children, uri, style }: { children: ReactNode; uri: s
 // --- Card ---
 export function Card({ children, style, testID }: { children: ReactNode; style?: ViewStyle; testID?: string }) {
   return (
-    <View testID={testID} style={[styles.card, style]}>
+    <BlurView intensity={18} tint="dark" testID={testID} style={[styles.card, style]}>
       {children}
-    </View>
+    </BlurView>
   );
 }
 
@@ -57,7 +57,7 @@ export function Button({ title, onPress, loading, variant = "primary", disabled,
   const isDisabled = disabled || loading;
   const bg =
     variant === "primary" ? colors.primary : variant === "secondary" ? colors.primaryPale : "transparent";
-  const fg = variant === "primary" ? "#fff" : colors.primary;
+  const fg = variant === "primary" ? "#071207" : colors.primaryLight;
   return (
     <TouchableOpacity
       activeOpacity={0.85}
@@ -67,7 +67,7 @@ export function Button({ title, onPress, loading, variant = "primary", disabled,
       style={[
         styles.btn,
         { backgroundColor: bg, opacity: isDisabled ? 0.55 : 1 },
-        variant === "ghost" && { borderWidth: 1, borderColor: colors.primary },
+        variant !== "primary" && { borderWidth: 1, borderColor: colors.borderBright },
         style,
       ]}
     >
@@ -87,7 +87,7 @@ export function Button({ title, onPress, loading, variant = "primary", disabled,
 export function SectionTitle({ title, action, testID }: { title: string; action?: ReactNode; testID?: string }) {
   return (
     <View style={styles.sectionRow} testID={testID}>
-      <Text style={[typography.caption, { color: colors.primaryLight, fontWeight: "700" }]}>{title}</Text>
+      <Text style={[typography.body, { color: colors.textMain, fontWeight: "800" }]}>{title}</Text>
       {action}
     </View>
   );
@@ -371,6 +371,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,       // rgba(74,222,128,0.18) green glass border
     overflow: "hidden",
+    ...shadow.md,
   },
   btn: {
     minHeight: 52,
@@ -380,15 +381,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     flexDirection: "row",
     gap: 8,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
   },
-  btnText: { fontSize: 15, fontWeight: "600" },
+  btnText: { fontSize: 15, fontWeight: "800" },
   sectionRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: spacing.sm,
   },
-  statValue: { fontSize: 26, fontWeight: "700", color: "#FFFFFF", letterSpacing: -0.4 },
+  statValue: { fontSize: 26, fontWeight: "800", color: "#FFFFFF", letterSpacing: 0 },
   statUnit: { fontSize: 13, color: "rgba(255,255,255,0.6)", fontWeight: "500" },
   macroTrack: {
     height: 8,

@@ -4,6 +4,7 @@ import {
   Modal, RefreshControl, TextInput,
 } from "react-native";
 import { ScreenBackground } from "@/src/components/ScreenBackground";
+import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { useFocusEffect } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
@@ -647,6 +648,7 @@ export default function Meals() {
       <View style={styles.header}>
         <Text style={typography.caption}>Repas</Text>
         <Text style={styles.headerTitle}>{total.toLocaleString("fr-FR")} <Text style={styles.headerUnit}>{"kcal aujourd'hui"}</Text></Text>
+        <MotivationalScript style={styles.headerScript}>nourris ton énergie.</MotivationalScript>
       </View>
 
       {/* Sticky tab chips */}
@@ -669,39 +671,62 @@ export default function Meals() {
       >
         {tab === "today" && (
           <>
-            <View style={styles.actions}>
-              <Button title={analyzing ? "Analyse..." : "Photo"} onPress={() => pickImage(true)} loading={analyzing} icon={<Ionicons name="camera-outline" size={18} color="#fff" />} testID="meals-camera-button" style={{ flex: 1 }} />
-              <Button title="Galerie" onPress={() => pickImage(false)} variant="secondary" icon={<Ionicons name="images-outline" size={18} color={colors.primary} />} testID="meals-library-button" style={{ flex: 1 }} />
+            <View style={styles.aiTools}>
+              <TouchableOpacity
+                onPress={() => pickImage(true)}
+                disabled={analyzing}
+                style={[styles.aiTool, styles.scanTool]}
+                testID="meals-camera-button"
+                activeOpacity={0.86}
+              >
+                <View style={styles.scanIcon}>
+                  {analyzing ? <ActivityIndicator color="#14220B" /> : <Ionicons name="scan" size={27} color="#14220B" />}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <View style={styles.aiLabelRow}>
+                    <Text style={styles.scanTitle}>{analyzing ? "Analyse en cours..." : "Scanner mon repas"}</Text>
+                    <View style={styles.aiBadge}><Text style={styles.aiBadgeText}>IA</Text></View>
+                  </View>
+                  <Text style={styles.scanSubtitle}>Photo, calories et macros en quelques secondes</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color="#14220B" />
+              </TouchableOpacity>
+
+              <View style={styles.aiToolRow}>
+                <TouchableOpacity onPress={() => pickImage(false)} style={styles.aiToolSmall} testID="meals-library-button">
+                  <Ionicons name="images-outline" size={23} color="#52D8F6" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.aiToolTitle}>Importer</Text>
+                    <Text style={styles.aiToolSubtitle}>Depuis la galerie</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity onPress={() => setRecipesOpen(true)} style={styles.aiToolSmall} testID="meals-recipes-button">
+                  <Ionicons name="snow-outline" size={24} color={colors.primaryLight} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.aiToolTitle}>Mon frigo</Text>
+                    <Text style={styles.aiToolSubtitle}>Recettes avec ce que j&apos;ai</Text>
+                  </View>
+                </TouchableOpacity>
+              </View>
             </View>
-            <Button
-              title="Ajout manuel (aliment)"
-              onPress={() => openManual()}
-              variant="ghost"
-              icon={<Ionicons name="add-circle-outline" size={18} color={colors.primary} />}
-              testID="meals-manual-button"
-            />
-            <View style={{ flexDirection: "row", gap: spacing.sm }}>
-              <Button
-                title="Recettes IA"
-                onPress={() => setRecipesOpen(true)}
-                variant="ghost"
-                icon={<Ionicons name="sparkles-outline" size={16} color={colors.primary} />}
-                testID="meals-recipes-button"
-                style={{ flex: 1 }}
-              />
+
+            <View style={styles.secondaryActions}>
+              <TouchableOpacity onPress={() => openManual()} style={styles.secondaryAction} testID="meals-manual-button">
+                <Ionicons name="add-circle-outline" size={17} color={colors.primaryLight} />
+                <Text style={styles.secondaryActionText}>Ajout manuel</Text>
+              </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => {
                   const y = new Date();
                   y.setDate(y.getDate() - 1);
                   openManual(y.toISOString().slice(0, 10));
                 }}
-                style={[styles.pastBtn, { flex: 1 }]}
+                style={styles.secondaryAction}
                 testID="meals-past-button"
               >
                 <Ionicons name="calendar-outline" size={16} color={colors.textSecondary} />
-                <Text style={[typography.small, { color: colors.textSecondary, fontWeight: "600" }]}>
-                  Jour passé
-                </Text>
+                <Text style={styles.secondaryActionText}>Jour passé</Text>
               </TouchableOpacity>
             </View>
 
@@ -1723,16 +1748,32 @@ const calStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
 
-  header: { padding: spacing.lg, paddingBottom: spacing.sm },
-  headerTitle: { fontSize: 32, fontWeight: "800", color: colors.textMain, letterSpacing: -1, marginTop: 4 },
+  header: { minHeight: 230, padding: spacing.lg, paddingBottom: spacing.xl, justifyContent: "flex-end" },
+  headerTitle: { fontSize: 34, fontWeight: "900", color: colors.textMain, letterSpacing: 0, marginTop: 4 },
   headerUnit: { fontSize: 14, color: colors.textSecondary, fontWeight: "500" },
+  headerScript: { fontSize: 27, lineHeight: 31, marginTop: spacing.sm },
   tabRow: { flexDirection: "row", gap: 8, paddingHorizontal: spacing.lg, marginBottom: spacing.sm },
-  tabChip: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, flexShrink: 0 },
-  tabChipActive: { backgroundColor: colors.primaryPale, borderColor: colors.primary },
+  tabChip: { paddingHorizontal: 14, paddingVertical: 9, borderRadius: radius.sm, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, flexShrink: 0 },
+  tabChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   tabText: { fontSize: 13, color: colors.textSecondary, fontWeight: "600" },
-  tabTextActive: { color: colors.primary, fontWeight: "700" },
-  content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl, paddingTop: spacing.sm },
-  actions: { flexDirection: "row", gap: spacing.sm },
+  tabTextActive: { color: "#14220B", fontWeight: "800" },
+  content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: 130, paddingTop: spacing.sm },
+  aiTools: { gap: spacing.sm },
+  aiTool: { flexDirection: "row", alignItems: "center", gap: spacing.md, minHeight: 92, padding: spacing.md, borderRadius: radius.md },
+  scanTool: { backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: "rgba(255,255,255,0.44)" },
+  scanIcon: { width: 48, height: 48, borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.34)", alignItems: "center", justifyContent: "center" },
+  aiLabelRow: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
+  scanTitle: { fontSize: 18, fontWeight: "900", color: "#14220B" },
+  scanSubtitle: { ...typography.small, color: "rgba(20,34,11,0.72)", marginTop: 3, lineHeight: 17 },
+  aiBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.sm, backgroundColor: "#14220B" },
+  aiBadgeText: { fontSize: 9, fontWeight: "900", color: colors.primaryLight },
+  aiToolRow: { flexDirection: "row", gap: spacing.sm },
+  aiToolSmall: { flex: 1, minWidth: 0, minHeight: 82, flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: "rgba(3,28,21,0.72)" },
+  aiToolTitle: { fontSize: 14, fontWeight: "800", color: colors.textMain },
+  aiToolSubtitle: { fontSize: 10, lineHeight: 13, color: colors.textSecondary, marginTop: 2 },
+  secondaryActions: { flexDirection: "row", gap: spacing.sm },
+  secondaryAction: { flex: 1, minHeight: 42, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderWidth: 1, borderColor: colors.border, borderRadius: radius.sm, backgroundColor: colors.surface },
+  secondaryActionText: { ...typography.small, color: colors.textSecondary, fontWeight: "700" },
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#FEF2F2", padding: spacing.md, borderRadius: radius.md },
   emptyIcon: { width: 56, height: 56, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center" },
   subHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 4 },

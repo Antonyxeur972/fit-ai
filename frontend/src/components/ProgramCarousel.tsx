@@ -12,18 +12,18 @@ const { width: SW } = Dimensions.get("window");
 const CARD_W = Math.min(SW * 0.72, 280);
 const CARD_H = CARD_W * 1.35;
 
-type Split = "ppl" | "fullbody" | "split";
-type Freq = 3 | 4 | 5;
+export type Split = "ppl" | "fullbody" | "split";
+export type Freq = 3 | 4 | 5;
 
-const PROGRAMS = [
+export const PROGRAMS = [
   {
     id: "masse",
     goal_label: "Masse",
     title: "Prise de Masse",
     emoji: "💪",
-    accent: "#1A52A0",
-    cardGrad: ["#0F2D5E", "#1D4ED8"] as const,
-    imageUrl: "https://images.unsplash.com/photo-1551632811-561732d1e306?w=420&q=80&fit=crop",
+    accent: colors.primaryDark,
+    cardGrad: ["#062A21", "#143B20"] as const,
+    imageSource: require("../../assets/images/fitai-hero-program-hd.png"),
     tagline: "Construire du muscle",
     description:
       "La prise de masse est un cycle axé sur la construction musculaire maximale. On augmente le volume d'entraînement avec des séries de 8–15 répétitions et une progression régulière des charges.",
@@ -41,9 +41,9 @@ const PROGRAMS = [
     goal_label: "Perte de gras",
     title: "Sèche",
     emoji: "🔥",
-    accent: "#C2410C",
-    cardGrad: ["#7C2D12", "#EA580C"] as const,
-    imageUrl: "https://images.unsplash.com/photo-1607962837359-5e7e89f86776?w=420&q=80&fit=crop",
+    accent: "#D67A22",
+    cardGrad: ["#183623", "#8A4D18"] as const,
+    imageSource: require("../../assets/images/fitai-hero-activities-hd.png"),
     tagline: "Révéler ta forme",
     description:
       "La sèche combine entraînement intense et cardio ciblé pour fondre la masse grasse tout en préservant le muscle. Idéal pour sculpter une silhouette définie et révéler les abdominaux.",
@@ -61,9 +61,9 @@ const PROGRAMS = [
     goal_label: "Hypertrophie",
     title: "Hypertrophie",
     emoji: "⚡",
-    accent: "#047857",
-    cardGrad: ["#064E3B", "#059669"] as const,
-    imageUrl: "https://images.unsplash.com/photo-1486218119243-13883505764c?w=420&q=80&fit=crop",
+    accent: colors.primaryDark,
+    cardGrad: ["#052E24", "#1A6A39"] as const,
+    imageSource: require("../../assets/images/fitai-hero-progress-hd.png"),
     tagline: "Développer chaque muscle",
     description:
       "L'hypertrophie cible la croissance musculaire contrôlée, groupe par groupe. On alterne charges lourdes et répétitions modérées pour forcer l'adaptation et développer une physique équilibrée.",
@@ -129,7 +129,7 @@ export function ProgramCarousel({ onSelectProgram, loading }: Props) {
         {PROGRAMS.map((p) => (
           <TouchableOpacity key={p.id} activeOpacity={0.88} onPress={() => openProgram(p)} style={styles.cardWrap}>
             <ImageBackground
-              source={{ uri: p.imageUrl }}
+              source={p.imageSource}
               style={[styles.card, { width: CARD_W, height: CARD_H }]}
               imageStyle={styles.cardImage}
               resizeMode="cover"
@@ -165,7 +165,7 @@ export function ProgramCarousel({ onSelectProgram, loading }: Props) {
               <>
                 {/* Header image strip */}
                 <ImageBackground
-                  source={{ uri: selected.imageUrl }}
+                  source={selected.imageSource}
                   style={[styles.sheetHero, { height: 160 }]}
                   imageStyle={{ borderTopLeftRadius: 28, borderTopRightRadius: 28 }}
                   resizeMode="cover"
@@ -359,7 +359,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-end",
   },
   sheet: {
-    backgroundColor: "#fff",
+    backgroundColor: colors.surfaceSheet,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     overflow: "hidden",
@@ -367,7 +367,7 @@ const styles = StyleSheet.create({
   },
   handle: {
     width: 40, height: 4, borderRadius: 2,
-    backgroundColor: "#DDD",
+    backgroundColor: "rgba(255,255,255,0.28)",
     alignSelf: "center",
     marginTop: 10, marginBottom: 4,
   },

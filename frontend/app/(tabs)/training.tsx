@@ -12,6 +12,7 @@ import { Card, Button, SectionTitle, Stat } from "@/src/components/UI";
 import { ShareCardModal } from "@/src/components/ShareCardModal";
 import { ProgramCarousel } from "@/src/components/ProgramCarousel";
 import { ScreenBackground } from "@/src/components/ScreenBackground";
+import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type Exercise = { name: string; sets: number; reps: string; rest_s: number; checked?: boolean; is_recommended?: boolean };
@@ -599,6 +600,9 @@ export default function Training() {
 
   const todayWorkout = week.find((w) => w.date === today);
   const todayExercises = todayWorkout?.exercises.filter((e) => e.checked !== false) || [];
+  const programProgress = program?.weeks_total
+    ? Math.min(100, Math.round(((program.current_week + 1) / program.weeks_total) * 100))
+    : 0;
 
   // Library grouped by category, used in editor
   const libByCategory = useMemo(() => {
@@ -613,8 +617,21 @@ export default function Training() {
   return (
     <ScreenBackground bg="training">
       <View style={styles.header}>
-        <Text style={typography.caption}>Programme</Text>
-        <Text style={styles.title}>Ton entraînement</Text>
+        <Text style={styles.heroEyebrow}>Programme</Text>
+        <View style={styles.heroTitleRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.heroCaption}>Ton parcours</Text>
+            <Text style={styles.title}>Transforme-toi</Text>
+            <MotivationalScript style={styles.heroScript}>libère ton esprit.</MotivationalScript>
+            <Text style={styles.heroProgram} numberOfLines={2}>
+              {program?.name || "Un programme pensé pour ton rythme"}
+            </Text>
+          </View>
+          <View style={styles.heroProgress}>
+            <Text style={styles.heroProgressValue}>{programProgress}%</Text>
+            <Text style={styles.heroProgressLabel}>terminé</Text>
+          </View>
+        </View>
       </View>
 
       {/* Tabs */}
@@ -1378,9 +1395,17 @@ const GLASS_BORDER = "rgba(74,222,128,0.18)";
 const SHEET = "rgba(6,16,10,0.97)";
 
 const styles = StyleSheet.create({
-  header: { padding: spacing.lg, paddingBottom: spacing.md },
-  title: { fontSize: 28, fontWeight: "800", color: "#FFFFFF", letterSpacing: -0.6, marginTop: 4 },
-  content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
+  header: { minHeight: 300, padding: spacing.lg, paddingBottom: spacing.xl, justifyContent: "space-between" },
+  heroEyebrow: { ...typography.caption, color: "rgba(255,255,255,0.9)", fontWeight: "700" },
+  heroTitleRow: { flexDirection: "row", alignItems: "flex-end", gap: spacing.md },
+  heroCaption: { ...typography.body, color: "rgba(255,255,255,0.82)", marginBottom: 2 },
+  title: { fontSize: 34, lineHeight: 38, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0 },
+  heroProgram: { ...typography.small, color: "rgba(255,255,255,0.78)", marginTop: spacing.sm, maxWidth: 210 },
+  heroScript: { fontSize: 29, lineHeight: 33, marginTop: 2 },
+  heroProgress: { width: 82, height: 82, borderRadius: 41, borderWidth: 7, borderColor: colors.primaryLight, backgroundColor: "rgba(2,18,12,0.58)", alignItems: "center", justifyContent: "center" },
+  heroProgressValue: { fontSize: 22, fontWeight: "900", color: "#FFFFFF" },
+  heroProgressLabel: { fontSize: 9, color: "rgba(255,255,255,0.72)", marginTop: -2 },
+  content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: 130 },
   focusBadge: { width: 44, height: 44, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.18)", alignItems: "center", justifyContent: "center", marginRight: spacing.md },
   exerciseRow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" },
   recoBadge: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: "rgba(161,42,34,0.25)", borderRadius: radius.full, borderWidth: 1, borderColor: "#E58880" },
@@ -1412,10 +1437,10 @@ const styles = StyleSheet.create({
   perfRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" },
   // Tabs
   tabRow: { flexDirection: "row", gap: 6, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
-  tabChip: { flex: 1, paddingVertical: 8, alignItems: "center", borderRadius: radius.full, backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER },
+  tabChip: { flex: 1, minHeight: 38, paddingVertical: 9, alignItems: "center", borderRadius: radius.sm, backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER },
   tabChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   tabText: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.55)" },
-  tabTextActive: { color: "#FFFFFF" },
+  tabTextActive: { color: "#102108" },
   // History
   histDot: { width: 8, height: 8, borderRadius: 4 },
   // Timer overlay

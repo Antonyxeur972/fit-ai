@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from "react-native";
 import { ScreenBackground } from "@/src/components/ScreenBackground";
+import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
@@ -94,8 +95,15 @@ export default function ChallengesTab() {
   return (
     <ScreenBackground bg="challenges">
       <View style={styles.header}>
-        <Text style={typography.caption}>30 jours · à la maison</Text>
-        <Text style={styles.title}>Challenges</Text>
+        <View>
+          <Text style={styles.heroEyebrow}>Activités Outdoor</Text>
+          <Text style={styles.title}>Explore. Bouge.{"\n"}Respire.</Text>
+          <MotivationalScript style={styles.heroScript}>respire l&apos;aventure.</MotivationalScript>
+        </View>
+        <View style={styles.heroPill}>
+          <Ionicons name="trophy" size={16} color="#16210C" />
+          <Text style={styles.heroPillText}>{active.length || 0} défi{active.length === 1 ? "" : "s"} en cours</Text>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -226,9 +234,13 @@ export default function ChallengesTab() {
 }
 
 const styles = StyleSheet.create({
-  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.sm },
-  title: { fontSize: 30, fontWeight: "800", color: colors.textMain },
-  content: { paddingHorizontal: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.md },
+  header: { minHeight: 310, paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xl, justifyContent: "space-between" },
+  heroEyebrow: { fontSize: 22, fontWeight: "900", color: colors.textMain },
+  title: { fontSize: 32, lineHeight: 37, fontWeight: "900", color: colors.textMain, marginTop: spacing.sm, maxWidth: 245 },
+  heroScript: { fontSize: 26, lineHeight: 30, marginTop: spacing.sm },
+  heroPill: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.full, backgroundColor: colors.primaryLight },
+  heroPillText: { fontSize: 13, fontWeight: "900", color: "#16210C" },
+  content: { paddingHorizontal: spacing.lg, paddingBottom: 130, gap: spacing.md },
   activeChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 8, borderRadius: radius.full, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.primary },
   activeChipOn: { backgroundColor: colors.primary, borderColor: colors.primary },
   streakBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full, backgroundColor: colors.primary },
