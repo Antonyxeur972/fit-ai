@@ -1,6 +1,6 @@
 import { storage } from "@/src/utils/storage";
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+export const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "https://fit-ai-4ujg.onrender.com";
 export const API_URL = `${BACKEND_URL}/api`;
 
 const TOKEN_KEY = "fit_session_token";

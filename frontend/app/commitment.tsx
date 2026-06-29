@@ -745,7 +745,7 @@ function LandingMockup({
     >
       <View style={styles.mockupLayer}>
         <LinearGradient
-          colors={["rgba(104,146,160,0.98)", "rgba(104,146,160,0.80)", "rgba(104,146,160,0.00)"]}
+          colors={["rgba(112,154,169,1)", "rgba(112,154,169,0.96)", "rgba(112,154,169,0.00)"]}
           locations={[0, 0.62, 1]}
           pointerEvents="none"
           style={styles.mockupStatusMask}
@@ -766,9 +766,6 @@ function LandingMockup({
         {MOCKUP_TOUCH_AREAS.filter(isMockupTrainingArea).filter((area) => area.trainingDays === selectedTrainingDays).map((area) => (
           <View key={`selected-${area.id}`} pointerEvents="none" style={[styles.mockupSelectedArea, mockupAreaStyle(area)]} testID={`commitment-selected-${area.trainingDays}`}>
             <View style={styles.mockupSelectedInner} />
-            <View style={styles.mockupSelectedBadge}>
-              <Text style={styles.mockupSelectedText}>Sélectionné</Text>
-            </View>
           </View>
         ))}
       </View>
@@ -962,9 +959,9 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     borderWidth: 2,
     borderColor: "rgba(190,255,70,0.96)",
-    backgroundColor: "rgba(182,255,63,0.16)",
+    backgroundColor: "rgba(182,255,63,0.08)",
     shadowColor: "#B6FF3F",
-    shadowOpacity: 0.55,
+    shadowOpacity: 0.42,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 0 },
   },
@@ -975,31 +972,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.28)",
   },
-  mockupSelectedBadge: {
-    position: "absolute",
-    left: "12%",
-    right: "12%",
-    bottom: 10,
-    minHeight: 24,
-    borderRadius: 999,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "rgba(182,255,63,0.96)",
-  },
-  mockupSelectedText: {
-    color: "#0A1B0E",
-    fontSize: 10,
-    fontWeight: "800",
-    textTransform: "uppercase",
-    letterSpacing: 0.2,
-  },
-  mockupStatusMask: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: 0,
-    height: "7%",
-  },
+  mockupStatusMask: { position: "absolute", left: 0, right: 0, top: 0, height: 96 },
   background: { flex: 1, backgroundColor: "#06100B" },
   backgroundStatusMask: { position: "absolute", left: 0, right: 0, top: 0, height: 132 },
   backgroundImage: { transform: [{ scale: 1.02 }] },

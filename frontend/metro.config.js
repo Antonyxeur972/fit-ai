@@ -12,15 +12,18 @@ config.cacheStores = [
   new FileStore({ root: path.join(root, 'cache') }),
 ];
 
+const escapedProjectRoot = __dirname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const projectFolder = (folder) => new RegExp(`${escapedProjectRoot}\\/${folder}\\/.*`);
+
 config.resolver.blockList = exclusionList([
-  /.*\/\.metro-cache\/.*/,
-  /.*\/dist-preview\/.*/,
-  /.*\/web-build\/.*/,
-  /.*\/coverage\/.*/,
-  /.*\/android\/.*/,
-  /.*\/ios\/.*/,
-  /.*\/build\/.*/,
-  new RegExp(`${__dirname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/dist\\/.*`),
+  projectFolder('\\.metro-cache'),
+  projectFolder('dist-preview'),
+  projectFolder('web-build'),
+  projectFolder('coverage'),
+  projectFolder('android'),
+  projectFolder('ios'),
+  projectFolder('build'),
+  projectFolder('dist'),
 ]);
 
 
