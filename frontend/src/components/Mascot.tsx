@@ -1,5 +1,5 @@
 import { View } from "react-native";
-import Svg, { Path, Ellipse, Circle, G, Polygon } from "react-native-svg";
+import Svg, { Path, Ellipse, Circle, G, Polygon, Defs, LinearGradient, RadialGradient, Stop } from "react-native-svg";
 
 export type MascotAnimal = "lion" | "tigre" | "loup" | "ours" | "aigle";
 
@@ -12,9 +12,8 @@ export const MASCOT_LABELS: Record<MascotAnimal, string> = {
 };
 
 /**
- * Realistic green animal illustrations — full green palette only.
- * No white fills. Shading via dark/mid/light green tones.
- * 100×100 viewBox, stroke details for realism.
+ * Premium vector mascots.
+ * 100×100 viewBox, layered lighting + evolution details.
  */
 
 type Props = {
@@ -26,11 +25,12 @@ type Props = {
   background?: string;
 };
 
-// Green palette — all shades of green
 const G0 = "#05150A"; // near-black green (pupils, deep shadows)
 const G1 = "#082D12"; // darkest green (outlines, shadows)
 const G3 = "#56AF6A"; // light green (iris, highlights)
 const G4 = "#8EE49E"; // bright green (eye reflection)
+const A0 = "#35D6E8"; // cool energy accent
+const A1 = "#FFB33F"; // premium evolution accent
 
 type AP = { c: string; ev: number };
 
@@ -352,17 +352,46 @@ function Aigle({ c, ev }: AP) {
 
 export function Mascot({ animal, evolution = 1, size = 48, color = "#2D7C3E", background = "transparent", strokeWidth: _sw }: Props) {
   const ev = evolution as number;
+  const aura = `mascotAura-${animal}-${ev}-${String(color).replace(/[^a-zA-Z0-9]/g, "")}`;
+  const rim = `mascotRim-${animal}-${ev}-${String(color).replace(/[^a-zA-Z0-9]/g, "")}`;
   return (
     <View style={{ width: size, height: size }}>
       <Svg viewBox="0 0 100 100" width={size} height={size}>
+        <Defs>
+          <RadialGradient id={aura} cx="50%" cy="32%" rx="62%" ry="70%">
+            <Stop offset="0" stopColor={ev >= 3 ? A1 : ev >= 2 ? A0 : G4} stopOpacity={0.42} />
+            <Stop offset="0.58" stopColor={color} stopOpacity={0.18} />
+            <Stop offset="1" stopColor={G0} stopOpacity={0} />
+          </RadialGradient>
+          <LinearGradient id={rim} x1="18" y1="8" x2="82" y2="92">
+            <Stop offset="0" stopColor={ev >= 3 ? A1 : G4} stopOpacity={0.9} />
+            <Stop offset="0.52" stopColor={A0} stopOpacity={ev >= 2 ? 0.75 : 0.26} />
+            <Stop offset="1" stopColor={color} stopOpacity={0.7} />
+          </LinearGradient>
+        </Defs>
         {background !== "transparent" && (
           <Circle cx={50} cy={50} r={50} fill={background} />
         )}
-        {animal === "lion"   && <Lion   c={color} ev={ev} />}
-        {animal === "tigre"  && <Tigre  c={color} ev={ev} />}
-        {animal === "loup"   && <Loup   c={color} ev={ev} />}
-        {animal === "ours"   && <Ours   c={color} ev={ev} />}
-        {animal === "aigle"  && <Aigle  c={color} ev={ev} />}
+        <Circle cx={50} cy={50} r={49} fill={`url(#${aura})`} />
+        <Circle cx={50} cy={50} r={47} fill="rgba(5,21,10,0.18)" stroke={`url(#${rim})`} strokeWidth={ev >= 3 ? 2.6 : 1.6} />
+        <Ellipse cx={50} cy={91} rx={27} ry={4} fill={G0} opacity={0.28} />
+        <G transform={ev >= 2 ? "translate(0 -1)" : undefined}>
+          {animal === "lion"   && <Lion   c={color} ev={ev} />}
+          {animal === "tigre"  && <Tigre  c={color} ev={ev} />}
+          {animal === "loup"   && <Loup   c={color} ev={ev} />}
+          {animal === "ours"   && <Ours   c={color} ev={ev} />}
+          {animal === "aigle"  && <Aigle  c={color} ev={ev} />}
+        </G>
+        <Path d="M21,22 C33,8 67,8 79,22" stroke="#FFFFFF" strokeWidth={1.3} strokeLinecap="round" opacity={0.18} fill="none" />
+        {ev >= 2 && (
+          <Path d="M16,77 C31,88 69,88 84,77" stroke={A0} strokeWidth={1.8} strokeLinecap="round" opacity={0.55} fill="none" />
+        )}
+        {ev >= 3 && (
+          <G opacity={0.82}>
+            <Path d="M50,4 L54,13 L64,14 L56,20 L59,30 L50,24 L41,30 L44,20 L36,14 L46,13Z" fill={A1} />
+            <Circle cx={50} cy={18} r={2.4} fill={G4} opacity={0.8} />
+          </G>
+        )}
       </Svg>
     </View>
   );

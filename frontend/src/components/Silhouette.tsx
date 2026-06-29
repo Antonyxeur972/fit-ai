@@ -1,5 +1,5 @@
 import { View } from "react-native";
-import Svg, { Path, Defs, LinearGradient, Stop, Ellipse } from "react-native-svg";
+import Svg, { Path, Defs, LinearGradient, Stop, Ellipse, G } from "react-native-svg";
 
 /**
  * Stylized body silhouettes — 5 progression levels × 2 sexes.
@@ -34,34 +34,34 @@ type SilParams = {
 // Build a clean, symmetric humanoid silhouette path from a small set of body parameters.
 function buildSilhouette(p: SilParams): string {
   const { sH, cH, wH, hH, aO, aW, lA, gap, hr } = p;
-  const body = [
-    [50 + 4, 24], // neck R
-    [50 + sH, 28], // shoulder R
-    [50 + aO, 52], // elbow R
-    [50 + aW + 2, 94], // wrist R outer
-    [50 + aW - 2, 94], // wrist R inner
-    [50 + cH - 1, 56], // armpit R
-    [50 + wH, 78], // waist R
-    [50 + hH, 88], // hip R
-    [50 + hH - 1, 132], // thigh R
-    [50 + lA + gap, 160], // ankle R outer
-    [50 + gap, 160], // ankle R inner
-    [50 + gap, 100], // crotch up R
-    [50, 92], // crotch center
-    [50 - gap, 100], // crotch up L
-    [50 - gap, 160], // ankle L inner
-    [50 - lA - gap, 160], // ankle L outer
-    [50 - (hH - 1), 132], // thigh L
-    [50 - hH, 88], // hip L
-    [50 - wH, 78], // waist L
-    [50 - (cH - 1), 56], // armpit L
-    [50 - (aW - 2), 94], // wrist L inner
-    [50 - (aW + 2), 94], // wrist L outer
-    [50 - aO, 52], // elbow L
-    [50 - sH, 28], // shoulder L
-    [50 - 4, 24], // neck L
-  ];
-  const torso = `M${body.map(([x, y]) => `${x} ${y}`).join(" L")} Z`;
+  const torso = [
+    `M${50 + 4} 24`,
+    `C${50 + 9} 24 ${50 + sH - 3} 26 ${50 + sH} 29`,
+    `C${50 + aO - 1} 36 ${50 + aO + 2} 47 ${50 + aO} 54`,
+    `C${50 + aW + 5} 67 ${50 + aW + 5} 84 ${50 + aW + 2} 94`,
+    `C${50 + aW} 97 ${50 + aW - 3} 97 ${50 + aW - 2} 93`,
+    `C${50 + cH + 1} 69 ${50 + cH} 60 ${50 + cH - 1} 56`,
+    `C${50 + cH - 2} 66 ${50 + wH + 1} 73 ${50 + wH} 78`,
+    `C${50 + wH + 1} 84 ${50 + hH - 1} 87 ${50 + hH} 90`,
+    `C${50 + hH + 3} 105 ${50 + hH + 1} 123 ${50 + hH - 1} 132`,
+    `C${50 + hH - 3} 143 ${50 + lA + gap + 2} 153 ${50 + lA + gap} 160`,
+    `L${50 + gap} 160`,
+    `C${50 + gap + 2} 139 ${50 + gap + 3} 116 ${50 + gap} 101`,
+    `C${50 + 2} 96 ${50 + 1} 94 50 92`,
+    `C${50 - 1} 94 ${50 - 2} 96 ${50 - gap} 101`,
+    `C${50 - gap - 3} 116 ${50 - gap - 2} 139 ${50 - gap} 160`,
+    `L${50 - lA - gap} 160`,
+    `C${50 - lA - gap - 2} 153 ${50 - hH + 3} 143 ${50 - (hH - 1)} 132`,
+    `C${50 - hH - 1} 123 ${50 - hH - 3} 105 ${50 - hH} 90`,
+    `C${50 - hH + 1} 87 ${50 - wH - 1} 84 ${50 - wH} 78`,
+    `C${50 - wH - 1} 73 ${50 - cH + 2} 66 ${50 - (cH - 1)} 56`,
+    `C${50 - cH} 60 ${50 - cH - 1} 69 ${50 - (aW - 2)} 93`,
+    `C${50 - aW + 3} 97 ${50 - aW} 97 ${50 - (aW + 2)} 94`,
+    `C${50 - aW - 5} 84 ${50 - aW - 5} 67 ${50 - aO} 54`,
+    `C${50 - aO - 2} 47 ${50 - aO + 1} 36 ${50 - sH} 29`,
+    `C${50 - sH + 3} 26 ${50 - 9} 24 ${50 - 4} 24`,
+    "Z",
+  ].join(" ");
   const head = `M${50 + hr} 14 a${hr} ${hr} 0 1 0 ${-2 * hr} 0 a${hr} ${hr} 0 1 0 ${2 * hr} 0 Z`;
   return `${head} ${torso}`;
 }
@@ -114,25 +114,38 @@ export function Silhouette({
   const w = size;
   const h = size * 1.65;
   const fillId = `silhouetteGrad-${sex}-${clamped}-${active ? "on" : "off"}`;
-  const stroke = active ? "#2D7C3E" : "#7A7A75";
+  const glowId = `silhouetteGlow-${sex}-${clamped}-${active ? "on" : "off"}`;
+  const stroke = active ? "#35D6E8" : "#7A7A75";
   return (
     <View style={{ width: w, height: h }}>
       <Svg width={w} height={h} viewBox="0 0 100 170">
         <Defs>
           <LinearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={active ? "#A3DCB1" : "#D8D8D2"} stopOpacity="0.95" />
-            <Stop offset="1" stopColor={active ? "#2D7C3E" : "#9A9A95"} stopOpacity="0.95" />
+            <Stop offset="0" stopColor={active ? "#D7FFE4" : "#ECECE7"} stopOpacity="0.98" />
+            <Stop offset="0.48" stopColor={active ? "#7FE3A1" : "#C4C4BD"} stopOpacity="0.96" />
+            <Stop offset="1" stopColor={active ? "#1F7E50" : "#8B8B85"} stopOpacity="0.98" />
+          </LinearGradient>
+          <LinearGradient id={glowId} x1="12" y1="22" x2="88" y2="160">
+            <Stop offset="0" stopColor="#35D6E8" stopOpacity={active ? "0.78" : "0.18"} />
+            <Stop offset="0.6" stopColor="#8EEA2F" stopOpacity={active ? "0.54" : "0.12"} />
+            <Stop offset="1" stopColor="#FFB33F" stopOpacity={active ? "0.48" : "0.08"} />
           </LinearGradient>
         </Defs>
+        <Path d={d} fill={`url(#${glowId})`} opacity={active ? 0.18 : 0.08} transform="translate(0 2)" />
         <Path
           d={d}
           fill={`url(#${fillId})`}
           stroke={stroke}
-          strokeWidth={active ? 1.4 : 0.9}
+          strokeWidth={active ? 1.7 : 0.9}
           strokeLinejoin="round"
         />
+        <G opacity={active ? 0.42 : 0.16}>
+          <Path d="M50 30 C45 46 44 62 47 78" stroke="#FFFFFF" strokeWidth={1.1} strokeLinecap="round" fill="none" />
+          <Path d="M50 30 C55 46 56 62 53 78" stroke="#06120B" strokeWidth={0.9} strokeLinecap="round" fill="none" opacity={0.36} />
+          <Path d="M35 88 C42 94 58 94 65 88" stroke="#FFFFFF" strokeWidth={0.9} strokeLinecap="round" fill="none" />
+        </G>
         {/* Soft ground shadow */}
-        <Ellipse cx="50" cy="166" rx="18" ry="2.2" fill={active ? "#2D7C3E" : "#9A9A95"} opacity="0.15" />
+        <Ellipse cx="50" cy="166" rx="20" ry="2.4" fill={active ? "#35D6E8" : "#9A9A95"} opacity="0.18" />
       </Svg>
     </View>
   );

@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, Dimensions, Animated, PanResponder, Platform } from "react-native";
 import { ScreenBackground } from "@/src/components/ScreenBackground";
+import { MotivationalScript } from "@/src/components/MotivationalScript";
+import { HydrationCard } from "@/src/components/HydrationCard";
 import { useFocusEffect } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import DateTimePicker from "@react-native-community/datetimepicker";
@@ -129,11 +131,22 @@ export default function Progress() {
   return (
     <ScreenBackground bg="progress">
       <View style={styles.header}>
-        <Text style={typography.caption}>Progression</Text>
-        <Text style={styles.title}>Ton évolution</Text>
+        <View>
+          <Text style={styles.heroEyebrow}>Progression</Text>
+          <Text style={styles.title}>Ton évolution</Text>
+          <Text style={styles.heroSubtitle}>en un coup d&apos;œil</Text>
+          <MotivationalScript style={styles.heroScript}>chaque effort laisse une trace.</MotivationalScript>
+        </View>
+        <View style={styles.heroStats}>
+          <HeroMetric value={`${trend && trend.pct >= 0 ? "+" : ""}${Math.round(trend?.pct || 0)}%`} label="Force" />
+          <HeroMetric value={`${totalCardioMin}`} label="min cardio" />
+          <HeroMetric value={totalWeekSteps.toLocaleString("fr-FR")} label="pas" />
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <HydrationCard />
+
         {/* 1RM Progression — THE addictive number */}
         <Card testID="rm-card">
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm }}>
@@ -628,11 +641,27 @@ function DeltaSummary({ left, right }: { left?: Transfo; right?: Transfo }) {
   );
 }
 
+function HeroMetric({ value, label }: { value: string; label: string }) {
+  return (
+    <View style={styles.heroMetric}>
+      <Text style={styles.heroMetricValue} numberOfLines={1}>{value}</Text>
+      <Text style={styles.heroMetricLabel}>{label}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
 
-  header: { padding: spacing.lg, paddingBottom: spacing.md },
-  title: { fontSize: 28, fontWeight: "700", color: colors.textMain, letterSpacing: -0.6, marginTop: 4 },
-  content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
+  header: { minHeight: 310, padding: spacing.lg, paddingBottom: spacing.xl, justifyContent: "space-between" },
+  heroEyebrow: { ...typography.caption, color: "rgba(255,255,255,0.82)", fontWeight: "700" },
+  title: { fontSize: 34, lineHeight: 38, fontWeight: "900", color: colors.textMain, letterSpacing: 0, marginTop: 4 },
+  heroSubtitle: { ...typography.body, color: "rgba(255,255,255,0.82)", marginTop: 2 },
+  heroScript: { fontSize: 23, lineHeight: 28, marginTop: spacing.sm, maxWidth: 280 },
+  heroStats: { flexDirection: "row", alignItems: "stretch", padding: spacing.sm, backgroundColor: "rgba(2,18,13,0.58)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)", borderRadius: radius.md },
+  heroMetric: { flex: 1, alignItems: "center", justifyContent: "center", minWidth: 0, paddingHorizontal: 4 },
+  heroMetricValue: { fontSize: 20, fontWeight: "900", color: "#FFFFFF" },
+  heroMetricLabel: { fontSize: 10, color: "rgba(255,255,255,0.68)", marginTop: 2 },
+  content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: 130 },
   emptyIcon: { width: 56, height: 56, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center" },
   transfoImg: { width: 96, height: 128, borderRadius: radius.md, backgroundColor: colors.border },
   uploadingRow: { flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", paddingVertical: spacing.sm },

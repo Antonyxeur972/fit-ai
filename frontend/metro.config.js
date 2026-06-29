@@ -2,6 +2,7 @@
 const { getDefaultConfig } = require("expo/metro-config");
 const path = require('path');
 const { FileStore } = require('metro-cache');
+const exclusionList = require(path.join(__dirname, 'node_modules/metro-config/src/defaults/exclusionList.js')).default;
 
 const config = getDefaultConfig(__dirname);
 
@@ -10,6 +11,17 @@ const root = process.env.METRO_CACHE_ROOT || path.join(__dirname, '.metro-cache'
 config.cacheStores = [
   new FileStore({ root: path.join(root, 'cache') }),
 ];
+
+config.resolver.blockList = exclusionList([
+  /.*\/\.metro-cache\/.*/,
+  /.*\/dist-preview\/.*/,
+  /.*\/web-build\/.*/,
+  /.*\/coverage\/.*/,
+  /.*\/android\/.*/,
+  /.*\/ios\/.*/,
+  /.*\/build\/.*/,
+  new RegExp(`${__dirname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\/dist\\/.*`),
+]);
 
 
 // // Exclude unnecessary directories from file watching

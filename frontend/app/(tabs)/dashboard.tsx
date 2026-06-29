@@ -11,7 +11,10 @@ import { ShareCardModal } from "@/src/components/ShareCardModal";
 import { Mascot } from "@/src/components/Mascot";
 import { StrengthSymbol } from "@/src/components/StrengthSymbol";
 import { ScreenBackground } from "@/src/components/ScreenBackground";
+import { HydrationCard } from "@/src/components/HydrationCard";
+import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { quoteForToday } from "@/src/lib/motivation";
+import { syncPhoneStepsToday } from "@/src/lib/steps";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 const SPLIT_LABELS: Record<string, string> = {
@@ -50,6 +53,8 @@ export default function Dashboard() {
   const [stepsModal, setStepsModal] = useState(false);
   const [stepsInput, setStepsInput] = useState("");
   const [savingSteps, setSavingSteps] = useState(false);
+  const [syncingSteps, setSyncingSteps] = useState(false);
+  const [stepSyncMessage, setStepSyncMessage] = useState<string | null>(null);
   // Phase 5: points / share
   const [points, setPoints] = useState<{
     level: number;
@@ -106,6 +111,19 @@ export default function Dashboard() {
     }
   };
 
+  const syncSteps = async () => {
+    if (!data) return;
+    setSyncingSteps(true);
+    setStepSyncMessage(null);
+    try {
+      const result = await syncPhoneStepsToday(data.activity.steps);
+      setStepSyncMessage(result.message);
+      if (result.ok && (result.addedSteps || 0) > 0) await load();
+    } finally {
+      setSyncingSteps(false);
+    }
+  };
+
   if (!data) {
     return (
       <ScreenBackground bg="dashboard">
@@ -126,11 +144,14 @@ export default function Dashboard() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primaryLight} />}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.headerRow}>
-          <View>
-            <Text style={typography.caption}>{today}</Text>
-            <Text style={styles.hello}>Salut {user?.name?.split(" ")[0]}</Text>
-          </View>
+        <View style={styles.heroStage}>
+          <View style={styles.headerRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.heroDate}>{today}</Text>
+              <Text style={styles.hello}>Bonjour,{"\n"}{user?.name?.split(" ")[0]} !</Text>
+              <Text style={styles.heroSubtitle}>Prête à te dépasser aujourd&apos;hui ?</Text>
+              <MotivationalScript style={styles.heroScript}>déploie ton énergie.</MotivationalScript>
+            </View>
           {user?.mascot?.animal ? (
             <Mascot
               animal={user.mascot.animal}
@@ -143,10 +164,10 @@ export default function Dashboard() {
               <Ionicons name="leaf" size={20} color={colors.primary} />
             </View>
           )}
-        </View>
+          </View>
 
-        {/* Phase 5: Quote + Strength + Share */}
-        <Card style={styles.heroCard} testID="dashboard-hero-card">
+          {/* Phase 5: Quote + Strength + Share */}
+          <Card style={styles.heroCard} testID="dashboard-hero-card">
           <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
             <StrengthSymbol
               size={62}
@@ -175,7 +196,10 @@ export default function Dashboard() {
             testID="dashboard-share-button"
             style={{ marginTop: spacing.md }}
           />
-        </Card>
+          </Card>
+        </View>
+
+        <HydrationCard />
 
         {/* Calorie ring */}
         <Card style={{ alignItems: "center", paddingVertical: spacing.xl }} testID="dashboard-calorie-card">
@@ -317,18 +341,34 @@ export default function Dashboard() {
         {/* Activity quick */}
         <Card testID="dashboard-activity-card">
           <SectionTitle title="Activité" action={
-            <TouchableOpacity onPress={() => setStepsModal(true)} testID="dashboard-add-steps">
-              <View style={styles.addStepsBtn}>
-                <Ionicons name="add" size={16} color={colors.primary} />
-                <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Pas</Text>
-              </View>
-            </TouchableOpacity>
+            <View style={styles.activityActions}>
+              <TouchableOpacity onPress={syncSteps} disabled={syncingSteps} testID="dashboard-sync-steps">
+                <View style={[styles.addStepsBtn, styles.syncStepsBtn, syncingSteps && { opacity: 0.6 }]}>
+                  <Ionicons name="sync" size={15} color={colors.aqua} />
+                  <Text style={[typography.small, { color: colors.aqua, fontWeight: "800" }]}>
+                    {syncingSteps ? "..." : "Sync"}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setStepsModal(true)} testID="dashboard-add-steps">
+                <View style={styles.addStepsBtn}>
+                  <Ionicons name="add" size={16} color={colors.primary} />
+                  <Text style={[typography.small, { color: colors.primary, fontWeight: "800" }]}>Pas</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
           } />
           <View style={{ flexDirection: "row", justifyContent: "space-between" }}>
             <Stat label="Pas" value={data.activity.steps.toLocaleString("fr-FR")} testID="activity-steps" />
             <Stat label="Cardio" value={data.activity.cardio_minutes} unit="min" align="center" testID="activity-cardio" />
             <Stat label="Repas" value={data.meals_count} align="center" testID="activity-meals" />
           </View>
+          {stepSyncMessage ? (
+            <View style={styles.syncMessage} testID="steps-sync-message">
+              <Ionicons name="phone-portrait-outline" size={14} color={colors.aqua} />
+              <Text style={[typography.small, { color: colors.textSecondary, flex: 1 }]}>{stepSyncMessage}</Text>
+            </View>
+          ) : null}
         </Card>
 
         <View style={{ height: spacing.xl }} />
@@ -340,6 +380,18 @@ export default function Dashboard() {
             <View style={styles.modalHandle} />
             <Text style={styles.modalTitle}>Ajouter des pas</Text>
             <Text style={[typography.small, { marginTop: 4 }]}>Total actuel : {data.activity.steps.toLocaleString("fr-FR")} pas</Text>
+            <Button
+              title="Synchroniser depuis le téléphone"
+              onPress={syncSteps}
+              loading={syncingSteps}
+              variant="secondary"
+              style={{ marginTop: spacing.md }}
+              testID="steps-sync-phone"
+              icon={<Ionicons name="phone-portrait-outline" size={16} color={colors.primary} />}
+            />
+            {stepSyncMessage ? (
+              <Text style={[typography.small, { marginTop: spacing.sm, color: colors.textSecondary }]}>{stepSyncMessage}</Text>
+            ) : null}
             <TextInput
               value={stepsInput}
               onChangeText={(t) => setStepsInput(t.replace(/[^0-9]/g, ""))}
@@ -420,10 +472,14 @@ function WeekMacroStat({ label, value, target, unit }: { label: string; value: n
 }
 
 const styles = StyleSheet.create({
-  content: { padding: spacing.lg, gap: spacing.md, paddingBottom: spacing.xxl },
-  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.md },
-  heroCard: { gap: 0 },
-  hello: { fontSize: 26, fontWeight: "800", color: "#FFFFFF", letterSpacing: -0.5, marginTop: 2 },
+  content: { padding: spacing.lg, gap: spacing.md, paddingBottom: 130 },
+  heroStage: { minHeight: 390, justifyContent: "space-between", paddingTop: spacing.sm },
+  headerRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start" },
+  heroCard: { gap: 0, backgroundColor: "rgba(3,22,15,0.58)", borderColor: "rgba(255,255,255,0.18)" },
+  heroDate: { ...typography.caption, color: "rgba(255,255,255,0.84)", textTransform: "capitalize", fontWeight: "600" },
+  hello: { fontSize: 39, lineHeight: 41, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0, marginTop: spacing.sm, maxWidth: 220 },
+  heroSubtitle: { ...typography.body, color: "rgba(255,255,255,0.82)", marginTop: spacing.sm, maxWidth: 220, lineHeight: 21 },
+  heroScript: { fontSize: 25, lineHeight: 29, marginTop: spacing.sm, maxWidth: 245 },
   avatar: {
     width: 44, height: 44, borderRadius: radius.full,
     backgroundColor: "rgba(74,222,128,0.2)", borderWidth: 1, borderColor: "rgba(74,222,128,0.4)",
@@ -446,6 +502,17 @@ const styles = StyleSheet.create({
     flexDirection: "row", alignItems: "center", gap: 4,
     backgroundColor: "rgba(74,222,128,0.15)", borderWidth: 1, borderColor: "rgba(74,222,128,0.3)",
     paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.full,
+  },
+  activityActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  syncStepsBtn: { backgroundColor: "rgba(53,214,232,0.13)", borderColor: "rgba(53,214,232,0.34)" },
+  syncMessage: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: spacing.md,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
   },
   modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "flex-end" },
   modalCard: { backgroundColor: colors.surfaceSheet, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, borderWidth: 1, borderColor: colors.border },
