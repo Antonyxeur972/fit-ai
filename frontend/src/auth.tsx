@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback, ReactNode 
 import { Platform } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
-import { api, getToken, setToken, clearToken } from "./api";
+import { BACKEND_URL, api, getToken, setToken, clearToken } from "./api";
 
 export type MascotAnimal = "lion" | "tigre" | "loup" | "ours" | "aigle";
 
@@ -68,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Pre-warm the backend before the user clicks "Sign in"
   useEffect(() => {
-    fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/health`).catch(() => {});
+    fetch(`${BACKEND_URL}/api/health`).catch(() => {});
   }, []);
 
   // Process session_id from redirect URL: api retries x2 with backoff + clear error on start.
