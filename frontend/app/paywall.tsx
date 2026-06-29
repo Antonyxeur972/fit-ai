@@ -146,7 +146,7 @@ export default function Paywall() {
 
   return (
     <ImageBackground
-      source={require("../assets/images/fitai-signup-hero-main.png")}
+      source={require("../assets/images/fitai-hero-program-hd.png")}
       style={styles.background}
       imageStyle={styles.backgroundImage}
       resizeMode="cover"
