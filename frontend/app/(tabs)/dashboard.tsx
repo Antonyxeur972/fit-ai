@@ -340,7 +340,7 @@ export default function Dashboard() {
 
         {/* Activity quick */}
         <Card testID="dashboard-activity-card">
-          <SectionTitle title="Activité" action={
+          <SectionTitle title="Défi quotidien" action={
             <View style={styles.activityActions}>
               <TouchableOpacity onPress={syncSteps} disabled={syncingSteps} testID="dashboard-sync-steps">
                 <View style={[styles.addStepsBtn, styles.syncStepsBtn, syncingSteps && { opacity: 0.6 }]}>
@@ -500,7 +500,7 @@ const styles = StyleSheet.create({
   workoutTitle: { fontSize: 15, fontWeight: "600", color: "#FFFFFF" },
   addStepsBtn: {
     flexDirection: "row", alignItems: "center", gap: 4,
-    backgroundColor: "rgba(74,222,128,0.15)", borderWidth: 1, borderColor: "rgba(74,222,128,0.3)",
+    backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)",
     paddingHorizontal: 10, paddingVertical: 6, borderRadius: radius.full,
   },
   activityActions: { flexDirection: "row", alignItems: "center", gap: 8 },

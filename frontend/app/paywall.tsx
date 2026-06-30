@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ImageBackground, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Image, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -145,12 +145,8 @@ export default function Paywall() {
   };
 
   return (
-    <ImageBackground
-      source={require("../assets/images/fitai-hero-activities-hd.png")}
-      style={styles.background}
-      imageStyle={styles.backgroundImage}
-      resizeMode="cover"
-    >
+    <View style={styles.background}>
+      <Image source={require("../assets/images/fitai-hero-activities-hd.png")} style={styles.backgroundImage} resizeMode="cover" />
       <LinearGradient
         colors={["rgba(8,16,12,0.34)", "rgba(7,22,13,0.24)", "rgba(3,8,5,0.92)"]}
         locations={[0, 0.42, 1]}
@@ -315,13 +311,13 @@ export default function Paywall() {
           </Text>
         </ScrollView>
       </SafeAreaView>
-    </ImageBackground>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   background: { flex: 1, backgroundColor: "#06100B" },
-  backgroundImage: { transform: [{ scale: 1.02 }] },
+  backgroundImage: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%", transform: [{ scale: 1.02 }] },
   safe: { flex: 1 },
   content: { padding: spacing.lg, paddingBottom: spacing.xxl, gap: spacing.lg },
   brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.md },

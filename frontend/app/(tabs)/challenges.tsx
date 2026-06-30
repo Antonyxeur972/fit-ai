@@ -96,7 +96,7 @@ export default function ChallengesTab() {
     <ScreenBackground bg="challenges">
       <View style={styles.header}>
         <View>
-          <Text style={styles.heroEyebrow}>Activités Outdoor</Text>
+          <Text style={styles.heroEyebrow}>Défis Outdoor</Text>
           <Text style={styles.title}>Explore. Bouge.{"\n"}Respire.</Text>
           <MotivationalScript style={styles.heroScript}>respire l&apos;aventure.</MotivationalScript>
         </View>

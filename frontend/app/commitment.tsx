@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ImageBackground, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from "react-native";
 import type { ImageSourcePropType, ViewStyle } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -10,7 +10,6 @@ import { api } from "@/src/api";
 import { Button, ProgressRing } from "@/src/components/UI";
 import { PROGRAMS, type Freq, type Split } from "@/src/components/ProgramCarousel";
 import { markCommitmentSigned } from "@/src/lib/commitment";
-import { ensureNotifPermission } from "@/src/lib/notifications";
 import { colors, radius, spacing, typography } from "@/src/theme";
 
 type Step =
@@ -53,7 +52,7 @@ const STEPS: { key: Step; label: string; icon: keyof typeof Ionicons.glyphMap }[
   { key: "priority", label: "Objectif", icon: "compass-outline" },
   { key: "obstacles", label: "Freins", icon: "trail-sign-outline" },
   { key: "weight", label: "Poids", icon: "body-outline" },
-  { key: "activity", label: "Activité", icon: "walk-outline" },
+  { key: "activity", label: "Défi", icon: "flash-outline" },
   { key: "protein", label: "Protéines", icon: "nutrition-outline" },
   { key: "loading", label: "Analyse", icon: "leaf-outline" },
   { key: "diagnosis", label: "Diagnostic", icon: "pulse-outline" },
@@ -311,8 +310,6 @@ export default function CommitmentExperience() {
   const [loadingPhase, setLoadingPhase] = useState(0);
   const [loadingTarget, setLoadingTarget] = useState<Step>("diagnosis");
   const [loadingSource, setLoadingSource] = useState<Exclude<Step, "loading">>("protein");
-  const [notifBusy, setNotifBusy] = useState(false);
-  const [notifEnabled, setNotifEnabled] = useState(false);
   const holdStart = useRef<number | null>(null);
   const holdTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -452,17 +449,6 @@ export default function CommitmentExperience() {
     router.replace("/paywall");
   };
 
-  const enableNotifications = async () => {
-    if (notifBusy || notifEnabled) return;
-    setNotifBusy(true);
-    try {
-      const ok = await ensureNotifPermission();
-      setNotifEnabled(ok);
-    } finally {
-      setNotifBusy(false);
-    }
-  };
-
   if (step === "cadence") {
     return <LandingMockup selectedTrainingDays={trainingDays} onNext={next} onTrainingDays={setTrainingDays} />;
   }
@@ -470,7 +456,8 @@ export default function CommitmentExperience() {
   const backgroundSource = COMMITMENT_STEP_BACKGROUNDS[step];
 
   return (
-    <ImageBackground source={backgroundSource} style={styles.background} imageStyle={styles.backgroundImage} resizeMode="cover">
+    <View style={styles.background}>
+      <Image source={backgroundSource} style={styles.backgroundImage} resizeMode="cover" />
       <LinearGradient colors={["rgba(8,16,12,0.30)", "rgba(8,18,12,0.10)", "rgba(3,8,5,0.84)"]} locations={[0, 0.42, 1]} style={StyleSheet.absoluteFillObject} />
       <LinearGradient
         colors={["rgba(104,146,160,0.92)", "rgba(104,146,160,0.40)", "rgba(104,146,160,0.00)"]}
@@ -545,12 +532,13 @@ export default function CommitmentExperience() {
 
           {step === "activity" && (
             <>
-              <HeroBlock script="activité quotidienne" title="À quel point tu bouges déjà dans tes journées ?" subtitle="On ne parle pas seulement sport, mais aussi métier, marche, déplacements et rythme général." />
+              <HeroBlock script="défi quotidien" title="Quel niveau de défi ton quotidien impose déjà à ton corps ?" subtitle="On tient compte du sport, mais aussi de la marche, du travail, des déplacements et de la fatigue réelle de tes journées." />
               <View style={styles.luxuryPanel}>
-                <Text style={styles.sectionLabel}>{"Niveau d'activité"}</Text>
+                <Text style={styles.sectionLabel}>Défi de fond</Text>
+                <Text style={styles.helper}>On calibre le programme sur ton vrai terrain de jeu, pas sur une semaine idéale.</Text>
                 <View style={styles.optionStack}>
                   {ACTIVITY_OPTIONS.map((item) => (
-                    <ChoiceRow key={item.value} label={item.label} detail={`Facteur ${item.factor.toFixed(2)}`} icon="walk-outline" active={activityInput === item.value} onPress={() => setActivityInput(item.value)} />
+                    <ChoiceRow key={item.value} label={item.label} detail={`Charge quotidienne · facteur ${item.factor.toFixed(2)}`} icon="flash-outline" active={activityInput === item.value} onPress={() => setActivityInput(item.value)} />
                   ))}
                 </View>
               </View>
@@ -651,8 +639,8 @@ export default function CommitmentExperience() {
                 </View>
               </View>
               <View style={styles.sessionStack}>
-                {analysis.program.sessions.map((session) => (
-                  <SessionRow key={`${session.day}-${session.title}`} {...session} />
+                {analysis.program.sessions.map((session, index) => (
+                  <SessionRow key={`${session.day}-${session.title}`} index={index + 1} {...session} />
                 ))}
               </View>
               <View style={styles.panelSoft}>
@@ -665,26 +653,7 @@ export default function CommitmentExperience() {
                 {analysis.program.featureNotes.map((note) => (
                   <FeatureRow key={note} text={note} />
                 ))}
-                <View style={styles.notificationPrompt}>
-                  <View style={styles.notificationPromptIcon}>
-                    <Ionicons name={notifEnabled ? "checkmark-circle" : "notifications-outline"} size={18} color={notifEnabled ? "#071207" : colors.primaryLight} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.notificationPromptTitle}>{notifEnabled ? "Notifications prêtes" : "Activer mes notifications"}</Text>
-                    <Text style={styles.notificationPromptBody}>
-                      {notifEnabled
-                        ? "Tu pourras recevoir tes rappels de séances, motivation, protéines et hydratation."
-                        : "On te proposera des rappels de séances, de motivation, de protéines et d'hydratation pour rester dans le rythme."}
-                    </Text>
-                  </View>
-                </View>
-                <Button
-                  title={notifEnabled ? "Notifications activées" : "Activer mes rappels"}
-                  onPress={enableNotifications}
-                  loading={notifBusy}
-                  disabled={notifEnabled}
-                  icon={<Ionicons name={notifEnabled ? "checkmark-circle" : "notifications-outline"} size={16} color={notifEnabled ? "#071207" : colors.primaryLight} style={{ marginRight: 8 }} />}
-                />
+                <Text style={styles.featureFootnote}>Les autorisations de notifications sont proposées automatiquement pendant l’inscription pour lancer les rappels de séances, protéines et hydratation sans étape en plus.</Text>
               </View>
               <View style={styles.timeline}>
                 <TimelineRow moment="7 jours" title="Cadre posé" body="Calories, protéines, hydratation et premières séances deviennent lisibles." />
@@ -721,7 +690,7 @@ export default function CommitmentExperience() {
           )}
         </ScrollView>
       </SafeAreaView>
-    </ImageBackground>
+    </View>
   );
 }
 
@@ -737,12 +706,11 @@ function LandingMockup({
   const windowSize = useWindowDimensions();
 
   return (
-    <ImageBackground
-      source={require("../assets/images/fitai-signup-hero-main.png")}
+    <View
       style={[styles.mockupScreen, { width: windowSize.width, height: windowSize.height }]}
-      resizeMode="cover"
       testID="commitment-screen"
     >
+      <Image source={require("../assets/images/fitai-signup-hero-clean.png")} style={styles.mockupImage} resizeMode="cover" />
       <View style={styles.mockupLayer}>
         <LinearGradient
           colors={["rgba(112,154,169,1)", "rgba(112,154,169,0.96)", "rgba(112,154,169,0.00)"]}
@@ -769,7 +737,7 @@ function LandingMockup({
           </View>
         ))}
       </View>
-    </ImageBackground>
+    </View>
   );
 }
 
@@ -887,17 +855,32 @@ function InsightCard({ icon, title, value, body }: { icon: keyof typeof Ionicons
   );
 }
 
-function SessionRow({ day, title, focus }: { day: string; title: string; focus: string }) {
+function SessionRow({ day, title, focus, index }: { day: string; title: string; focus: string; index: number }) {
+  const icon: keyof typeof Ionicons.glyphMap = title.toLowerCase().includes("push")
+    ? "fitness-outline"
+    : title.toLowerCase().includes("pull")
+      ? "body-outline"
+      : title.toLowerCase().includes("leg") || title.toLowerCase().includes("jamb")
+        ? "walk-outline"
+        : title.toLowerCase().includes("core")
+          ? "leaf-outline"
+          : "barbell-outline";
   return (
     <View style={styles.sessionRow}>
       <View style={styles.sessionDay}>
         <Text style={styles.sessionDayText}>{day}</Text>
       </View>
       <View style={{ flex: 1 }}>
+        <View style={styles.sessionMetaRow}>
+          <View style={styles.sessionTag}>
+            <Ionicons name={icon} size={12} color="#122108" />
+            <Text style={styles.sessionTagText}>Séance {index}</Text>
+          </View>
+        </View>
         <Text style={styles.sessionTitle}>{title}</Text>
         <Text style={styles.sessionFocus}>{focus}</Text>
       </View>
-      <Ionicons name="chevron-forward" size={16} color="rgba(255,255,255,0.48)" />
+      <Ionicons name="chevron-forward" size={16} color="rgba(18,33,8,0.54)" />
     </View>
   );
 }
@@ -952,6 +935,7 @@ function InputCard({ label, value, unit, onChange, testID }: { label: string; va
 
 const styles = StyleSheet.create({
   mockupScreen: { flex: 1, backgroundColor: "#06100B" },
+  mockupImage: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%" },
   mockupLayer: { ...StyleSheet.absoluteFillObject },
   mockupTouchArea: { position: "absolute", borderRadius: 999 },
   mockupSelectedArea: {
@@ -974,29 +958,29 @@ const styles = StyleSheet.create({
   },
   mockupStatusMask: { position: "absolute", left: 0, right: 0, top: 0, height: 96 },
   background: { flex: 1, backgroundColor: "#06100B" },
-  backgroundStatusMask: { position: "absolute", left: 0, right: 0, top: 0, height: 132 },
-  backgroundImage: { transform: [{ scale: 1.02 }] },
+  backgroundStatusMask: { position: "absolute", left: 0, right: 0, top: 0, height: 112 },
+  backgroundImage: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%", transform: [{ scale: 1.02 }] },
   safe: { flex: 1 },
-  content: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: spacing.xxl, gap: spacing.lg },
-  brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingTop: spacing.sm },
+  content: { paddingHorizontal: spacing.lg, paddingTop: 0, paddingBottom: spacing.xxl, gap: spacing.md },
+  brandRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingTop: 2 },
   mark: { width: 58, height: 58, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.13)", borderWidth: 1.3, borderColor: "rgba(255,255,255,0.45)" },
   brand: { color: colors.textMain, fontSize: 29, lineHeight: 32, fontWeight: "800", letterSpacing: 0 },
   brandSub: { color: "rgba(255,255,255,0.72)", fontSize: 12.5, marginTop: 2, fontWeight: "400" },
   stepCount: { color: "rgba(255,255,255,0.88)", fontSize: 16, fontWeight: "600", letterSpacing: 0, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 999, backgroundColor: "rgba(38,48,52,0.40)" },
-  stepRail: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: spacing.sm, marginBottom: spacing.md, padding: 10, borderRadius: 999, borderWidth: 1, borderColor: "rgba(255,255,255,0.20)", backgroundColor: "rgba(229,235,220,0.22)" },
+  stepRail: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 6, marginBottom: spacing.sm, padding: 10, borderRadius: 999, borderWidth: 1, borderColor: "rgba(255,255,255,0.24)", backgroundColor: "rgba(229,235,220,0.28)" },
   stepRailItem: { width: 38, height: 38, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(80,92,90,0.45)" },
   stepRailItemActive: { backgroundColor: colors.primaryLight, shadowColor: colors.primaryLight, shadowOpacity: 0.6, shadowRadius: 14, shadowOffset: { width: 0, height: 0 } },
-  hero: { paddingTop: spacing.xl, gap: spacing.md },
+  hero: { paddingTop: spacing.sm, gap: 10 },
   scriptPill: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: 13, paddingVertical: 7, borderRadius: 999, backgroundColor: "rgba(12,29,12,0.52)", borderWidth: 1, borderColor: "rgba(182,255,63,0.16)" },
   script: { fontSize: 12, lineHeight: 15, color: "rgba(182,255,63,0.94)", fontWeight: "800", letterSpacing: 1.1, textTransform: "uppercase" },
-  title: { color: colors.textMain, fontSize: 38, lineHeight: 45, fontWeight: "800", letterSpacing: 0, textShadowColor: "rgba(0,0,0,0.42)", textShadowRadius: 14, textShadowOffset: { width: 0, height: 2 } },
+  title: { color: colors.textMain, fontSize: 36, lineHeight: 42, fontWeight: "800", letterSpacing: 0, textShadowColor: "rgba(0,0,0,0.42)", textShadowRadius: 14, textShadowOffset: { width: 0, height: 2 } },
   subtitle: { color: "rgba(255,255,255,0.84)", fontSize: 16, lineHeight: 25, fontWeight: "400", maxWidth: 620 },
   sectionLabel: { color: "rgba(182,255,63,0.94)", fontSize: 12, fontWeight: "900", textTransform: "uppercase", letterSpacing: 0.5 },
   question: { color: "rgba(255,255,255,0.94)", fontSize: 17, fontWeight: "800" },
   helper: { color: "rgba(255,255,255,0.66)", fontSize: 12.5, lineHeight: 18, marginTop: -4 },
-  luxuryPanel: { gap: spacing.md, padding: spacing.lg, borderRadius: 30, borderWidth: 1, borderColor: "rgba(255,255,255,0.26)", backgroundColor: "rgba(68,84,49,0.62)", shadowColor: "#000", shadowOpacity: 0.32, shadowRadius: 22, shadowOffset: { width: 0, height: 12 }, elevation: 10 },
-  panelSoft: { padding: spacing.lg, borderRadius: 28, borderWidth: 1, borderColor: "rgba(255,255,255,0.20)", backgroundColor: "rgba(72,90,50,0.62)" },
-  featurePanel: { gap: spacing.sm, padding: spacing.lg, borderRadius: 28, borderWidth: 1, borderColor: "rgba(255,255,255,0.20)", backgroundColor: "rgba(45,68,52,0.70)" },
+  luxuryPanel: { gap: spacing.md, padding: spacing.lg, borderRadius: 30, borderWidth: 1, borderColor: "rgba(255,255,255,0.28)", backgroundColor: "rgba(74,88,56,0.74)", shadowColor: "#000", shadowOpacity: 0.32, shadowRadius: 22, shadowOffset: { width: 0, height: 12 }, elevation: 10 },
+  panelSoft: { padding: spacing.lg, borderRadius: 28, borderWidth: 1, borderColor: "rgba(255,255,255,0.22)", backgroundColor: "rgba(72,90,50,0.74)" },
+  featurePanel: { gap: spacing.sm, padding: spacing.lg, borderRadius: 28, borderWidth: 1, borderColor: "rgba(255,255,255,0.22)", backgroundColor: "rgba(45,68,52,0.78)" },
   dayRow: { flexDirection: "row", gap: spacing.sm },
   dayChip: { flex: 1, minHeight: 84, borderRadius: 18, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)", backgroundColor: "rgba(255,255,255,0.05)" },
   dayChipOn: { borderColor: colors.primaryLight, backgroundColor: "rgba(182,255,63,0.15)" },
@@ -1032,7 +1016,7 @@ const styles = StyleSheet.create({
   mockupNextButton: { flex: 1, minHeight: 64, borderRadius: 999, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 14, backgroundColor: colors.primaryLight, shadowColor: colors.primaryLight, shadowOpacity: 0.35, shadowRadius: 18, shadowOffset: { width: 0, height: 8 } },
   mockupNextDisabled: { opacity: 0.42 },
   mockupNextText: { color: "#122108", fontSize: 18, fontWeight: "800" },
-  loadingPanel: { gap: spacing.lg, paddingVertical: spacing.xxl, paddingHorizontal: spacing.lg, borderRadius: 30, borderWidth: 1, borderColor: "rgba(255,255,255,0.24)", backgroundColor: "rgba(68,84,49,0.70)", alignItems: "center" },
+  loadingPanel: { gap: spacing.lg, paddingVertical: spacing.xxl, paddingHorizontal: spacing.lg, borderRadius: 30, borderWidth: 1, borderColor: "rgba(255,255,255,0.26)", backgroundColor: "rgba(68,84,49,0.78)", alignItems: "center" },
   loadingLeafWrap: { width: 140, height: 140, borderRadius: 70, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(182,255,63,0.05)", overflow: "hidden" },
   loadingGlow: { position: "absolute", inset: 18, borderRadius: 999, backgroundColor: "rgba(182,255,63,0.18)" },
   loadingLeafCore: { width: 80, height: 80, borderRadius: 40, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(7,18,12,0.82)", borderWidth: 1, borderColor: "rgba(182,255,63,0.20)" },
@@ -1062,20 +1046,20 @@ const styles = StyleSheet.create({
   recoveryPill: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderRadius: 16, backgroundColor: "rgba(53,214,232,0.10)", borderWidth: 1, borderColor: "rgba(53,214,232,0.24)" },
   recoveryText: { color: colors.textMain, flex: 1, fontWeight: "700" },
   sessionStack: { gap: spacing.sm },
-  sessionRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md, borderRadius: 22, borderWidth: 1, borderColor: "rgba(255,255,255,0.42)", backgroundColor: "rgba(247,245,231,0.90)" },
-  sessionDay: { width: 42, height: 42, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(53,214,232,0.12)", borderWidth: 1, borderColor: "rgba(53,214,232,0.22)" },
+  sessionRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md, borderRadius: 24, borderWidth: 1, borderColor: "rgba(255,255,255,0.48)", backgroundColor: "rgba(246,244,229,0.94)" },
+  sessionDay: { width: 46, height: 46, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(53,214,232,0.12)", borderWidth: 1, borderColor: "rgba(53,214,232,0.24)" },
   sessionDayText: { color: colors.aqua, fontWeight: "900", fontSize: 12 },
-  sessionTitle: { color: "#122108", fontWeight: "900" },
-  sessionFocus: { color: "rgba(24,36,20,0.60)", fontSize: 12, marginTop: 2 },
+  sessionMetaRow: { flexDirection: "row", alignItems: "center", marginBottom: 6 },
+  sessionTag: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: radius.full, backgroundColor: "rgba(162,198,101,0.20)", borderWidth: 1, borderColor: "rgba(132,165,79,0.28)" },
+  sessionTagText: { color: "#122108", fontSize: 11, fontWeight: "800" },
+  sessionTitle: { color: "#122108", fontWeight: "900", fontSize: 16 },
+  sessionFocus: { color: "rgba(24,36,20,0.68)", fontSize: 12.5, marginTop: 2, lineHeight: 17 },
   goalHeadline: { color: colors.textMain, fontSize: 22, lineHeight: 28, fontWeight: "600", marginTop: spacing.sm },
   objective: { ...typography.body, color: colors.textSecondary, lineHeight: 23, marginTop: spacing.sm },
   featureRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingVertical: 4 },
   featureDot: { width: 26, height: 26, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryLight },
   featureText: { color: colors.textMain, flex: 1, lineHeight: 19, fontWeight: "700" },
-  notificationPrompt: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, padding: spacing.md, borderRadius: 22, borderWidth: 1, borderColor: "rgba(182,255,63,0.24)", backgroundColor: "rgba(182,255,63,0.10)" },
-  notificationPromptIcon: { width: 34, height: 34, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(7,18,12,0.65)", borderWidth: 1, borderColor: "rgba(182,255,63,0.24)" },
-  notificationPromptTitle: { color: colors.textMain, fontSize: 15, fontWeight: "700" },
-  notificationPromptBody: { color: "rgba(255,255,255,0.66)", fontSize: 12.5, lineHeight: 18, marginTop: 3 },
+  featureFootnote: { color: "rgba(255,255,255,0.62)", fontSize: 12.5, lineHeight: 18, marginTop: 2 },
   timeline: { padding: spacing.lg, borderRadius: 28, borderWidth: 1, borderColor: "rgba(255,255,255,0.22)", backgroundColor: "rgba(68,84,49,0.62)" },
   timelineRow: { flexDirection: "row", gap: spacing.md },
   timelineRail: { alignItems: "center", width: 18 },

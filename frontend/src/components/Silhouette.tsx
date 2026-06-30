@@ -115,20 +115,20 @@ export function Silhouette({
   const h = size * 1.65;
   const fillId = `silhouetteGrad-${sex}-${clamped}-${active ? "on" : "off"}`;
   const glowId = `silhouetteGlow-${sex}-${clamped}-${active ? "on" : "off"}`;
-  const stroke = active ? "#35D6E8" : "#7A7A75";
+  const stroke = active ? "#7FDCA4" : "#8E9185";
   return (
     <View style={{ width: w, height: h }}>
       <Svg width={w} height={h} viewBox="0 0 100 170">
         <Defs>
           <LinearGradient id={fillId} x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0" stopColor={active ? "#D7FFE4" : "#ECECE7"} stopOpacity="0.98" />
-            <Stop offset="0.48" stopColor={active ? "#7FE3A1" : "#C4C4BD"} stopOpacity="0.96" />
-            <Stop offset="1" stopColor={active ? "#1F7E50" : "#8B8B85"} stopOpacity="0.98" />
+            <Stop offset="0" stopColor={active ? "#FFF8EE" : "#F1F0E9"} stopOpacity="0.98" />
+            <Stop offset="0.5" stopColor={active ? "#B5E2C4" : "#CACBC2"} stopOpacity="0.97" />
+            <Stop offset="1" stopColor={active ? "#4B8E67" : "#919287"} stopOpacity="0.98" />
           </LinearGradient>
           <LinearGradient id={glowId} x1="12" y1="22" x2="88" y2="160">
-            <Stop offset="0" stopColor="#35D6E8" stopOpacity={active ? "0.78" : "0.18"} />
-            <Stop offset="0.6" stopColor="#8EEA2F" stopOpacity={active ? "0.54" : "0.12"} />
-            <Stop offset="1" stopColor="#FFB33F" stopOpacity={active ? "0.48" : "0.08"} />
+            <Stop offset="0" stopColor="#FAE2B6" stopOpacity={active ? "0.72" : "0.18"} />
+            <Stop offset="0.6" stopColor="#9DE1BE" stopOpacity={active ? "0.48" : "0.12"} />
+            <Stop offset="1" stopColor="#7FC8D6" stopOpacity={active ? "0.34" : "0.08"} />
           </LinearGradient>
         </Defs>
         <Path d={d} fill={`url(#${glowId})`} opacity={active ? 0.18 : 0.08} transform="translate(0 2)" />
@@ -143,6 +143,10 @@ export function Silhouette({
           <Path d="M50 30 C45 46 44 62 47 78" stroke="#FFFFFF" strokeWidth={1.1} strokeLinecap="round" fill="none" />
           <Path d="M50 30 C55 46 56 62 53 78" stroke="#06120B" strokeWidth={0.9} strokeLinecap="round" fill="none" opacity={0.36} />
           <Path d="M35 88 C42 94 58 94 65 88" stroke="#FFFFFF" strokeWidth={0.9} strokeLinecap="round" fill="none" />
+          <Path d="M38 52 C42 49 46 48 50 48 C54 48 58 49 62 52" stroke="#FFFFFF" strokeWidth={0.9} strokeLinecap="round" fill="none" />
+          <Path d="M43 61 C45 66 46 71 46 78" stroke="#0E1710" strokeWidth={0.8} strokeLinecap="round" fill="none" opacity={0.28} />
+          <Path d="M57 61 C55 66 54 71 54 78" stroke="#0E1710" strokeWidth={0.8} strokeLinecap="round" fill="none" opacity={0.28} />
+          <Path d="M40 104 C44 101 47 100 50 100 C53 100 56 101 60 104" stroke="#FFFFFF" strokeWidth={0.8} strokeLinecap="round" fill="none" opacity={0.5} />
         </G>
         {/* Soft ground shadow */}
         <Ellipse cx="50" cy="166" rx="20" ry="2.4" fill={active ? "#35D6E8" : "#9A9A95"} opacity="0.18" />

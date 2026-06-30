@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ImageBackground } from "react-native";
+import { Image, View, Text, StyleSheet, TextInput, TouchableOpacity } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -12,7 +12,7 @@ import { SilhouettePicker } from "@/src/components/SilhouettePicker";
 import { MascotPicker } from "@/src/components/MascotPicker";
 import { MascotAnimal } from "@/src/components/Mascot";
 import { getOrStartPaywallOffer } from "@/src/lib/subscription";
-import { schedulePreSubscriptionNudges } from "@/src/lib/notifications";
+import { ensureNotifPermission, schedulePreSubscriptionNudges } from "@/src/lib/notifications";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type Step = 0 | 1 | 2 | 3 | 4 | 5 | 6;
@@ -127,6 +127,7 @@ export default function Onboarding() {
       } catch {}
       await refreshUser();
       try {
+        await ensureNotifPermission();
         const offer = await getOrStartPaywallOffer();
         await schedulePreSubscriptionNudges(offer.expiresAt, offer.revealedAt);
       } catch {}
@@ -139,12 +140,8 @@ export default function Onboarding() {
   };
 
   return (
-    <ImageBackground
-      source={require("../assets/images/fitai-hero-progress-hd.png")}
-      style={styles.background}
-      imageStyle={styles.backgroundImage}
-      resizeMode="cover"
-    >
+    <View style={styles.background}>
+      <Image source={require("../assets/images/fitai-hero-progress-hd.png")} style={styles.backgroundImage} resizeMode="cover" />
       <LinearGradient
         colors={["rgba(8,16,12,0.34)", "rgba(7,22,13,0.24)", "rgba(3,8,5,0.90)"]}
         locations={[0, 0.40, 1]}
@@ -169,10 +166,15 @@ export default function Onboarding() {
       >
         {step === 0 && (
           <>
-            <Text style={styles.title}>Salut {user?.name?.split(" ")[0] || ""}</Text>
+            <Text style={styles.title}>Transforme ton corps, libère ton potentiel.</Text>
             <Text style={styles.subtitle}>
-              On pose ici un profil précis, propre et exploitable pour que tout le reste garde la même cohérence.
+              On construit un programme sérieux, motivant et mesurable autour de ton niveau réel.
             </Text>
+            <View style={styles.benefitStack}>
+              <OnboardingBenefit icon="analytics-outline" title="Programme adapté à toi" />
+              <OnboardingBenefit icon="sparkles-outline" title="Suivi intelligent" />
+              <OnboardingBenefit icon="trophy-outline" title="Résultats mesurables" />
+            </View>
             <Card style={{ marginTop: spacing.lg }}>
               <Text style={[typography.caption, { marginBottom: spacing.md }]}>Genre</Text>
               <View style={styles.row}>
@@ -336,7 +338,7 @@ export default function Onboarding() {
           <Button title="Retour" onPress={prev} variant="secondary" style={{ flex: 1 }} testID="onboarding-back" />
         ) : null}
         <Button
-          title={step === STEPS_COUNT - 1 ? "Terminer & calculer" : "Continuer"}
+          title={step === 0 ? "Commencer" : step === STEPS_COUNT - 1 ? "Terminer & calculer" : "Continuer"}
           onPress={step === STEPS_COUNT - 1 ? submit : next}
           loading={submitting}
           style={{ flex: step > 0 ? 1.4 : 1 }}
@@ -344,7 +346,16 @@ export default function Onboarding() {
         />
       </View>
     </SafeAreaView>
-    </ImageBackground>
+    </View>
+  );
+}
+
+function OnboardingBenefit({ icon, title }: { icon: keyof typeof Ionicons.glyphMap; title: string }) {
+  return (
+    <View style={styles.benefitMini}>
+      <Ionicons name={icon} size={16} color={colors.primaryLight} />
+      <Text style={styles.benefitMiniText}>{title}</Text>
+    </View>
   );
 }
 
@@ -437,17 +448,20 @@ function LiftRow({
 
 const styles = StyleSheet.create({
   background: { flex: 1, backgroundColor: "#06100B" },
-  backgroundImage: { transform: [{ scale: 1.02 }] },
+  backgroundImage: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%", transform: [{ scale: 1.02 }] },
   safe: { flex: 1 },
-  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, gap: spacing.sm },
+  header: { paddingHorizontal: spacing.lg, paddingTop: 6, gap: spacing.sm },
   headerTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
   brand: { color: colors.textMain, fontSize: 20, fontWeight: "600", letterSpacing: 0.6 },
   headerStep: { color: "rgba(255,255,255,0.76)", fontSize: 12, fontWeight: "600" },
   progressTrack: { height: 8, backgroundColor: "rgba(255,255,255,0.16)", borderRadius: radius.full, overflow: "hidden" },
   progressFill: { height: "100%", backgroundColor: colors.primary, borderRadius: radius.full },
-  content: { padding: spacing.lg, paddingBottom: 120 },
-  title: { fontSize: 31, fontWeight: "600", color: colors.textMain, letterSpacing: 0, lineHeight: 36 },
+  content: { paddingHorizontal: spacing.lg, paddingTop: spacing.sm, paddingBottom: 120 },
+  title: { fontSize: 30, fontWeight: "600", color: colors.textMain, letterSpacing: 0, lineHeight: 34 },
   subtitle: { ...typography.body, color: "rgba(255,255,255,0.78)", marginTop: spacing.sm, lineHeight: 23 },
+  benefitStack: { gap: spacing.sm, marginTop: spacing.lg },
+  benefitMini: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 48, paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(182,255,63,0.20)", backgroundColor: "rgba(7,28,18,0.66)" },
+  benefitMiniText: { color: colors.textMain, fontWeight: "800", fontSize: 14 },
   row: { flexDirection: "row", gap: spacing.sm },
   choice: {
     flex: 1,

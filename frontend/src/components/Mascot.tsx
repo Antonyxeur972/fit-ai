@@ -33,6 +33,19 @@ const A0 = "#35D6E8"; // cool energy accent
 const A1 = "#FFB33F"; // premium evolution accent
 
 type AP = { c: string; ev: number };
+type MascotPalette = {
+  primary: string;
+  rim: string;
+  glow: string;
+};
+
+const PALETTES: Record<MascotAnimal, MascotPalette> = {
+  lion: { primary: "#B98C4C", rim: "#F1D08A", glow: "#F4C15B" },
+  tigre: { primary: "#C77C34", rim: "#FFD18B", glow: "#FFAB52" },
+  loup: { primary: "#8E989E", rim: "#D9E4EA", glow: "#9BC5D5" },
+  ours: { primary: "#87634B", rim: "#DDBA91", glow: "#D8A36C" },
+  aigle: { primary: "#D7E0E3", rim: "#FFF6CF", glow: "#F2C15A" },
+};
 
 // ─── LION ─────────────────────────────────────────────────────────────────────
 
@@ -352,21 +365,23 @@ function Aigle({ c, ev }: AP) {
 
 export function Mascot({ animal, evolution = 1, size = 48, color = "#2D7C3E", background = "transparent", strokeWidth: _sw }: Props) {
   const ev = evolution as number;
-  const aura = `mascotAura-${animal}-${ev}-${String(color).replace(/[^a-zA-Z0-9]/g, "")}`;
-  const rim = `mascotRim-${animal}-${ev}-${String(color).replace(/[^a-zA-Z0-9]/g, "")}`;
+  const palette = PALETTES[animal];
+  const baseColor = color === "#2D7C3E" ? palette.primary : color;
+  const aura = `mascotAura-${animal}-${ev}-${String(baseColor).replace(/[^a-zA-Z0-9]/g, "")}`;
+  const rim = `mascotRim-${animal}-${ev}-${String(baseColor).replace(/[^a-zA-Z0-9]/g, "")}`;
   return (
     <View style={{ width: size, height: size }}>
       <Svg viewBox="0 0 100 100" width={size} height={size}>
         <Defs>
           <RadialGradient id={aura} cx="50%" cy="32%" rx="62%" ry="70%">
-            <Stop offset="0" stopColor={ev >= 3 ? A1 : ev >= 2 ? A0 : G4} stopOpacity={0.42} />
-            <Stop offset="0.58" stopColor={color} stopOpacity={0.18} />
+            <Stop offset="0" stopColor={ev >= 3 ? A1 : ev >= 2 ? palette.glow : palette.rim} stopOpacity={0.46} />
+            <Stop offset="0.58" stopColor={baseColor} stopOpacity={0.22} />
             <Stop offset="1" stopColor={G0} stopOpacity={0} />
           </RadialGradient>
           <LinearGradient id={rim} x1="18" y1="8" x2="82" y2="92">
-            <Stop offset="0" stopColor={ev >= 3 ? A1 : G4} stopOpacity={0.9} />
-            <Stop offset="0.52" stopColor={A0} stopOpacity={ev >= 2 ? 0.75 : 0.26} />
-            <Stop offset="1" stopColor={color} stopOpacity={0.7} />
+            <Stop offset="0" stopColor={ev >= 3 ? A1 : palette.rim} stopOpacity={0.92} />
+            <Stop offset="0.52" stopColor={ev >= 2 ? palette.glow : palette.rim} stopOpacity={ev >= 2 ? 0.78 : 0.32} />
+            <Stop offset="1" stopColor={baseColor} stopOpacity={0.72} />
           </LinearGradient>
         </Defs>
         {background !== "transparent" && (
@@ -376,11 +391,11 @@ export function Mascot({ animal, evolution = 1, size = 48, color = "#2D7C3E", ba
         <Circle cx={50} cy={50} r={47} fill="rgba(5,21,10,0.18)" stroke={`url(#${rim})`} strokeWidth={ev >= 3 ? 2.6 : 1.6} />
         <Ellipse cx={50} cy={91} rx={27} ry={4} fill={G0} opacity={0.28} />
         <G transform={ev >= 2 ? "translate(0 -1)" : undefined}>
-          {animal === "lion"   && <Lion   c={color} ev={ev} />}
-          {animal === "tigre"  && <Tigre  c={color} ev={ev} />}
-          {animal === "loup"   && <Loup   c={color} ev={ev} />}
-          {animal === "ours"   && <Ours   c={color} ev={ev} />}
-          {animal === "aigle"  && <Aigle  c={color} ev={ev} />}
+          {animal === "lion"   && <Lion   c={baseColor} ev={ev} />}
+          {animal === "tigre"  && <Tigre  c={baseColor} ev={ev} />}
+          {animal === "loup"   && <Loup   c={baseColor} ev={ev} />}
+          {animal === "ours"   && <Ours   c={baseColor} ev={ev} />}
+          {animal === "aigle"  && <Aigle  c={baseColor} ev={ev} />}
         </G>
         <Path d="M21,22 C33,8 67,8 79,22" stroke="#FFFFFF" strokeWidth={1.3} strokeLinecap="round" opacity={0.18} fill="none" />
         {ev >= 2 && (

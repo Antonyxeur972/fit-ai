@@ -14,6 +14,7 @@ import { ProgramCarousel } from "@/src/components/ProgramCarousel";
 import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { colors, spacing, typography, radius } from "@/src/theme";
+import { PROGRAM_PRESETS, SCIENCE_NOTES, phaseForWeek, presetByGoal, weeklyAiAdvice } from "@/src/lib/programPresets";
 
 type Exercise = { name: string; sets: number; reps: string; rest_s: number; checked?: boolean; is_recommended?: boolean };
 type Workout = {
@@ -152,10 +153,10 @@ export default function Training() {
   const [expandedWeek, setExpandedWeek] = useState<number | null>(null);
   const [programSetupOpen, setProgramSetupOpen] = useState(false);
   const [setupWeeks, setSetupWeeks] = useState(8);
-  const [setupFreq, setSetupFreq] = useState<3 | 5 | 7>(5);
-  const [setupDays, setSetupDays] = useState<number[]>([0, 1, 2, 3, 4]);
+  const [setupFreq, setSetupFreq] = useState<2 | 3 | 4>(3);
+  const [setupDays, setSetupDays] = useState<number[]>([0, 2, 4]);
   const [setupSplit, setSetupSplit] = useState<"ppl" | "fullbody" | "split">("ppl");
-  const [setupGoal, setSetupGoal] = useState("Hypertrophie");
+  const [setupGoal, setSetupGoal] = useState("Masse");
   const [setupBlocks, setSetupBlocks] = useState<{ volume: number; puissance: number; force: number }>({ volume: 1, puissance: 1, force: 1 });
   const [creatingProgram, setCreatingProgram] = useState(false);
 
@@ -421,7 +422,7 @@ export default function Training() {
   const createProgram = async (overrides?: { goal_label?: string; frequency?: number; training_days?: number[]; split?: string; weeks?: number }) => {
     setCreatingProgram(true);
     try {
-      const dayDefaults: Record<number, number[]> = { 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4] };
+      const dayDefaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4] };
       const freq = overrides?.frequency ?? setupFreq;
       const created = await api<TrainingProgram>("/program/create", {
         method: "POST",
@@ -659,6 +660,8 @@ export default function Training() {
           travelBusy={travelBusy}
         />
 
+        <TrainingPulseCard program={program} />
+
         {/* Activity card */}
         <Card testID="activity-card">
           <SectionTitle title="Activité du jour" action={
@@ -766,8 +769,8 @@ export default function Training() {
           </Card>
         ) : !program ? (
           <ProgramCarousel
-            onSelectProgram={(goalLabel, freq, split) =>
-              createProgram({ goal_label: goalLabel, frequency: freq, split, weeks: 8 })
+            onSelectProgram={(goalLabel, freq, split, weeks) =>
+              createProgram({ goal_label: goalLabel, frequency: freq, split, weeks: weeks || presetByGoal(goalLabel).defaultWeeks })
             }
             loading={creatingProgram}
           />
@@ -786,6 +789,8 @@ export default function Training() {
                 <ProgramWeekCard
                   key={w.week_index}
                   week={w}
+                  totalWeeks={program.weeks_total}
+                  currentWeek={program.current_week}
                   isExpanded={expandedWeek === w.week_index}
                   isCurrent={program.current_week === w.week_index}
                   onToggle={() => setExpandedWeek(expandedWeek === w.week_index ? null : w.week_index)}
@@ -793,6 +798,7 @@ export default function Training() {
                 />
               ))}
             </View>
+            <SciencePanel />
           </View>
         )}
 
@@ -997,37 +1003,45 @@ export default function Training() {
             <ScrollView style={{ maxHeight: 540 }} keyboardShouldPersistTaps="handled">
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Objectif</Text>
               <View style={styles.setupOptionRow}>
-                {["Hypertrophie", "Force", "Perte de gras"].map((g) => (
+                {PROGRAM_PRESETS.map((preset) => (
                   <TouchableOpacity
-                    key={g}
-                    onPress={() => setSetupGoal(g)}
-                    style={[styles.setupOption, setupGoal === g && styles.setupOptionOn]}
-                    testID={`setup-goal-${g}`}
+                    key={preset.id}
+                    onPress={() => {
+                      setSetupGoal(preset.goalLabel);
+                      setSetupWeeks(preset.defaultWeeks);
+                      setSetupFreq(preset.defaultFrequency);
+                      setSetupSplit(preset.defaultSplit);
+                      const defaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4] };
+                      setSetupDays(defaults[preset.defaultFrequency]);
+                    }}
+                    style={[styles.setupOption, setupGoal === preset.goalLabel && styles.setupOptionOn]}
+                    testID={`setup-goal-${preset.id}`}
                   >
-                    <Text style={[styles.setupOptionLabel, setupGoal === g && styles.setupOptionLabelOn]}>{g}</Text>
+                    <Text style={[styles.setupOptionLabel, setupGoal === preset.goalLabel && styles.setupOptionLabelOn]}>{preset.goalLabel}</Text>
+                    <Text style={styles.setupOptionSub}>{preset.defaultWeeks} sem.</Text>
                   </TouchableOpacity>
                 ))}
               </View>
 
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Fréquence (jours / semaine)</Text>
               <View style={styles.setupOptionRow}>
-                {([3, 5, 7] as const).map((f) => (
+                {([2, 3, 4] as const).map((f) => (
                   <TouchableOpacity
                     key={f}
                     onPress={() => {
                       setSetupFreq(f);
-                      const defaults: Record<number, number[]> = { 3: [0, 2, 4], 5: [0, 1, 2, 3, 4], 7: [0, 1, 2, 3, 4, 5, 6] };
+                      const defaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4] };
                       setSetupDays(defaults[f]);
                     }}
                     style={[styles.setupOption, setupFreq === f && styles.setupOptionOn]}
                     testID={`setup-freq-${f}`}
                   >
-                    <Text style={[styles.setupOptionLabel, setupFreq === f && styles.setupOptionLabelOn]}>{f}j</Text>
-                    <Text style={styles.setupOptionSub}>
-                      {f === 3 ? "Light" : f === 5 ? "Optimal" : "Intensif"}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      <Text style={[styles.setupOptionLabel, setupFreq === f && styles.setupOptionLabelOn]}>{f}j</Text>
+                      <Text style={styles.setupOptionSub}>
+                        {f === 2 ? "Minimal" : f === 3 ? "Optimal" : "Ambitieux"}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
               </View>
 
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Jours d&apos;entraînement ({setupDays.length}/{setupFreq})</Text>
@@ -1075,7 +1089,7 @@ export default function Training() {
 
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Durée du programme</Text>
               <View style={styles.setupOptionRow}>
-                {[4, 8, 12, 16, 24].map((w) => (
+                {[6, 8, 10, 12].map((w) => (
                   <TouchableOpacity
                     key={w}
                     onPress={() => setSetupWeeks(w)}
@@ -1480,6 +1494,23 @@ const styles = StyleSheet.create({
   setupOptionLabel: { fontSize: 14, fontWeight: "700", color: "rgba(255,255,255,0.6)" },
   setupOptionLabelOn: { color: colors.primaryLight },
   setupOptionSub: { fontSize: 10, color: "rgba(255,255,255,0.38)", marginTop: 2 },
+  xpRing: { width: 68, height: 68, borderRadius: 34, borderWidth: 5, borderColor: colors.primaryLight, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(2,18,12,0.54)" },
+  xpValue: { color: "#FFFFFF", fontSize: 19, fontWeight: "900", lineHeight: 22 },
+  xpLabel: { color: colors.primaryLight, fontSize: 10, fontWeight: "900", marginTop: -1 },
+  pulseGrid: { flexDirection: "row", gap: spacing.sm },
+  pulseStat: { flex: 1, minHeight: 76, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.06)", alignItems: "center", justifyContent: "center", gap: 3 },
+  pulseValue: { color: colors.textMain, fontSize: 17, fontWeight: "900" },
+  pulseLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700" },
+  aiCoachBox: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.10)" },
+  aiCoachText: { color: colors.textSecondary, flex: 1, fontSize: 12.5, lineHeight: 18, fontWeight: "600" },
+  weekMetrics: { flexDirection: "row", gap: spacing.sm },
+  miniMetric: { flex: 1, borderRadius: radius.sm, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.06)", padding: spacing.sm },
+  miniMetricValue: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
+  miniMetricLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", marginTop: 2 },
+  scienceIcon: { width: 34, height: 34, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(53,214,232,0.14)" },
+  scienceRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm },
+  scienceDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.aqua, marginTop: 6 },
+  scienceText: { color: colors.textSecondary, flex: 1, fontSize: 12.5, lineHeight: 18 },
 });
 
 // ----- Helpers / sub-components -----
@@ -1584,16 +1615,82 @@ function ProgramSummaryCard({
   );
 }
 
+function TrainingPulseCard({ program }: { program: TrainingProgram | null }) {
+  const preset = presetByGoal(program?.goal_label);
+  const currentWeek = program?.current_week || 1;
+  const totalWeeks = program?.weeks_total || preset.defaultWeeks;
+  const completion = Math.min(100, Math.round((currentWeek / Math.max(1, totalWeeks)) * 100));
+  return (
+    <Card testID="training-pulse-card" style={{ gap: spacing.md }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md }}>
+        <View style={{ flex: 1 }}>
+          <Text style={[typography.caption, { color: colors.primaryLight, fontWeight: "900" }]}>AVENTURE FIT AI</Text>
+          <Text style={[typography.h3, { marginTop: 3 }]}>Ton plan s&apos;adapte à toi, pas l&apos;inverse.</Text>
+        </View>
+        <View style={styles.xpRing}>
+          <Text style={styles.xpValue}>+80</Text>
+          <Text style={styles.xpLabel}>XP</Text>
+        </View>
+      </View>
+      <View style={styles.pulseGrid}>
+        <PulseStat icon="flame-outline" label="Streak" value="1 j" />
+        <PulseStat icon="trophy-outline" label="Badge proche" value="7 j" />
+        <PulseStat icon="analytics-outline" label="Cycle" value={`${completion}%`} />
+      </View>
+      <View style={styles.aiCoachBox}>
+        <Ionicons name="sparkles-outline" size={16} color={colors.primaryLight} />
+        <Text style={styles.aiCoachText}>{weeklyAiAdvice(program?.weeks?.find((w) => w.week_index === currentWeek)?.session_type, currentWeek)}</Text>
+      </View>
+    </Card>
+  );
+}
+
+function PulseStat({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
+  return (
+    <View style={styles.pulseStat}>
+      <Ionicons name={icon} size={16} color={colors.primaryLight} />
+      <Text style={styles.pulseValue}>{value}</Text>
+      <Text style={styles.pulseLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function SciencePanel() {
+  return (
+    <Card testID="science-panel" style={{ gap: spacing.sm, marginTop: spacing.md }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+        <View style={styles.scienceIcon}>
+          <Ionicons name="flask-outline" size={16} color={colors.aqua} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[typography.body, { fontWeight: "900" }]}>Basé sur la science</Text>
+          <Text style={typography.small}>Repères courts, sans jargon.</Text>
+        </View>
+      </View>
+      {SCIENCE_NOTES.slice(0, 4).map((note) => (
+        <View key={note} style={styles.scienceRow}>
+          <View style={styles.scienceDot} />
+          <Text style={styles.scienceText}>{note}</Text>
+        </View>
+      ))}
+    </Card>
+  );
+}
+
 function ProgramWeekCard({
-  week, isExpanded, isCurrent, onToggle, onEditDay,
+  week, totalWeeks, currentWeek, isExpanded, isCurrent, onToggle, onEditDay,
 }: {
   week: ProgramWeek;
+  totalWeeks: number;
+  currentWeek: number;
   isExpanded: boolean;
   isCurrent: boolean;
   onToggle: () => void;
   onEditDay: (dayIndex: number) => void;
 }) {
   const palette = SESSION_COLOR[week.session_type] || SESSION_COLOR.volume;
+  const status = week.week_index < currentWeek ? "Terminée" : isCurrent ? "En cours" : "À venir";
+  const adherence = week.week_index < currentWeek ? 88 : isCurrent ? 68 : 0;
   return (
     <Card style={{ marginBottom: 0, borderLeftWidth: 4, borderLeftColor: palette.fg }} testID={`program-week-${week.week_index}`}>
       <TouchableOpacity onPress={onToggle} activeOpacity={0.7}>
@@ -1607,7 +1704,9 @@ function ProgramWeekCard({
                 </View>
               )}
             </View>
-            <Text style={typography.small}>{week.days.length} séances · {week.days.map((d) => d.focus).join(" · ")}</Text>
+            <Text style={typography.small}>
+              {status} · {phaseForWeek(totalWeeks, week.week_index)} · {week.days.length} séances
+            </Text>
           </View>
           <View style={[styles.weekTypePill, { backgroundColor: palette.bg, borderColor: palette.border }]}>
             <Text style={{ fontSize: 11, fontWeight: "700", color: palette.fg, textTransform: "uppercase" }}>{week.session_type}</Text>
@@ -1617,6 +1716,15 @@ function ProgramWeekCard({
       </TouchableOpacity>
       {isExpanded && (
         <View style={{ marginTop: spacing.md, gap: 6 }}>
+          <View style={styles.weekMetrics}>
+            <MiniMetric label="Adhérence" value={adherence ? `${adherence}%` : "À venir"} />
+            <MiniMetric label="Charge" value={week.week_index <= currentWeek ? "+2%" : "Planifié"} />
+            <MiniMetric label="Fatigue" value={isCurrent ? "Modérée" : week.week_index < currentWeek ? "OK" : "—"} />
+          </View>
+          <View style={styles.aiCoachBox}>
+            <Ionicons name="sparkles-outline" size={15} color={colors.primaryLight} />
+            <Text style={styles.aiCoachText}>{weeklyAiAdvice(week.session_type, week.week_index)}</Text>
+          </View>
           {week.days.map((d) => (
             <TouchableOpacity
               key={d.day_index}
@@ -1644,6 +1752,15 @@ function ProgramWeekCard({
         </View>
       )}
     </Card>
+  );
+}
+
+function MiniMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.miniMetric}>
+      <Text style={styles.miniMetricValue}>{value}</Text>
+      <Text style={styles.miniMetricLabel}>{label}</Text>
+    </View>
   );
 }
 
