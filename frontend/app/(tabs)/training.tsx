@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Platform, Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Platform, Alert, ImageBackground,
 } from "react-native";
+import type { ImageSourcePropType } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -83,6 +84,27 @@ const REST_DEFAULTS: Record<string, number> = {
   endurance: 45,
 };
 
+const EXERCISE_VISUALS: ImageSourcePropType[] = [
+  require("../../assets/images/fitai-bg-training.png"),
+  require("../../assets/images/fitai-hero-activities-hd.png"),
+  require("../../assets/images/fitai-hero-program-hd.png"),
+  require("../../assets/images/fitai-hero-dashboard-hd.png"),
+  require("../../assets/images/fitai-hero-progress-hd.png"),
+];
+
+function exerciseVisualFor(name: string, index: number) {
+  const lower = name.toLowerCase();
+  if (lower.includes("squat") || lower.includes("presse") || lower.includes("fente") || lower.includes("mollet")) return EXERCISE_VISUALS[2];
+  if (lower.includes("développé") || lower.includes("bench") || lower.includes("pompe") || lower.includes("traction")) return EXERCISE_VISUALS[0];
+  if (lower.includes("rowing") || lower.includes("tirage") || lower.includes("soulevé") || lower.includes("deadlift")) return EXERCISE_VISUALS[1];
+  if (lower.includes("gainage") || lower.includes("abdo") || lower.includes("yoga") || lower.includes("mobilité")) return EXERCISE_VISUALS[4];
+  return EXERCISE_VISUALS[index % EXERCISE_VISUALS.length];
+}
+
+function exercisePointsFor(ex: Exercise, index: number, reco: boolean) {
+  return 8 + Math.min(10, ex.sets * 2) + (reco ? 8 : 0) + (index < 3 ? 2 : 0);
+}
+
 // Phase 5 — C4: red-highlight AI-recommended exercises per session type.
 // Heuristic based on standard strength science: big compounds for Force,
 // explosive/plyo for Puissance, hypertrophy compounds + isolations for Volume.
@@ -132,6 +154,7 @@ export default function Training() {
   const [perfWeight, setPerfWeight] = useState("");
   const [perfReps, setPerfReps] = useState("");
   const [perfHistory, setPerfHistory] = useState<Perf[]>([]);
+  const [earnedExercisePoints, setEarnedExercisePoints] = useState<Record<string, number>>({});
 
   // Calendar / history state
   const [calMonth, setCalMonth] = useState<Date>(() => new Date());
@@ -587,6 +610,10 @@ export default function Training() {
         sets: 1,
       },
     });
+    const exerciseIndex = perfEx.workout.exercises.findIndex((item) => item.name === perfEx.exercise.name);
+    const reco = isRecommendedFor(perfEx.exercise.name, perfEx.workout.session_type);
+    const points = exercisePointsFor(perfEx.exercise, Math.max(0, exerciseIndex), reco);
+    setEarnedExercisePoints((prev) => ({ ...prev, [perfEx.exercise.name]: points }));
     // refresh history
     try {
       const r2 = await api<{ items: Perf[] }>(`/perf/recent?exercise=${encodeURIComponent(perfEx.exercise.name)}&limit=10`);
@@ -691,7 +718,13 @@ export default function Training() {
         {/* Today's workout */}
         {todayWorkout ? (
           <Card testID="today-workout-card">
-            <View style={styles.todayVisualWrap}>
+            <ImageBackground
+              source={exerciseVisualFor(todayWorkout.focus || todayWorkout.title, 0)}
+              style={styles.todayVisualWrap}
+              imageStyle={styles.todayVisualImage}
+              resizeMode="cover"
+            >
+              <View style={styles.todayVisualShade} />
               <View style={styles.todayVisualContent}>
                 <View style={styles.todayHeroTop}>
                   <View style={styles.todayHeroIcon}>
@@ -719,12 +752,17 @@ export default function Training() {
                     </View>
                   </View>
                   <View style={styles.timerBubble}>
-                    <Text style={styles.timerBubbleValue}>00:45</Text>
+                  <Text style={styles.timerBubbleValue}>00:45</Text>
                     <Text style={styles.timerBubbleLabel}>repos</Text>
                   </View>
                 </View>
+                <SessionPerformanceGraph
+                  completed={todayWorkout.completed}
+                  total={todayExercises.length}
+                  earnedPoints={todayExercises.reduce((sum, ex) => sum + (earnedExercisePoints[ex.name] || 0), 0)}
+                />
               </View>
-            </View>
+            </ImageBackground>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm }}>
               <Text style={typography.caption}>Séance du jour</Text>
               <View style={{ flexDirection: "row", gap: 8 }}>
@@ -746,25 +784,20 @@ export default function Training() {
             </View>
             {todayExercises.map((ex, i) => {
               const reco = isRecommendedFor(ex.name, todayWorkout?.session_type);
+              const points = exercisePointsFor(ex, i, reco);
+              const earned = earnedExercisePoints[ex.name] || (todayWorkout.completed ? points : 0);
               return (
-                <TouchableOpacity key={`${ex.name}-${i}`} style={styles.exerciseRow} onPress={() => openPerf(todayWorkout, ex)} testID={`exercise-${i}`} activeOpacity={0.7}>
-                  <View style={[styles.exerciseNum, reco && { backgroundColor: "#FBDDDB" }]}>
-                    <Text style={[typography.small, { color: reco ? "#A12A22" : colors.primary, fontWeight: "700" }]}>{i + 1}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                      <Text style={[typography.body, { fontWeight: "600", color: reco ? "#A12A22" : colors.textMain }]}>{ex.name}</Text>
-                      {reco && (
-                        <View style={styles.recoBadge}>
-                          <Ionicons name="flame" size={9} color="#A12A22" />
-                          <Text style={styles.recoBadgeTxt}>RECO IA</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={typography.small}>{ex.sets} × {ex.reps} · repos {ex.rest_s}s</Text>
-                  </View>
-                  <Ionicons name="add-circle-outline" size={22} color={reco ? "#A12A22" : colors.primary} />
-                </TouchableOpacity>
+                <ExerciseSessionCard
+                  key={`${ex.name}-${i}`}
+                  exercise={ex}
+                  index={i}
+                  recommended={reco}
+                  points={points}
+                  earnedPoints={earned}
+                  visual={exerciseVisualFor(ex.name, i)}
+                  onPress={() => openPerf(todayWorkout, ex)}
+                  testID={`exercise-${i}`}
+                />
               );
             })}
             <Button
@@ -1365,6 +1398,18 @@ export default function Training() {
               <Ionicons name="flash" size={22} color={colors.primary} />
             </View>
 
+            {perfEx && earnedExercisePoints[perfEx.exercise.name] ? (
+              <View style={styles.exerciseRewardToast} testID="perf-reward-toast">
+                <View style={styles.exerciseRewardIcon}>
+                  <Ionicons name="sparkles" size={18} color="#081207" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.exerciseRewardTitle}>Exercice validé</Text>
+                  <Text style={styles.exerciseRewardText}>+{earnedExercisePoints[perfEx.exercise.name]} points ajoutés à ta séance.</Text>
+                </View>
+              </View>
+            ) : null}
+
             <Button title="Enregistrer la perf" onPress={savePerf} style={{ marginTop: spacing.md }} testID="perf-save" />
 
             <Text style={[typography.caption, { marginTop: spacing.lg }]}>Historique</Text>
@@ -1645,15 +1690,21 @@ const styles = StyleSheet.create({
   },
   challengeRingValue: { color: colors.textMain, fontSize: 14, fontWeight: "900" },
   todayVisualWrap: {
-    minHeight: 240,
+    minHeight: 318,
     borderRadius: radius.lg,
     overflow: "hidden",
     marginBottom: spacing.md,
     borderWidth: 1,
-    borderColor: "rgba(182,255,63,0.18)",
+    borderColor: "rgba(182,255,63,0.28)",
     backgroundColor: "rgba(4,18,12,0.82)",
   },
-  todayVisualContent: { flex: 1, padding: spacing.lg, gap: spacing.md },
+  todayVisualImage: { opacity: 0.9, transform: [{ scale: 1.05 }] },
+  todayVisualShade: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(1,12,7,0.54)",
+    borderRadius: radius.lg,
+  },
+  todayVisualContent: { flex: 1, padding: spacing.lg, gap: spacing.md, justifyContent: "space-between" },
   todayHeroTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   todayHeroIcon: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(182,255,63,0.12)", borderWidth: 1, borderColor: "rgba(182,255,63,0.26)" },
   todayVisualEyebrow: { fontSize: 11, fontWeight: "900", color: colors.primaryLight, letterSpacing: 0.3 },
@@ -1671,6 +1722,112 @@ const styles = StyleSheet.create({
   timerBubble: { width: 72, height: 72, borderRadius: 36, borderWidth: 5, borderColor: colors.primaryLight, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(2,18,12,0.58)" },
   timerBubbleValue: { color: colors.textMain, fontSize: 16, fontWeight: "900" },
   timerBubbleLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "800", marginTop: -1 },
+  sessionGraphPanel: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.24)",
+    backgroundColor: "rgba(1,16,9,0.72)",
+  },
+  sessionGraphRing: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    borderWidth: 7,
+    borderColor: colors.primaryLight,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(2,18,12,0.72)",
+  },
+  sessionGraphRingValue: { color: colors.textMain, fontSize: 18, fontWeight: "900" },
+  sessionGraphRingLabel: { color: colors.textMuted, fontSize: 9.5, fontWeight: "800", marginTop: 1 },
+  sessionGraphTopLine: { flexDirection: "row", justifyContent: "space-between", gap: spacing.sm, alignItems: "flex-start" },
+  sessionGraphTitle: { color: colors.textMain, fontSize: 14, fontWeight: "900" },
+  sessionGraphText: { color: colors.textMuted, fontSize: 11.5, lineHeight: 16, marginTop: 2 },
+  sessionGraphXp: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: radius.full, backgroundColor: "rgba(182,255,63,0.12)", borderWidth: 1, borderColor: "rgba(182,255,63,0.24)" },
+  sessionGraphXpText: { color: colors.primaryLight, fontSize: 11, fontWeight: "900" },
+  sessionBars: { height: 54, flexDirection: "row", alignItems: "flex-end", gap: 6 },
+  sessionBar: { flex: 1, minWidth: 7, borderRadius: 7 },
+  exerciseLuxuryCard: {
+    minHeight: 132,
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: spacing.sm,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(5,22,14,0.74)",
+  },
+  exerciseLuxuryCardDone: {
+    borderColor: "rgba(182,255,63,0.42)",
+    backgroundColor: "rgba(21,56,25,0.62)",
+  },
+  exerciseThumb: {
+    width: 96,
+    borderRadius: radius.md,
+    overflow: "hidden",
+    justifyContent: "space-between",
+    padding: spacing.sm,
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  exerciseThumbImage: { borderRadius: radius.md, opacity: 0.86, transform: [{ scale: 1.12 }] },
+  exerciseThumbShade: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(2,12,8,0.24)" },
+  exerciseNumLuxury: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(182,255,63,0.88)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.42)",
+  },
+  exerciseNumReco: { backgroundColor: "rgba(255,179,63,0.92)" },
+  exerciseNumLuxuryText: { color: "#071207", fontSize: 13, fontWeight: "900" },
+  exerciseLuxuryBody: { flex: 1, justifyContent: "space-between", gap: spacing.sm, paddingVertical: 2 },
+  exerciseLuxuryHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: spacing.sm },
+  exerciseNameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  exerciseLuxuryName: { color: colors.textMain, fontSize: 15.5, fontWeight: "900", flexShrink: 1 },
+  exerciseLuxuryMeta: { color: colors.textSecondary, fontSize: 11.5, lineHeight: 16, marginTop: 3, fontWeight: "700" },
+  exercisePointPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.28)",
+    backgroundColor: "rgba(182,255,63,0.10)",
+  },
+  exercisePointPillDone: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
+  exercisePointText: { color: colors.primaryLight, fontSize: 11, fontWeight: "900" },
+  exercisePointTextDone: { color: "#081207" },
+  exerciseMicroStats: { flexDirection: "row", gap: 6 },
+  exerciseMicroStat: { flex: 1, minHeight: 44, borderRadius: radius.sm, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.055)", alignItems: "center", justifyContent: "center" },
+  exerciseMicroValue: { color: colors.textMain, fontSize: 12.5, fontWeight: "900" },
+  exerciseMicroLabel: { color: colors.textMuted, fontSize: 9.5, fontWeight: "800", marginTop: 1 },
+  exerciseLuxuryProgress: { height: 5, borderRadius: 3, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.12)" },
+  exerciseLuxuryProgressFill: { height: "100%", borderRadius: 3, backgroundColor: colors.primaryLight },
+  exerciseRewardToast: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.30)",
+    backgroundColor: "rgba(182,255,63,0.12)",
+  },
+  exerciseRewardIcon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryLight },
+  exerciseRewardTitle: { color: colors.textMain, fontSize: 14, fontWeight: "900" },
+  exerciseRewardText: { color: colors.textSecondary, fontSize: 12.5, lineHeight: 17, marginTop: 2 },
   weekMetrics: { flexDirection: "row", gap: spacing.sm },
   miniMetric: { flex: 1, borderRadius: radius.sm, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.06)", padding: spacing.sm },
   miniMetricValue: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
@@ -1905,6 +2062,133 @@ function RewardTile({ icon, label, value }: { icon: keyof typeof Ionicons.glyphM
       <Ionicons name={icon} size={18} color={colors.primaryLight} />
       <Text style={styles.rewardValue}>{value}</Text>
       <Text style={styles.rewardLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function ExerciseSessionCard({
+  exercise,
+  index,
+  recommended,
+  points,
+  earnedPoints,
+  visual,
+  onPress,
+  testID,
+}: {
+  exercise: Exercise;
+  index: number;
+  recommended: boolean;
+  points: number;
+  earnedPoints: number;
+  visual: ImageSourcePropType;
+  onPress: () => void;
+  testID: string;
+}) {
+  const completed = earnedPoints > 0;
+  const progress = completed ? 100 : Math.min(86, 28 + index * 11);
+  return (
+    <TouchableOpacity
+      style={[styles.exerciseLuxuryCard, completed && styles.exerciseLuxuryCardDone]}
+      onPress={onPress}
+      testID={testID}
+      activeOpacity={0.82}
+    >
+      <ImageBackground source={visual} style={styles.exerciseThumb} imageStyle={styles.exerciseThumbImage} resizeMode="cover">
+        <View style={styles.exerciseThumbShade} />
+        <View style={[styles.exerciseNumLuxury, recommended && styles.exerciseNumReco]}>
+          <Text style={styles.exerciseNumLuxuryText}>{index + 1}</Text>
+        </View>
+      </ImageBackground>
+
+      <View style={styles.exerciseLuxuryBody}>
+        <View style={styles.exerciseLuxuryHeader}>
+          <View style={{ flex: 1 }}>
+            <View style={styles.exerciseNameRow}>
+              <Text style={styles.exerciseLuxuryName} numberOfLines={1}>{exercise.name}</Text>
+              {recommended ? (
+                <View style={styles.recoBadge}>
+                  <Ionicons name="flame" size={9} color="#F87171" />
+                  <Text style={styles.recoBadgeTxt}>IA</Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.exerciseLuxuryMeta}>{exercise.sets} séries · {exercise.reps} reps · {exercise.rest_s}s repos</Text>
+          </View>
+          <View style={[styles.exercisePointPill, completed && styles.exercisePointPillDone]}>
+            <Ionicons name={completed ? "checkmark" : "star"} size={12} color={completed ? "#081207" : colors.primaryLight} />
+            <Text style={[styles.exercisePointText, completed && styles.exercisePointTextDone]}>
+              {completed ? `+${earnedPoints}` : `+${points}`}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.exerciseMicroStats}>
+          <View style={styles.exerciseMicroStat}>
+            <Text style={styles.exerciseMicroValue}>{exercise.sets}</Text>
+            <Text style={styles.exerciseMicroLabel}>séries</Text>
+          </View>
+          <View style={styles.exerciseMicroStat}>
+            <Text style={styles.exerciseMicroValue}>{exercise.reps}</Text>
+            <Text style={styles.exerciseMicroLabel}>cible</Text>
+          </View>
+          <View style={styles.exerciseMicroStat}>
+            <Text style={styles.exerciseMicroValue}>{Math.round(exercise.rest_s / 15) * 15}s</Text>
+            <Text style={styles.exerciseMicroLabel}>repos</Text>
+          </View>
+        </View>
+
+        <View style={styles.exerciseLuxuryProgress}>
+          <View style={[styles.exerciseLuxuryProgressFill, { width: `${progress}%` }]} />
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function SessionPerformanceGraph({
+  completed,
+  total,
+  earnedPoints,
+}: {
+  completed: boolean;
+  total: number;
+  earnedPoints: number;
+}) {
+  const done = completed ? total : Math.min(total, Math.max(1, Math.round(total * 0.42)));
+  const ratio = total > 0 ? Math.round((done / total) * 100) : 0;
+  return (
+    <View style={styles.sessionGraphPanel}>
+      <View style={styles.sessionGraphRing}>
+        <Text style={styles.sessionGraphRingValue}>{done}/{Math.max(1, total)}</Text>
+        <Text style={styles.sessionGraphRingLabel}>exercices</Text>
+      </View>
+      <View style={{ flex: 1, gap: 8 }}>
+        <View style={styles.sessionGraphTopLine}>
+          <View>
+            <Text style={styles.sessionGraphTitle}>Suivi de séance</Text>
+            <Text style={styles.sessionGraphText}>{completed ? "Séance complète. Coffre prêt." : "Objectif : valider série par série."}</Text>
+          </View>
+          <View style={styles.sessionGraphXp}>
+            <Ionicons name="sparkles" size={12} color={colors.primaryLight} />
+            <Text style={styles.sessionGraphXpText}>+{earnedPoints || 80} pts</Text>
+          </View>
+        </View>
+        <View style={styles.sessionBars}>
+          {[0.36, 0.62, 0.48, 0.78, 0.56, 0.88].map((height, index) => (
+            <View
+              key={`session-bar-${index}`}
+              style={[
+                styles.sessionBar,
+                {
+                  height: 12 + height * 34,
+                  backgroundColor: index < Math.ceil((ratio / 100) * 6) ? colors.primaryLight : "rgba(255,255,255,0.16)",
+                },
+              ]}
+            />
+          ))}
+        </View>
+      </View>
     </View>
   );
 }
