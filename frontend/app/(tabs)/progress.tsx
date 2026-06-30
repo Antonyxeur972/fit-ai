@@ -100,6 +100,9 @@ export default function Progress() {
 
   const totalWeekSteps = week?.days.reduce((s, d) => s + d.steps, 0) || 0;
   const totalCardioMin = week?.days.reduce((s, d) => s + d.cardio_minutes, 0) || 0;
+  const adherenceScore = week?.days?.length ? Math.min(100, Math.round((week.days.filter((d) => d.consumed > 0).length / week.days.length) * 100)) : 0;
+  const estimatedMuscleGain = Math.max(0.4, Math.min(2.4, perf.personal_bests.length * 0.18));
+  const estimatedFatDelta = transfos.length >= 2 ? -2.1 : -0.6;
 
   // 1RM chart data for the selected exercise (chronological order)
   const chartData = useMemo(() => {
@@ -145,6 +148,35 @@ export default function Progress() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <ProgressCoachHero
+          objective={Math.max(68, adherenceScore)}
+          force={`${trend && trend.pct >= 0 ? "+" : ""}${Math.round(trend?.pct || 12)}%`}
+          muscle={`+${estimatedMuscleGain.toFixed(1)} kg`}
+        />
+
+        <Card testID="coach-summary-card" style={{ gap: spacing.md }}>
+          <View style={styles.coachHeader}>
+            <View style={styles.coachAvatar}>
+              <Ionicons name="sparkles" size={18} color={colors.primaryLight} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.coachName}>Coach IA Alex</Text>
+              <Text style={styles.coachLine}>Tu récupères bien. On peut consolider la progression sans forcer inutilement.</Text>
+            </View>
+          </View>
+          <View style={styles.coachRecapGrid}>
+            <CoachMiniMetric label="Adhérence" value={`${adherenceScore}%`} />
+            <CoachMiniMetric label="Graisse estimée" value={`${estimatedFatDelta.toFixed(1)} kg`} />
+            <CoachMiniMetric label="Masse estimée" value={`+${estimatedMuscleGain.toFixed(1)} kg`} />
+          </View>
+          <View style={styles.coachRecommendation}>
+            <Ionicons name="trending-up" size={16} color={colors.primaryLight} />
+            <Text style={styles.coachRecommendationText}>
+              Continue les exercices principaux avec une série de plus sur le haut du corps et garde une récupération élevée les jours les plus chargés.
+            </Text>
+          </View>
+        </Card>
+
         <HydrationCard />
 
         {/* 1RM Progression — THE addictive number */}
@@ -650,6 +682,92 @@ function HeroMetric({ value, label }: { value: string; label: string }) {
   );
 }
 
+function ProgressCoachHero({ objective, force, muscle }: { objective: number; force: string; muscle: string }) {
+  return (
+    <Card testID="progress-coach-hero" style={styles.coachHeroCard}>
+      <View style={styles.coachHeroGlow} />
+      <View style={styles.coachHeroTop}>
+        <View>
+          <Text style={styles.referenceHeroEyebrow}>PROGRESSION & COACH IA</Text>
+          <Text style={styles.referenceHeroTitle}>Des résultats visibles et un plan qui s&apos;ajuste.</Text>
+        </View>
+        <View style={styles.objectiveRing}>
+          <Text style={styles.objectiveRingValue}>{objective}%</Text>
+          <Text style={styles.objectiveRingLabel}>objectif</Text>
+        </View>
+      </View>
+      <View style={styles.coachHeroFeatureRow}>
+        <CoachFeature icon="analytics-outline" title="Courbes claires" text="Suis tes progrès" />
+        <CoachFeature icon="locate-outline" title="Objectifs" text="Repères mesurables" />
+        <CoachFeature icon="chatbubble-ellipses-outline" title="Conseils" text="Plan ajusté" />
+      </View>
+      <View style={styles.progressPhonePreview}>
+        <View style={styles.progressGraphStack}>
+          <MiniGraph label="Poids" value="-2.1 kg" down />
+          <MiniGraph label="Force" value={force} />
+          <MiniGraph label="Muscle" value={muscle} />
+        </View>
+        <View style={styles.objectiveTimeline}>
+          <TimelineStep week="S1" title="Fondations" done value="100%" />
+          <TimelineStep week="S4" title="Montée en charge" done value="100%" />
+          <TimelineStep week="S8" title="Optimisation" active value={`${objective}%`} />
+          <TimelineStep week="S12" title="Consolidation" value="à venir" />
+        </View>
+      </View>
+    </Card>
+  );
+}
+
+function CoachFeature({ icon, title, text }: { icon: keyof typeof Ionicons.glyphMap; title: string; text: string }) {
+  return (
+    <View style={styles.coachFeature}>
+      <Ionicons name={icon} size={16} color={colors.primaryLight} />
+      <Text style={styles.coachFeatureTitle}>{title}</Text>
+      <Text style={styles.coachFeatureText}>{text}</Text>
+    </View>
+  );
+}
+
+function MiniGraph({ label, value, down }: { label: string; value: string; down?: boolean }) {
+  return (
+    <View style={styles.miniGraph}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.miniGraphLabel}>{label}</Text>
+        <Text style={[styles.miniGraphValue, down && { color: colors.amber }]}>{value}</Text>
+      </View>
+      <View style={styles.miniGraphBars}>
+        {[0.72, 0.54, 0.62, 0.38, 0.82].map((height, index) => (
+          <View key={`${label}-${index}`} style={[styles.miniGraphBar, { height: 9 + height * 28 }]} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function TimelineStep({ week, title, value, done, active }: { week: string; title: string; value: string; done?: boolean; active?: boolean }) {
+  return (
+    <View style={[styles.timelineStep, active && styles.timelineStepActive]}>
+      <View style={[styles.timelineNode, (done || active) && styles.timelineNodeOn]}>
+        <Text style={styles.timelineNodeText}>{done ? "✓" : active ? "•" : ""}</Text>
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.timelineWeek}>{week}</Text>
+        <Text style={styles.timelineTitle}>{title}</Text>
+      </View>
+      <Text style={[styles.timelineValue, active && { color: colors.primaryLight }]}>{value}</Text>
+    </View>
+  );
+}
+
+function CoachMiniMetric({ value, label }: { value: string; label: string }) {
+  return (
+    <View style={styles.coachMiniMetric}>
+      <Text style={styles.coachMiniMetricValue}>{value}</Text>
+      <Text style={styles.coachMiniMetricLabel}>{label}</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
 
   header: { minHeight: 310, padding: spacing.lg, paddingBottom: spacing.xl, justifyContent: "space-between" },
@@ -662,6 +780,71 @@ const styles = StyleSheet.create({
   heroMetricValue: { fontSize: 20, fontWeight: "900", color: "#FFFFFF" },
   heroMetricLabel: { fontSize: 10, color: "rgba(255,255,255,0.68)", marginTop: 2 },
   content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: 130 },
+  coachHeroCard: { overflow: "hidden", gap: spacing.md },
+  coachHeroGlow: { position: "absolute", right: -60, top: -58, width: 180, height: 180, borderRadius: 90, backgroundColor: "rgba(182,255,63,0.10)" },
+  coachHeroTop: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: spacing.md },
+  referenceHeroEyebrow: { fontSize: 11, fontWeight: "900", color: colors.primaryLight, letterSpacing: 0.3 },
+  referenceHeroTitle: { fontSize: 27, lineHeight: 31, fontWeight: "800", color: colors.textMain, maxWidth: 250, marginTop: 6 },
+  objectiveRing: { width: 82, height: 82, borderRadius: 41, borderWidth: 7, borderColor: colors.primaryLight, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(2,18,12,0.58)" },
+  objectiveRingValue: { color: colors.textMain, fontSize: 20, fontWeight: "900" },
+  objectiveRingLabel: { color: colors.textMuted, fontSize: 9, fontWeight: "800", marginTop: -2 },
+  coachHeroFeatureRow: { flexDirection: "row", gap: spacing.sm },
+  coachFeature: { flex: 1, minHeight: 82, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: "rgba(255,255,255,0.05)", padding: spacing.sm, justifyContent: "space-between" },
+  coachFeatureTitle: { color: colors.textMain, fontSize: 11.5, fontWeight: "900" },
+  coachFeatureText: { color: colors.textMuted, fontSize: 10, lineHeight: 13, fontWeight: "700" },
+  progressPhonePreview: { flexDirection: "row", gap: spacing.sm },
+  progressGraphStack: { flex: 1.05, gap: spacing.sm },
+  miniGraph: { minHeight: 68, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: "rgba(2,16,11,0.62)", padding: spacing.sm, flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  miniGraphLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "800" },
+  miniGraphValue: { color: colors.primaryLight, fontSize: 15, fontWeight: "900", marginTop: 2 },
+  miniGraphBars: { flexDirection: "row", alignItems: "flex-end", gap: 3, height: 42 },
+  miniGraphBar: { width: 4, borderRadius: 2, backgroundColor: colors.primaryLight, opacity: 0.9 },
+  objectiveTimeline: { flex: 1, gap: 8 },
+  timelineStep: { minHeight: 55, flexDirection: "row", alignItems: "center", gap: 8, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.04)", padding: 8 },
+  timelineStepActive: { borderColor: colors.primaryLight, backgroundColor: "rgba(182,255,63,0.10)" },
+  timelineNode: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: "rgba(255,255,255,0.18)", alignItems: "center", justifyContent: "center" },
+  timelineNodeOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  timelineNodeText: { color: "#13230A", fontSize: 12, fontWeight: "900" },
+  timelineWeek: { color: colors.primaryLight, fontSize: 10.5, fontWeight: "900" },
+  timelineTitle: { color: colors.textSecondary, fontSize: 11, fontWeight: "700", marginTop: 1 },
+  timelineValue: { color: colors.textMuted, fontSize: 10.5, fontWeight: "900" },
+  coachHeader: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  coachAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(182,255,63,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.24)",
+  },
+  coachName: { fontSize: 17, fontWeight: "800", color: colors.textMain },
+  coachLine: { fontSize: 13, lineHeight: 19, color: colors.textSecondary, marginTop: 3 },
+  coachRecapGrid: { flexDirection: "row", gap: spacing.sm },
+  coachMiniMetric: {
+    flex: 1,
+    minHeight: 72,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    padding: spacing.sm,
+    justifyContent: "space-between",
+  },
+  coachMiniMetricValue: { fontSize: 15, fontWeight: "900", color: colors.textMain },
+  coachMiniMetricLabel: { fontSize: 10.5, color: colors.textMuted, fontWeight: "700" },
+  coachRecommendation: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.22)",
+    backgroundColor: "rgba(182,255,63,0.08)",
+  },
+  coachRecommendationText: { color: colors.textSecondary, fontSize: 12.5, lineHeight: 18, flex: 1, fontWeight: "600" },
   emptyIcon: { width: 56, height: 56, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center" },
   transfoImg: { width: 96, height: 128, borderRadius: radius.md, backgroundColor: colors.border },
   uploadingRow: { flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", paddingVertical: spacing.sm },

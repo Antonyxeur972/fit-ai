@@ -36,6 +36,16 @@ const ACTIVITY_OPTIONS: { value: ActivityLevel; label: string; desc: string }[] 
   { value: "very_active", label: "Très actif", desc: "Athlète, métier physique" },
 ];
 
+const STEP_TITLES = [
+  "Départ intelligent",
+  "Tes mesures",
+  "Objectif principal",
+  "Ton rythme réel",
+  "Ta silhouette",
+  "Ta mascotte",
+  "Tes records",
+] as const;
+
 export default function Onboarding() {
   const router = useRouter();
   const { refreshUser, user } = useAuth();
@@ -166,6 +176,51 @@ export default function Onboarding() {
       >
         {step === 0 && (
           <>
+            <View style={styles.smartIntroCard}>
+              <View style={styles.introHalo} />
+              <View style={styles.referenceKicker}>
+                <Ionicons name="leaf-outline" size={14} color={colors.primaryLight} />
+                <Text style={styles.referenceKickerText}>INSCRIPTION INTELLIGENTE</Text>
+              </View>
+              <Text style={styles.referenceHeroTitle}>Un départ ultra simple, motivant et personnalisé.</Text>
+              <Text style={styles.referenceHeroSubtitle}>
+                On transforme tes réponses en plan, objectifs mesurables, rythme réaliste et premiers bonus de progression.
+              </Text>
+              <View style={styles.introFeatureRow}>
+                <SmartFeature icon="locate-outline" title="Personnalisé" body="Un plan adapté à toi" />
+                <SmartFeature icon="sparkles-outline" title="Intelligent" body="L'IA ajuste ton plan" />
+                <SmartFeature icon="trophy-outline" title="Motivant" body="XP, badges, défis" />
+              </View>
+              <View style={styles.phonePreview}>
+                <View style={styles.phonePreviewTop}>
+                  <View style={styles.phoneCamera} />
+                  <Text style={styles.phonePreviewStep}>1/7</Text>
+                </View>
+                <Text style={styles.phonePreviewTitle}>Transforme ton corps,</Text>
+                <Text style={styles.phonePreviewScript}>libère ton potentiel.</Text>
+                <View style={styles.phonePreviewStack}>
+                  <PhoneLine icon="calendar-outline" label="Plan adapté" />
+                  <PhoneLine icon="analytics-outline" label="Suivi intelligent" />
+                  <PhoneLine icon="ribbon-outline" label="Résultats concrets" />
+                </View>
+                <View style={styles.phonePreviewCta}>
+                  <Text style={styles.phonePreviewCtaText}>Commencer</Text>
+                  <Ionicons name="arrow-forward" size={16} color="#13230A" />
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.stepBadgeRow}>
+              <View style={styles.stepBadge}>
+                <Text style={styles.stepBadgeLabel}>Étape active</Text>
+                <Text style={styles.stepBadgeValue}>{STEP_TITLES[step]}</Text>
+              </View>
+              <View style={styles.stepReward}>
+                <Ionicons name="star" size={14} color={colors.primaryLight} />
+                <Text style={styles.stepRewardText}>Bienvenue +50 XP</Text>
+              </View>
+            </View>
+
             <Text style={styles.title}>Transforme ton corps, libère ton potentiel.</Text>
             <Text style={styles.subtitle}>
               On construit un programme sérieux, motivant et mesurable autour de ton niveau réel.
@@ -359,6 +414,27 @@ function OnboardingBenefit({ icon, title }: { icon: keyof typeof Ionicons.glyphM
   );
 }
 
+function SmartFeature({ icon, title, body }: { icon: keyof typeof Ionicons.glyphMap; title: string; body: string }) {
+  return (
+    <View style={styles.smartFeature}>
+      <View style={styles.smartFeatureIcon}>
+        <Ionicons name={icon} size={16} color={colors.primaryLight} />
+      </View>
+      <Text style={styles.smartFeatureTitle}>{title}</Text>
+      <Text style={styles.smartFeatureBody}>{body}</Text>
+    </View>
+  );
+}
+
+function PhoneLine({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+  return (
+    <View style={styles.phoneLine}>
+      <Ionicons name={icon} size={13} color={colors.primaryLight} />
+      <Text style={styles.phoneLineText}>{label}</Text>
+    </View>
+  );
+}
+
 function NumericField({
   label,
   value,
@@ -460,6 +536,73 @@ const styles = StyleSheet.create({
   title: { fontSize: 30, fontWeight: "600", color: colors.textMain, letterSpacing: 0, lineHeight: 34 },
   subtitle: { ...typography.body, color: "rgba(255,255,255,0.78)", marginTop: spacing.sm, lineHeight: 23 },
   benefitStack: { gap: spacing.sm, marginTop: spacing.lg },
+  smartIntroCard: {
+    minHeight: 340,
+    borderRadius: radius.lg,
+    overflow: "hidden",
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(6,18,12,0.72)",
+    padding: spacing.lg,
+  },
+  introHalo: { position: "absolute", right: -44, top: -56, width: 180, height: 180, borderRadius: 90, backgroundColor: "rgba(182,255,63,0.11)" },
+  referenceKicker: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: radius.full,
+    backgroundColor: "rgba(7,28,18,0.66)",
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.24)",
+  },
+  referenceKickerText: { fontSize: 11, fontWeight: "800", color: colors.primaryLight, letterSpacing: 0.3 },
+  referenceHeroTitle: { fontSize: 29, lineHeight: 33, fontWeight: "800", color: colors.textMain, maxWidth: 320, marginTop: spacing.md },
+  referenceHeroSubtitle: { fontSize: 14, lineHeight: 21, color: "rgba(255,255,255,0.78)", maxWidth: 320, marginTop: spacing.sm },
+  introFeatureRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg },
+  smartFeature: { flex: 1, minHeight: 92, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(182,255,63,0.18)", backgroundColor: "rgba(255,255,255,0.05)", padding: spacing.sm },
+  smartFeatureIcon: { width: 28, height: 28, borderRadius: radius.full, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(182,255,63,0.30)", backgroundColor: "rgba(182,255,63,0.10)", marginBottom: 8 },
+  smartFeatureTitle: { color: colors.textMain, fontSize: 12.5, fontWeight: "900" },
+  smartFeatureBody: { color: colors.textMuted, fontSize: 10.5, lineHeight: 14, marginTop: 2 },
+  phonePreview: { marginTop: spacing.lg, borderRadius: radius.lg, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(2,14,10,0.72)", padding: spacing.md },
+  phonePreviewTop: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm },
+  phoneCamera: { width: 52, height: 14, borderRadius: radius.full, backgroundColor: "rgba(0,0,0,0.55)" },
+  phonePreviewStep: { color: colors.textMuted, fontSize: 11, fontWeight: "800" },
+  phonePreviewTitle: { color: colors.textMain, fontSize: 20, fontWeight: "900", lineHeight: 23 },
+  phonePreviewScript: { color: colors.primaryLight, fontSize: 20, fontWeight: "900", fontStyle: "italic", lineHeight: 23 },
+  phonePreviewStack: { gap: 7, marginTop: spacing.md },
+  phoneLine: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 10, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.06)" },
+  phoneLineText: { color: colors.textSecondary, fontSize: 12, fontWeight: "700" },
+  phonePreviewCta: { marginTop: spacing.md, minHeight: 42, borderRadius: radius.full, backgroundColor: colors.primary, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  phonePreviewCtaText: { color: "#13230A", fontSize: 14, fontWeight: "900" },
+  stepBadgeRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.md },
+  stepBadge: {
+    flex: 1,
+    minHeight: 58,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.md,
+    justifyContent: "center",
+    backgroundColor: "rgba(7,20,15,0.82)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.15)",
+  },
+  stepBadgeLabel: { fontSize: 11, fontWeight: "700", color: "rgba(255,255,255,0.56)", textTransform: "uppercase" },
+  stepBadgeValue: { fontSize: 15, fontWeight: "700", color: colors.textMain, marginTop: 4 },
+  stepReward: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: radius.full,
+    backgroundColor: "rgba(182,255,63,0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.24)",
+  },
+  stepRewardText: { fontSize: 12, fontWeight: "700", color: colors.primaryLight },
   benefitMini: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 48, paddingHorizontal: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(182,255,63,0.20)", backgroundColor: "rgba(7,28,18,0.66)" },
   benefitMiniText: { color: colors.textMain, fontWeight: "800", fontSize: 14 },
   row: { flexDirection: "row", gap: spacing.sm },

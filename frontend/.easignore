@@ -1,0 +1,10 @@
+.expo/
+.metro-cache/
+dist/
+dist-*/
+web-build/
+live-preview/
+*.tsbuildinfo
+npm-debug.*
+yarn-debug.*
+yarn-error.*

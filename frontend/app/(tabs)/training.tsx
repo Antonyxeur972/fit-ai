@@ -604,6 +604,10 @@ export default function Training() {
   const programProgress = program?.weeks_total
     ? Math.min(100, Math.round(((program.current_week + 1) / program.weeks_total) * 100))
     : 0;
+  const completedSessions = week.filter((item) => item.completed).length;
+  const streakDays = Math.max(1, completedSessions + (todayWorkout?.completed ? 1 : 0));
+  const weeklyChallengeProgress = Math.min(100, Math.round((completedSessions / Math.max(1, program?.frequency || 3)) * 100));
+  const chestReady = todayWorkout?.completed || weeklyChallengeProgress >= 100;
 
   // Library grouped by category, used in editor
   const libByCategory = useMemo(() => {
@@ -662,6 +666,12 @@ export default function Training() {
 
         <TrainingPulseCard program={program} />
 
+        <RewardsRail
+          streakDays={streakDays}
+          weeklyChallengeProgress={weeklyChallengeProgress}
+          chestReady={chestReady}
+        />
+
         {/* Activity card */}
         <Card testID="activity-card">
           <SectionTitle title="Activité du jour" action={
@@ -681,6 +691,40 @@ export default function Training() {
         {/* Today's workout */}
         {todayWorkout ? (
           <Card testID="today-workout-card">
+            <View style={styles.todayVisualWrap}>
+              <View style={styles.todayVisualContent}>
+                <View style={styles.todayHeroTop}>
+                  <View style={styles.todayHeroIcon}>
+                    <Ionicons name="timer-outline" size={18} color={colors.primaryLight} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.todayVisualEyebrow}>SÉANCE DU JOUR</Text>
+                    <Text style={styles.todayVisualTitle}>{todayWorkout.focus}</Text>
+                  </View>
+                  <View style={styles.sessionXpBadge}>
+                    <Ionicons name="star" size={12} color={colors.primaryLight} />
+                    <Text style={styles.sessionXpText}>+80 XP</Text>
+                  </View>
+                </View>
+                <View style={styles.sessionGuideGrid}>
+                  <SessionGuideStat icon="repeat-outline" title="Swap" text="Remplace en un geste" />
+                  <SessionGuideStat icon="stopwatch-outline" title="Repos" text="Timer adapté" />
+                  <SessionGuideStat icon="sparkles-outline" title="IA" text="Feedback après série" />
+                </View>
+                <View style={styles.sessionProgressPanel}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.sessionProgressLabel}>Progression de la séance</Text>
+                    <View style={styles.sessionProgressTrack}>
+                      <View style={[styles.sessionProgressFill, { width: todayWorkout.completed ? "100%" : "28%" }]} />
+                    </View>
+                  </View>
+                  <View style={styles.timerBubble}>
+                    <Text style={styles.timerBubbleValue}>00:45</Text>
+                    <Text style={styles.timerBubbleLabel}>repos</Text>
+                  </View>
+                </View>
+              </View>
+            </View>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm }}>
               <Text style={typography.caption}>Séance du jour</Text>
               <View style={{ flexDirection: "row", gap: 8 }}>
@@ -1482,6 +1526,53 @@ const styles = StyleSheet.create({
   // Program
   progressBar: { height: 4, backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 2, overflow: "hidden", marginTop: spacing.sm },
   progressFill: { height: "100%", backgroundColor: colors.primary, borderRadius: 2 },
+  timelineRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: spacing.md },
+  timelineDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  timelineDotDone: { backgroundColor: "rgba(182,255,63,0.14)", borderColor: "rgba(182,255,63,0.28)" },
+  timelineDotActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  timelineDotText: { fontSize: 11, fontWeight: "800", color: "rgba(255,255,255,0.62)" },
+  timelineDotTextActive: { color: "#13230A" },
+  referenceMetricRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
+  referenceMetric: {
+    flex: 1,
+    minHeight: 68,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: GLASS_BORDER,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    padding: spacing.sm,
+    justifyContent: "space-between",
+  },
+  referenceMetricValue: { color: colors.textMain, fontSize: 14, fontWeight: "800" },
+  referenceMetricLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700" },
+  programNatureBand: {
+    height: 124,
+    margin: -spacing.lg,
+    marginBottom: spacing.lg,
+    overflow: "hidden",
+    backgroundColor: "rgba(182,255,63,0.08)",
+  },
+  programSun: { position: "absolute", right: 30, top: 20, width: 42, height: 42, borderRadius: 21, backgroundColor: "rgba(255,179,63,0.34)" },
+  programMountainBack: { position: "absolute", left: -20, bottom: 0, width: 220, height: 94, borderTopLeftRadius: 130, borderTopRightRadius: 130, backgroundColor: "rgba(53,214,232,0.14)", transform: [{ rotate: "-8deg" }] },
+  programMountainFront: { position: "absolute", right: -40, bottom: -4, width: 250, height: 108, borderTopLeftRadius: 150, borderTopRightRadius: 150, backgroundColor: "rgba(13,46,27,0.86)", transform: [{ rotate: "7deg" }] },
+  programTrail: { position: "absolute", left: 78, right: 76, bottom: 22, height: 4, borderRadius: 2, backgroundColor: "rgba(182,255,63,0.42)", transform: [{ rotate: "-10deg" }] },
+  programHiker: { position: "absolute", right: 76, bottom: 30, width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
+  phasePreviewStack: { gap: 8, marginTop: spacing.md },
+  phasePreview: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 58, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.05)", padding: spacing.sm },
+  phaseAccent: { width: 4, alignSelf: "stretch", borderRadius: 2 },
+  phasePreviewLabel: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
+  phasePreviewWeeks: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700", marginTop: 2 },
+  sparkline: { flexDirection: "row", alignItems: "flex-end", gap: 3, height: 34 },
+  sparkBar: { width: 4, borderRadius: 2, opacity: 0.9 },
   currentBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full },
   weekTypePill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.full, borderWidth: 1 },
   programDayRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: GLASS_BORDER },
@@ -1503,6 +1594,83 @@ const styles = StyleSheet.create({
   pulseLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700" },
   aiCoachBox: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.10)" },
   aiCoachText: { color: colors.textSecondary, flex: 1, fontSize: 12.5, lineHeight: 18, fontWeight: "600" },
+  rewardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
+  rewardEyebrow: { fontSize: 11, fontWeight: "900", color: colors.primaryLight, letterSpacing: 0.3 },
+  rewardCrown: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(182,255,63,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.24)",
+  },
+  rewardGrid: { flexDirection: "row", gap: spacing.sm },
+  rewardTile: {
+    flex: 1,
+    minHeight: 82,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: GLASS_BORDER,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    padding: spacing.sm,
+  },
+  rewardValue: { color: colors.textMain, fontSize: 15, fontWeight: "900" },
+  rewardLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700" },
+  challengeBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.22)",
+    backgroundColor: "rgba(182,255,63,0.08)",
+  },
+  challengeTitle: { color: colors.textMain, fontSize: 14, fontWeight: "800" },
+  challengeText: { color: colors.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: 4 },
+  challengeRing: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 4,
+    borderColor: colors.primaryLight,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(4,14,9,0.72)",
+  },
+  challengeRingValue: { color: colors.textMain, fontSize: 14, fontWeight: "900" },
+  todayVisualWrap: {
+    minHeight: 240,
+    borderRadius: radius.lg,
+    overflow: "hidden",
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.18)",
+    backgroundColor: "rgba(4,18,12,0.82)",
+  },
+  todayVisualContent: { flex: 1, padding: spacing.lg, gap: spacing.md },
+  todayHeroTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  todayHeroIcon: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(182,255,63,0.12)", borderWidth: 1, borderColor: "rgba(182,255,63,0.26)" },
+  todayVisualEyebrow: { fontSize: 11, fontWeight: "900", color: colors.primaryLight, letterSpacing: 0.3 },
+  todayVisualTitle: { fontSize: 25, lineHeight: 29, fontWeight: "800", color: colors.textMain, maxWidth: 240 },
+  sessionXpBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 6, borderRadius: radius.full, backgroundColor: "rgba(182,255,63,0.12)", borderWidth: 1, borderColor: "rgba(182,255,63,0.24)" },
+  sessionXpText: { color: colors.primaryLight, fontSize: 11, fontWeight: "900" },
+  sessionGuideGrid: { flexDirection: "row", gap: spacing.sm },
+  sessionGuideStat: { flex: 1, minHeight: 86, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.05)", padding: spacing.sm, justifyContent: "space-between" },
+  sessionGuideTitle: { color: colors.textMain, fontSize: 12.5, fontWeight: "900" },
+  sessionGuideText: { color: colors.textMuted, fontSize: 10.5, lineHeight: 14 },
+  sessionProgressPanel: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md, borderRadius: radius.md, backgroundColor: "rgba(0,0,0,0.22)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  sessionProgressLabel: { color: colors.textSecondary, fontSize: 12, fontWeight: "800", marginBottom: 8 },
+  sessionProgressTrack: { height: 8, borderRadius: 4, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.12)" },
+  sessionProgressFill: { height: "100%", borderRadius: 4, backgroundColor: colors.primaryLight },
+  timerBubble: { width: 72, height: 72, borderRadius: 36, borderWidth: 5, borderColor: colors.primaryLight, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(2,18,12,0.58)" },
+  timerBubbleValue: { color: colors.textMain, fontSize: 16, fontWeight: "900" },
+  timerBubbleLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "800", marginTop: -1 },
   weekMetrics: { flexDirection: "row", gap: spacing.sm },
   miniMetric: { flex: 1, borderRadius: radius.sm, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.06)", padding: spacing.sm },
   miniMetricValue: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
@@ -1568,7 +1736,16 @@ function ProgramSummaryCard({
   }
   const isTravel = (program as any).is_travel === true;
   return (
-    <Card testID="program-summary-card" style={{ borderColor: isTravel ? "#A85B0F" : colors.primary, borderWidth: 1.5 }}>
+    <Card testID="program-summary-card" style={{ borderColor: isTravel ? "#A85B0F" : colors.primary, borderWidth: 1.5, overflow: "hidden" }}>
+      <View style={styles.programNatureBand}>
+        <View style={styles.programSun} />
+        <View style={styles.programMountainBack} />
+        <View style={styles.programMountainFront} />
+        <View style={styles.programTrail} />
+        <View style={styles.programHiker}>
+          <Ionicons name="walk" size={18} color="#13230A" />
+        </View>
+      </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
         <View style={[styles.focusBadge, { backgroundColor: isTravel ? "#FCE3CB" : colors.primaryPale }]}>
           <Ionicons name={isTravel ? "airplane" : "rocket"} size={20} color={isTravel ? "#A85B0F" : colors.primary} />
@@ -1585,6 +1762,35 @@ function ProgramSummaryCard({
       </View>
       <View style={styles.progressBar}>
         <View style={[styles.progressFill, { width: `${Math.min(100, (program.current_week / program.weeks_total) * 100)}%`, backgroundColor: isTravel ? "#A85B0F" : colors.primary }]} />
+      </View>
+      <View style={styles.timelineRow}>
+        {Array.from({ length: program.weeks_total }).map((_, index) => {
+          const weekIndex = index + 1;
+          const active = weekIndex === program.current_week;
+          const done = weekIndex < program.current_week;
+          return (
+            <View
+              key={`timeline-${weekIndex}`}
+              style={[
+                styles.timelineDot,
+                done && styles.timelineDotDone,
+                active && styles.timelineDotActive,
+              ]}
+            >
+              <Text style={[styles.timelineDotText, active && styles.timelineDotTextActive]}>{weekIndex}</Text>
+            </View>
+          );
+        })}
+      </View>
+      <View style={styles.referenceMetricRow}>
+        <ReferenceMetric label="Phase" value={phaseForWeek(program.weeks_total, program.current_week)} />
+        <ReferenceMetric label="Rythme" value={`${program.frequency} séances`} />
+        <ReferenceMetric label="Plan" value={program.split.toUpperCase()} />
+      </View>
+      <View style={styles.phasePreviewStack}>
+        <PhasePreview label="Volume" weeks="Sem. 1 à 4" accent={colors.primaryLight} />
+        <PhasePreview label="Force" weeks="Sem. 5 à 8" accent={colors.aqua} />
+        <PhasePreview label="Consolidation" weeks="Sem. 9 à 12" accent={colors.amber} />
       </View>
       {/* Action buttons */}
       <View style={{ flexDirection: "row", gap: 6, marginTop: spacing.sm, flexWrap: "wrap" }}>
@@ -1610,6 +1816,44 @@ function ProgramSummaryCard({
             </TouchableOpacity>
           </>
         )}
+      </View>
+    </Card>
+  );
+}
+
+function RewardsRail({
+  streakDays,
+  weeklyChallengeProgress,
+  chestReady,
+}: {
+  streakDays: number;
+  weeklyChallengeProgress: number;
+  chestReady: boolean;
+}) {
+  return (
+    <Card testID="rewards-rail-card" style={{ gap: spacing.md }}>
+      <View style={styles.rewardHeader}>
+        <View>
+          <Text style={styles.rewardEyebrow}>GAMIFICATION PREMIUM</Text>
+          <Text style={[typography.h3, { marginTop: 2 }]}>Chaque séance nourrit ta progression.</Text>
+        </View>
+        <View style={styles.rewardCrown}>
+          <Ionicons name="trophy" size={18} color={colors.primaryLight} />
+        </View>
+      </View>
+      <View style={styles.rewardGrid}>
+        <RewardTile icon="flame" label="Streak" value={`${streakDays} j`} />
+        <RewardTile icon="ribbon" label="Badge proche" value="7 jours" />
+        <RewardTile icon="gift" label="Coffre" value={chestReady ? "Disponible" : "En cours"} />
+      </View>
+      <View style={styles.challengeBox}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.challengeTitle}>Défi hebdomadaire</Text>
+          <Text style={styles.challengeText}>Termine ton rythme prévu pour débloquer un coffre surprise, des XP et un bonus de motivation.</Text>
+        </View>
+        <View style={styles.challengeRing}>
+          <Text style={styles.challengeRingValue}>{weeklyChallengeProgress}%</Text>
+        </View>
       </View>
     </Card>
   );
@@ -1651,6 +1895,52 @@ function PulseStat({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMa
       <Ionicons name={icon} size={16} color={colors.primaryLight} />
       <Text style={styles.pulseValue}>{value}</Text>
       <Text style={styles.pulseLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function RewardTile({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
+  return (
+    <View style={styles.rewardTile}>
+      <Ionicons name={icon} size={18} color={colors.primaryLight} />
+      <Text style={styles.rewardValue}>{value}</Text>
+      <Text style={styles.rewardLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function SessionGuideStat({ icon, title, text }: { icon: keyof typeof Ionicons.glyphMap; title: string; text: string }) {
+  return (
+    <View style={styles.sessionGuideStat}>
+      <Ionicons name={icon} size={16} color={colors.primaryLight} />
+      <Text style={styles.sessionGuideTitle}>{title}</Text>
+      <Text style={styles.sessionGuideText}>{text}</Text>
+    </View>
+  );
+}
+
+function PhasePreview({ label, weeks, accent }: { label: string; weeks: string; accent: string }) {
+  return (
+    <View style={styles.phasePreview}>
+      <View style={[styles.phaseAccent, { backgroundColor: accent }]} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.phasePreviewLabel}>{label}</Text>
+        <Text style={styles.phasePreviewWeeks}>{weeks}</Text>
+      </View>
+      <View style={styles.sparkline}>
+        {[0.25, 0.52, 0.38, 0.72, 0.58].map((height, index) => (
+          <View key={`${label}-${index}`} style={[styles.sparkBar, { height: 8 + height * 20, backgroundColor: accent }]} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function ReferenceMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.referenceMetric}>
+      <Text style={styles.referenceMetricValue}>{value}</Text>
+      <Text style={styles.referenceMetricLabel}>{label}</Text>
     </View>
   );
 }
