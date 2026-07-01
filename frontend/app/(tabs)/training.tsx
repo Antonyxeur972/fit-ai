@@ -85,7 +85,6 @@ const REST_DEFAULTS: Record<string, number> = {
 };
 
 const EXERCISE_VISUALS: ImageSourcePropType[] = [
-  require("../../assets/images/fitai-bg-training.png"),
   require("../../assets/images/fitai-hero-activities-hd.png"),
   require("../../assets/images/fitai-hero-program-hd.png"),
   require("../../assets/images/fitai-hero-dashboard-hd.png"),
