@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Platform, Alert,
+  View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Platform, Alert, ImageBackground,
 } from "react-native";
+import type { ImageSourcePropType } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -14,6 +15,7 @@ import { ProgramCarousel } from "@/src/components/ProgramCarousel";
 import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { colors, spacing, typography, radius } from "@/src/theme";
+import { PROGRAM_PRESETS, SCIENCE_NOTES, phaseForWeek, presetByGoal, weeklyAiAdvice } from "@/src/lib/programPresets";
 
 type Exercise = { name: string; sets: number; reps: string; rest_s: number; checked?: boolean; is_recommended?: boolean };
 type Workout = {
@@ -82,6 +84,27 @@ const REST_DEFAULTS: Record<string, number> = {
   endurance: 45,
 };
 
+const EXERCISE_VISUALS: ImageSourcePropType[] = [
+  require("../../assets/images/fitai-bg-training.png"),
+  require("../../assets/images/fitai-hero-activities-hd.png"),
+  require("../../assets/images/fitai-hero-program-hd.png"),
+  require("../../assets/images/fitai-hero-dashboard-hd.png"),
+  require("../../assets/images/fitai-hero-progress-hd.png"),
+];
+
+function exerciseVisualFor(name: string, index: number) {
+  const lower = name.toLowerCase();
+  if (lower.includes("squat") || lower.includes("presse") || lower.includes("fente") || lower.includes("mollet")) return EXERCISE_VISUALS[2];
+  if (lower.includes("développé") || lower.includes("bench") || lower.includes("pompe") || lower.includes("traction")) return EXERCISE_VISUALS[0];
+  if (lower.includes("rowing") || lower.includes("tirage") || lower.includes("soulevé") || lower.includes("deadlift")) return EXERCISE_VISUALS[1];
+  if (lower.includes("gainage") || lower.includes("abdo") || lower.includes("yoga") || lower.includes("mobilité")) return EXERCISE_VISUALS[4];
+  return EXERCISE_VISUALS[index % EXERCISE_VISUALS.length];
+}
+
+function exercisePointsFor(ex: Exercise, index: number, reco: boolean) {
+  return 8 + Math.min(10, ex.sets * 2) + (reco ? 8 : 0) + (index < 3 ? 2 : 0);
+}
+
 // Phase 5 — C4: red-highlight AI-recommended exercises per session type.
 // Heuristic based on standard strength science: big compounds for Force,
 // explosive/plyo for Puissance, hypertrophy compounds + isolations for Volume.
@@ -131,6 +154,7 @@ export default function Training() {
   const [perfWeight, setPerfWeight] = useState("");
   const [perfReps, setPerfReps] = useState("");
   const [perfHistory, setPerfHistory] = useState<Perf[]>([]);
+  const [earnedExercisePoints, setEarnedExercisePoints] = useState<Record<string, number>>({});
 
   // Calendar / history state
   const [calMonth, setCalMonth] = useState<Date>(() => new Date());
@@ -152,10 +176,10 @@ export default function Training() {
   const [expandedWeek, setExpandedWeek] = useState<number | null>(null);
   const [programSetupOpen, setProgramSetupOpen] = useState(false);
   const [setupWeeks, setSetupWeeks] = useState(8);
-  const [setupFreq, setSetupFreq] = useState<3 | 5 | 7>(5);
-  const [setupDays, setSetupDays] = useState<number[]>([0, 1, 2, 3, 4]);
+  const [setupFreq, setSetupFreq] = useState<2 | 3 | 4>(3);
+  const [setupDays, setSetupDays] = useState<number[]>([0, 2, 4]);
   const [setupSplit, setSetupSplit] = useState<"ppl" | "fullbody" | "split">("ppl");
-  const [setupGoal, setSetupGoal] = useState("Hypertrophie");
+  const [setupGoal, setSetupGoal] = useState("Masse");
   const [setupBlocks, setSetupBlocks] = useState<{ volume: number; puissance: number; force: number }>({ volume: 1, puissance: 1, force: 1 });
   const [creatingProgram, setCreatingProgram] = useState(false);
 
@@ -421,7 +445,7 @@ export default function Training() {
   const createProgram = async (overrides?: { goal_label?: string; frequency?: number; training_days?: number[]; split?: string; weeks?: number }) => {
     setCreatingProgram(true);
     try {
-      const dayDefaults: Record<number, number[]> = { 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4] };
+      const dayDefaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4] };
       const freq = overrides?.frequency ?? setupFreq;
       const created = await api<TrainingProgram>("/program/create", {
         method: "POST",
@@ -586,6 +610,10 @@ export default function Training() {
         sets: 1,
       },
     });
+    const exerciseIndex = perfEx.workout.exercises.findIndex((item) => item.name === perfEx.exercise.name);
+    const reco = isRecommendedFor(perfEx.exercise.name, perfEx.workout.session_type);
+    const points = exercisePointsFor(perfEx.exercise, Math.max(0, exerciseIndex), reco);
+    setEarnedExercisePoints((prev) => ({ ...prev, [perfEx.exercise.name]: points }));
     // refresh history
     try {
       const r2 = await api<{ items: Perf[] }>(`/perf/recent?exercise=${encodeURIComponent(perfEx.exercise.name)}&limit=10`);
@@ -603,6 +631,10 @@ export default function Training() {
   const programProgress = program?.weeks_total
     ? Math.min(100, Math.round(((program.current_week + 1) / program.weeks_total) * 100))
     : 0;
+  const completedSessions = week.filter((item) => item.completed).length;
+  const streakDays = Math.max(1, completedSessions + (todayWorkout?.completed ? 1 : 0));
+  const weeklyChallengeProgress = Math.min(100, Math.round((completedSessions / Math.max(1, program?.frequency || 3)) * 100));
+  const chestReady = todayWorkout?.completed || weeklyChallengeProgress >= 100;
 
   // Library grouped by category, used in editor
   const libByCategory = useMemo(() => {
@@ -659,6 +691,14 @@ export default function Training() {
           travelBusy={travelBusy}
         />
 
+        <TrainingPulseCard program={program} />
+
+        <RewardsRail
+          streakDays={streakDays}
+          weeklyChallengeProgress={weeklyChallengeProgress}
+          chestReady={chestReady}
+        />
+
         {/* Activity card */}
         <Card testID="activity-card">
           <SectionTitle title="Activité du jour" action={
@@ -678,6 +718,51 @@ export default function Training() {
         {/* Today's workout */}
         {todayWorkout ? (
           <Card testID="today-workout-card">
+            <ImageBackground
+              source={exerciseVisualFor(todayWorkout.focus || todayWorkout.title, 0)}
+              style={styles.todayVisualWrap}
+              imageStyle={styles.todayVisualImage}
+              resizeMode="cover"
+            >
+              <View style={styles.todayVisualShade} />
+              <View style={styles.todayVisualContent}>
+                <View style={styles.todayHeroTop}>
+                  <View style={styles.todayHeroIcon}>
+                    <Ionicons name="timer-outline" size={18} color={colors.primaryLight} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.todayVisualEyebrow}>SÉANCE DU JOUR</Text>
+                    <Text style={styles.todayVisualTitle}>{todayWorkout.focus}</Text>
+                  </View>
+                  <View style={styles.sessionXpBadge}>
+                    <Ionicons name="star" size={12} color={colors.primaryLight} />
+                    <Text style={styles.sessionXpText}>+80 XP</Text>
+                  </View>
+                </View>
+                <View style={styles.sessionGuideGrid}>
+                  <SessionGuideStat icon="repeat-outline" title="Swap" text="Remplace en un geste" />
+                  <SessionGuideStat icon="stopwatch-outline" title="Repos" text="Timer adapté" />
+                  <SessionGuideStat icon="sparkles-outline" title="IA" text="Feedback après série" />
+                </View>
+                <View style={styles.sessionProgressPanel}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.sessionProgressLabel}>Progression de la séance</Text>
+                    <View style={styles.sessionProgressTrack}>
+                      <View style={[styles.sessionProgressFill, { width: todayWorkout.completed ? "100%" : "28%" }]} />
+                    </View>
+                  </View>
+                  <View style={styles.timerBubble}>
+                  <Text style={styles.timerBubbleValue}>00:45</Text>
+                    <Text style={styles.timerBubbleLabel}>repos</Text>
+                  </View>
+                </View>
+                <SessionPerformanceGraph
+                  completed={todayWorkout.completed}
+                  total={todayExercises.length}
+                  earnedPoints={todayExercises.reduce((sum, ex) => sum + (earnedExercisePoints[ex.name] || 0), 0)}
+                />
+              </View>
+            </ImageBackground>
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm }}>
               <Text style={typography.caption}>Séance du jour</Text>
               <View style={{ flexDirection: "row", gap: 8 }}>
@@ -699,25 +784,20 @@ export default function Training() {
             </View>
             {todayExercises.map((ex, i) => {
               const reco = isRecommendedFor(ex.name, todayWorkout?.session_type);
+              const points = exercisePointsFor(ex, i, reco);
+              const earned = earnedExercisePoints[ex.name] || (todayWorkout.completed ? points : 0);
               return (
-                <TouchableOpacity key={`${ex.name}-${i}`} style={styles.exerciseRow} onPress={() => openPerf(todayWorkout, ex)} testID={`exercise-${i}`} activeOpacity={0.7}>
-                  <View style={[styles.exerciseNum, reco && { backgroundColor: "#FBDDDB" }]}>
-                    <Text style={[typography.small, { color: reco ? "#A12A22" : colors.primary, fontWeight: "700" }]}>{i + 1}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                      <Text style={[typography.body, { fontWeight: "600", color: reco ? "#A12A22" : colors.textMain }]}>{ex.name}</Text>
-                      {reco && (
-                        <View style={styles.recoBadge}>
-                          <Ionicons name="flame" size={9} color="#A12A22" />
-                          <Text style={styles.recoBadgeTxt}>RECO IA</Text>
-                        </View>
-                      )}
-                    </View>
-                    <Text style={typography.small}>{ex.sets} × {ex.reps} · repos {ex.rest_s}s</Text>
-                  </View>
-                  <Ionicons name="add-circle-outline" size={22} color={reco ? "#A12A22" : colors.primary} />
-                </TouchableOpacity>
+                <ExerciseSessionCard
+                  key={`${ex.name}-${i}`}
+                  exercise={ex}
+                  index={i}
+                  recommended={reco}
+                  points={points}
+                  earnedPoints={earned}
+                  visual={exerciseVisualFor(ex.name, i)}
+                  onPress={() => openPerf(todayWorkout, ex)}
+                  testID={`exercise-${i}`}
+                />
               );
             })}
             <Button
@@ -766,8 +846,8 @@ export default function Training() {
           </Card>
         ) : !program ? (
           <ProgramCarousel
-            onSelectProgram={(goalLabel, freq, split) =>
-              createProgram({ goal_label: goalLabel, frequency: freq, split, weeks: 8 })
+            onSelectProgram={(goalLabel, freq, split, weeks) =>
+              createProgram({ goal_label: goalLabel, frequency: freq, split, weeks: weeks || presetByGoal(goalLabel).defaultWeeks })
             }
             loading={creatingProgram}
           />
@@ -786,6 +866,8 @@ export default function Training() {
                 <ProgramWeekCard
                   key={w.week_index}
                   week={w}
+                  totalWeeks={program.weeks_total}
+                  currentWeek={program.current_week}
                   isExpanded={expandedWeek === w.week_index}
                   isCurrent={program.current_week === w.week_index}
                   onToggle={() => setExpandedWeek(expandedWeek === w.week_index ? null : w.week_index)}
@@ -793,6 +875,7 @@ export default function Training() {
                 />
               ))}
             </View>
+            <SciencePanel />
           </View>
         )}
 
@@ -997,37 +1080,45 @@ export default function Training() {
             <ScrollView style={{ maxHeight: 540 }} keyboardShouldPersistTaps="handled">
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Objectif</Text>
               <View style={styles.setupOptionRow}>
-                {["Hypertrophie", "Force", "Perte de gras"].map((g) => (
+                {PROGRAM_PRESETS.map((preset) => (
                   <TouchableOpacity
-                    key={g}
-                    onPress={() => setSetupGoal(g)}
-                    style={[styles.setupOption, setupGoal === g && styles.setupOptionOn]}
-                    testID={`setup-goal-${g}`}
+                    key={preset.id}
+                    onPress={() => {
+                      setSetupGoal(preset.goalLabel);
+                      setSetupWeeks(preset.defaultWeeks);
+                      setSetupFreq(preset.defaultFrequency);
+                      setSetupSplit(preset.defaultSplit);
+                      const defaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4] };
+                      setSetupDays(defaults[preset.defaultFrequency]);
+                    }}
+                    style={[styles.setupOption, setupGoal === preset.goalLabel && styles.setupOptionOn]}
+                    testID={`setup-goal-${preset.id}`}
                   >
-                    <Text style={[styles.setupOptionLabel, setupGoal === g && styles.setupOptionLabelOn]}>{g}</Text>
+                    <Text style={[styles.setupOptionLabel, setupGoal === preset.goalLabel && styles.setupOptionLabelOn]}>{preset.goalLabel}</Text>
+                    <Text style={styles.setupOptionSub}>{preset.defaultWeeks} sem.</Text>
                   </TouchableOpacity>
                 ))}
               </View>
 
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Fréquence (jours / semaine)</Text>
               <View style={styles.setupOptionRow}>
-                {([3, 5, 7] as const).map((f) => (
+                {([2, 3, 4] as const).map((f) => (
                   <TouchableOpacity
                     key={f}
                     onPress={() => {
                       setSetupFreq(f);
-                      const defaults: Record<number, number[]> = { 3: [0, 2, 4], 5: [0, 1, 2, 3, 4], 7: [0, 1, 2, 3, 4, 5, 6] };
+                      const defaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4] };
                       setSetupDays(defaults[f]);
                     }}
                     style={[styles.setupOption, setupFreq === f && styles.setupOptionOn]}
                     testID={`setup-freq-${f}`}
                   >
-                    <Text style={[styles.setupOptionLabel, setupFreq === f && styles.setupOptionLabelOn]}>{f}j</Text>
-                    <Text style={styles.setupOptionSub}>
-                      {f === 3 ? "Light" : f === 5 ? "Optimal" : "Intensif"}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+                      <Text style={[styles.setupOptionLabel, setupFreq === f && styles.setupOptionLabelOn]}>{f}j</Text>
+                      <Text style={styles.setupOptionSub}>
+                        {f === 2 ? "Minimal" : f === 3 ? "Optimal" : "Ambitieux"}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
               </View>
 
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Jours d&apos;entraînement ({setupDays.length}/{setupFreq})</Text>
@@ -1075,7 +1166,7 @@ export default function Training() {
 
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Durée du programme</Text>
               <View style={styles.setupOptionRow}>
-                {[4, 8, 12, 16, 24].map((w) => (
+                {[6, 8, 10, 12].map((w) => (
                   <TouchableOpacity
                     key={w}
                     onPress={() => setSetupWeeks(w)}
@@ -1307,6 +1398,18 @@ export default function Training() {
               <Ionicons name="flash" size={22} color={colors.primary} />
             </View>
 
+            {perfEx && earnedExercisePoints[perfEx.exercise.name] ? (
+              <View style={styles.exerciseRewardToast} testID="perf-reward-toast">
+                <View style={styles.exerciseRewardIcon}>
+                  <Ionicons name="sparkles" size={18} color="#081207" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.exerciseRewardTitle}>Exercice validé</Text>
+                  <Text style={styles.exerciseRewardText}>+{earnedExercisePoints[perfEx.exercise.name]} points ajoutés à ta séance.</Text>
+                </View>
+              </View>
+            ) : null}
+
             <Button title="Enregistrer la perf" onPress={savePerf} style={{ marginTop: spacing.md }} testID="perf-save" />
 
             <Text style={[typography.caption, { marginTop: spacing.lg }]}>Historique</Text>
@@ -1468,6 +1571,53 @@ const styles = StyleSheet.create({
   // Program
   progressBar: { height: 4, backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 2, overflow: "hidden", marginTop: spacing.sm },
   progressFill: { height: "100%", backgroundColor: colors.primary, borderRadius: 2 },
+  timelineRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: spacing.md },
+  timelineDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.16)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  timelineDotDone: { backgroundColor: "rgba(182,255,63,0.14)", borderColor: "rgba(182,255,63,0.28)" },
+  timelineDotActive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  timelineDotText: { fontSize: 11, fontWeight: "800", color: "rgba(255,255,255,0.62)" },
+  timelineDotTextActive: { color: "#13230A" },
+  referenceMetricRow: { flexDirection: "row", gap: spacing.sm, marginTop: spacing.md },
+  referenceMetric: {
+    flex: 1,
+    minHeight: 68,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: GLASS_BORDER,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    padding: spacing.sm,
+    justifyContent: "space-between",
+  },
+  referenceMetricValue: { color: colors.textMain, fontSize: 14, fontWeight: "800" },
+  referenceMetricLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700" },
+  programNatureBand: {
+    height: 124,
+    margin: -spacing.lg,
+    marginBottom: spacing.lg,
+    overflow: "hidden",
+    backgroundColor: "rgba(182,255,63,0.08)",
+  },
+  programSun: { position: "absolute", right: 30, top: 20, width: 42, height: 42, borderRadius: 21, backgroundColor: "rgba(255,179,63,0.34)" },
+  programMountainBack: { position: "absolute", left: -20, bottom: 0, width: 220, height: 94, borderTopLeftRadius: 130, borderTopRightRadius: 130, backgroundColor: "rgba(53,214,232,0.14)", transform: [{ rotate: "-8deg" }] },
+  programMountainFront: { position: "absolute", right: -40, bottom: -4, width: 250, height: 108, borderTopLeftRadius: 150, borderTopRightRadius: 150, backgroundColor: "rgba(13,46,27,0.86)", transform: [{ rotate: "7deg" }] },
+  programTrail: { position: "absolute", left: 78, right: 76, bottom: 22, height: 4, borderRadius: 2, backgroundColor: "rgba(182,255,63,0.42)", transform: [{ rotate: "-10deg" }] },
+  programHiker: { position: "absolute", right: 76, bottom: 30, width: 34, height: 34, borderRadius: 17, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center" },
+  phasePreviewStack: { gap: 8, marginTop: spacing.md },
+  phasePreview: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 58, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.05)", padding: spacing.sm },
+  phaseAccent: { width: 4, alignSelf: "stretch", borderRadius: 2 },
+  phasePreviewLabel: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
+  phasePreviewWeeks: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700", marginTop: 2 },
+  sparkline: { flexDirection: "row", alignItems: "flex-end", gap: 3, height: 34 },
+  sparkBar: { width: 4, borderRadius: 2, opacity: 0.9 },
   currentBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: radius.full },
   weekTypePill: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.full, borderWidth: 1 },
   programDayRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: GLASS_BORDER },
@@ -1480,6 +1630,212 @@ const styles = StyleSheet.create({
   setupOptionLabel: { fontSize: 14, fontWeight: "700", color: "rgba(255,255,255,0.6)" },
   setupOptionLabelOn: { color: colors.primaryLight },
   setupOptionSub: { fontSize: 10, color: "rgba(255,255,255,0.38)", marginTop: 2 },
+  xpRing: { width: 68, height: 68, borderRadius: 34, borderWidth: 5, borderColor: colors.primaryLight, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(2,18,12,0.54)" },
+  xpValue: { color: "#FFFFFF", fontSize: 19, fontWeight: "900", lineHeight: 22 },
+  xpLabel: { color: colors.primaryLight, fontSize: 10, fontWeight: "900", marginTop: -1 },
+  pulseGrid: { flexDirection: "row", gap: spacing.sm },
+  pulseStat: { flex: 1, minHeight: 76, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.06)", alignItems: "center", justifyContent: "center", gap: 3 },
+  pulseValue: { color: colors.textMain, fontSize: 17, fontWeight: "900" },
+  pulseLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700" },
+  aiCoachBox: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.10)" },
+  aiCoachText: { color: colors.textSecondary, flex: 1, fontSize: 12.5, lineHeight: 18, fontWeight: "600" },
+  rewardHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
+  rewardEyebrow: { fontSize: 11, fontWeight: "900", color: colors.primaryLight, letterSpacing: 0.3 },
+  rewardCrown: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(182,255,63,0.12)",
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.24)",
+  },
+  rewardGrid: { flexDirection: "row", gap: spacing.sm },
+  rewardTile: {
+    flex: 1,
+    minHeight: 82,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: GLASS_BORDER,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 4,
+    padding: spacing.sm,
+  },
+  rewardValue: { color: colors.textMain, fontSize: 15, fontWeight: "900" },
+  rewardLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700" },
+  challengeBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.22)",
+    backgroundColor: "rgba(182,255,63,0.08)",
+  },
+  challengeTitle: { color: colors.textMain, fontSize: 14, fontWeight: "800" },
+  challengeText: { color: colors.textSecondary, fontSize: 12.5, lineHeight: 18, marginTop: 4 },
+  challengeRing: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 4,
+    borderColor: colors.primaryLight,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(4,14,9,0.72)",
+  },
+  challengeRingValue: { color: colors.textMain, fontSize: 14, fontWeight: "900" },
+  todayVisualWrap: {
+    minHeight: 318,
+    borderRadius: radius.lg,
+    overflow: "hidden",
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.28)",
+    backgroundColor: "rgba(4,18,12,0.82)",
+  },
+  todayVisualImage: { opacity: 0.9, transform: [{ scale: 1.05 }] },
+  todayVisualShade: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(1,12,7,0.54)",
+    borderRadius: radius.lg,
+  },
+  todayVisualContent: { flex: 1, padding: spacing.lg, gap: spacing.md, justifyContent: "space-between" },
+  todayHeroTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  todayHeroIcon: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(182,255,63,0.12)", borderWidth: 1, borderColor: "rgba(182,255,63,0.26)" },
+  todayVisualEyebrow: { fontSize: 11, fontWeight: "900", color: colors.primaryLight, letterSpacing: 0.3 },
+  todayVisualTitle: { fontSize: 25, lineHeight: 29, fontWeight: "800", color: colors.textMain, maxWidth: 240 },
+  sessionXpBadge: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 6, borderRadius: radius.full, backgroundColor: "rgba(182,255,63,0.12)", borderWidth: 1, borderColor: "rgba(182,255,63,0.24)" },
+  sessionXpText: { color: colors.primaryLight, fontSize: 11, fontWeight: "900" },
+  sessionGuideGrid: { flexDirection: "row", gap: spacing.sm },
+  sessionGuideStat: { flex: 1, minHeight: 86, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.05)", padding: spacing.sm, justifyContent: "space-between" },
+  sessionGuideTitle: { color: colors.textMain, fontSize: 12.5, fontWeight: "900" },
+  sessionGuideText: { color: colors.textMuted, fontSize: 10.5, lineHeight: 14 },
+  sessionProgressPanel: { flexDirection: "row", alignItems: "center", gap: spacing.md, padding: spacing.md, borderRadius: radius.md, backgroundColor: "rgba(0,0,0,0.22)", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
+  sessionProgressLabel: { color: colors.textSecondary, fontSize: 12, fontWeight: "800", marginBottom: 8 },
+  sessionProgressTrack: { height: 8, borderRadius: 4, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.12)" },
+  sessionProgressFill: { height: "100%", borderRadius: 4, backgroundColor: colors.primaryLight },
+  timerBubble: { width: 72, height: 72, borderRadius: 36, borderWidth: 5, borderColor: colors.primaryLight, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(2,18,12,0.58)" },
+  timerBubbleValue: { color: colors.textMain, fontSize: 16, fontWeight: "900" },
+  timerBubbleLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "800", marginTop: -1 },
+  sessionGraphPanel: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.24)",
+    backgroundColor: "rgba(1,16,9,0.72)",
+  },
+  sessionGraphRing: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    borderWidth: 7,
+    borderColor: colors.primaryLight,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(2,18,12,0.72)",
+  },
+  sessionGraphRingValue: { color: colors.textMain, fontSize: 18, fontWeight: "900" },
+  sessionGraphRingLabel: { color: colors.textMuted, fontSize: 9.5, fontWeight: "800", marginTop: 1 },
+  sessionGraphTopLine: { flexDirection: "row", justifyContent: "space-between", gap: spacing.sm, alignItems: "flex-start" },
+  sessionGraphTitle: { color: colors.textMain, fontSize: 14, fontWeight: "900" },
+  sessionGraphText: { color: colors.textMuted, fontSize: 11.5, lineHeight: 16, marginTop: 2 },
+  sessionGraphXp: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: radius.full, backgroundColor: "rgba(182,255,63,0.12)", borderWidth: 1, borderColor: "rgba(182,255,63,0.24)" },
+  sessionGraphXpText: { color: colors.primaryLight, fontSize: 11, fontWeight: "900" },
+  sessionBars: { height: 54, flexDirection: "row", alignItems: "flex-end", gap: 6 },
+  sessionBar: { flex: 1, minWidth: 7, borderRadius: 7 },
+  exerciseLuxuryCard: {
+    minHeight: 132,
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: spacing.sm,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.12)",
+    backgroundColor: "rgba(5,22,14,0.74)",
+  },
+  exerciseLuxuryCardDone: {
+    borderColor: "rgba(182,255,63,0.42)",
+    backgroundColor: "rgba(21,56,25,0.62)",
+  },
+  exerciseThumb: {
+    width: 96,
+    borderRadius: radius.md,
+    overflow: "hidden",
+    justifyContent: "space-between",
+    padding: spacing.sm,
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  exerciseThumbImage: { borderRadius: radius.md, opacity: 0.86, transform: [{ scale: 1.12 }] },
+  exerciseThumbShade: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(2,12,8,0.24)" },
+  exerciseNumLuxury: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(182,255,63,0.88)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.42)",
+  },
+  exerciseNumReco: { backgroundColor: "rgba(255,179,63,0.92)" },
+  exerciseNumLuxuryText: { color: "#071207", fontSize: 13, fontWeight: "900" },
+  exerciseLuxuryBody: { flex: 1, justifyContent: "space-between", gap: spacing.sm, paddingVertical: 2 },
+  exerciseLuxuryHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: spacing.sm },
+  exerciseNameRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  exerciseLuxuryName: { color: colors.textMain, fontSize: 15.5, fontWeight: "900", flexShrink: 1 },
+  exerciseLuxuryMeta: { color: colors.textSecondary, fontSize: 11.5, lineHeight: 16, marginTop: 3, fontWeight: "700" },
+  exercisePointPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.28)",
+    backgroundColor: "rgba(182,255,63,0.10)",
+  },
+  exercisePointPillDone: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
+  exercisePointText: { color: colors.primaryLight, fontSize: 11, fontWeight: "900" },
+  exercisePointTextDone: { color: "#081207" },
+  exerciseMicroStats: { flexDirection: "row", gap: 6 },
+  exerciseMicroStat: { flex: 1, minHeight: 44, borderRadius: radius.sm, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.055)", alignItems: "center", justifyContent: "center" },
+  exerciseMicroValue: { color: colors.textMain, fontSize: 12.5, fontWeight: "900" },
+  exerciseMicroLabel: { color: colors.textMuted, fontSize: 9.5, fontWeight: "800", marginTop: 1 },
+  exerciseLuxuryProgress: { height: 5, borderRadius: 3, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.12)" },
+  exerciseLuxuryProgressFill: { height: "100%", borderRadius: 3, backgroundColor: colors.primaryLight },
+  exerciseRewardToast: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.md,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.30)",
+    backgroundColor: "rgba(182,255,63,0.12)",
+  },
+  exerciseRewardIcon: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryLight },
+  exerciseRewardTitle: { color: colors.textMain, fontSize: 14, fontWeight: "900" },
+  exerciseRewardText: { color: colors.textSecondary, fontSize: 12.5, lineHeight: 17, marginTop: 2 },
+  weekMetrics: { flexDirection: "row", gap: spacing.sm },
+  miniMetric: { flex: 1, borderRadius: radius.sm, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.06)", padding: spacing.sm },
+  miniMetricValue: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
+  miniMetricLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "700", marginTop: 2 },
+  scienceIcon: { width: 34, height: 34, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(53,214,232,0.14)" },
+  scienceRow: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm },
+  scienceDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.aqua, marginTop: 6 },
+  scienceText: { color: colors.textSecondary, flex: 1, fontSize: 12.5, lineHeight: 18 },
 });
 
 // ----- Helpers / sub-components -----
@@ -1537,7 +1893,16 @@ function ProgramSummaryCard({
   }
   const isTravel = (program as any).is_travel === true;
   return (
-    <Card testID="program-summary-card" style={{ borderColor: isTravel ? "#A85B0F" : colors.primary, borderWidth: 1.5 }}>
+    <Card testID="program-summary-card" style={{ borderColor: isTravel ? "#A85B0F" : colors.primary, borderWidth: 1.5, overflow: "hidden" }}>
+      <View style={styles.programNatureBand}>
+        <View style={styles.programSun} />
+        <View style={styles.programMountainBack} />
+        <View style={styles.programMountainFront} />
+        <View style={styles.programTrail} />
+        <View style={styles.programHiker}>
+          <Ionicons name="walk" size={18} color="#13230A" />
+        </View>
+      </View>
       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
         <View style={[styles.focusBadge, { backgroundColor: isTravel ? "#FCE3CB" : colors.primaryPale }]}>
           <Ionicons name={isTravel ? "airplane" : "rocket"} size={20} color={isTravel ? "#A85B0F" : colors.primary} />
@@ -1554,6 +1919,35 @@ function ProgramSummaryCard({
       </View>
       <View style={styles.progressBar}>
         <View style={[styles.progressFill, { width: `${Math.min(100, (program.current_week / program.weeks_total) * 100)}%`, backgroundColor: isTravel ? "#A85B0F" : colors.primary }]} />
+      </View>
+      <View style={styles.timelineRow}>
+        {Array.from({ length: program.weeks_total }).map((_, index) => {
+          const weekIndex = index + 1;
+          const active = weekIndex === program.current_week;
+          const done = weekIndex < program.current_week;
+          return (
+            <View
+              key={`timeline-${weekIndex}`}
+              style={[
+                styles.timelineDot,
+                done && styles.timelineDotDone,
+                active && styles.timelineDotActive,
+              ]}
+            >
+              <Text style={[styles.timelineDotText, active && styles.timelineDotTextActive]}>{weekIndex}</Text>
+            </View>
+          );
+        })}
+      </View>
+      <View style={styles.referenceMetricRow}>
+        <ReferenceMetric label="Phase" value={phaseForWeek(program.weeks_total, program.current_week)} />
+        <ReferenceMetric label="Rythme" value={`${program.frequency} séances`} />
+        <ReferenceMetric label="Plan" value={program.split.toUpperCase()} />
+      </View>
+      <View style={styles.phasePreviewStack}>
+        <PhasePreview label="Volume" weeks="Sem. 1 à 4" accent={colors.primaryLight} />
+        <PhasePreview label="Force" weeks="Sem. 5 à 8" accent={colors.aqua} />
+        <PhasePreview label="Consolidation" weeks="Sem. 9 à 12" accent={colors.amber} />
       </View>
       {/* Action buttons */}
       <View style={{ flexDirection: "row", gap: 6, marginTop: spacing.sm, flexWrap: "wrap" }}>
@@ -1584,16 +1978,293 @@ function ProgramSummaryCard({
   );
 }
 
+function RewardsRail({
+  streakDays,
+  weeklyChallengeProgress,
+  chestReady,
+}: {
+  streakDays: number;
+  weeklyChallengeProgress: number;
+  chestReady: boolean;
+}) {
+  return (
+    <Card testID="rewards-rail-card" style={{ gap: spacing.md }}>
+      <View style={styles.rewardHeader}>
+        <View>
+          <Text style={styles.rewardEyebrow}>GAMIFICATION PREMIUM</Text>
+          <Text style={[typography.h3, { marginTop: 2 }]}>Chaque séance nourrit ta progression.</Text>
+        </View>
+        <View style={styles.rewardCrown}>
+          <Ionicons name="trophy" size={18} color={colors.primaryLight} />
+        </View>
+      </View>
+      <View style={styles.rewardGrid}>
+        <RewardTile icon="flame" label="Streak" value={`${streakDays} j`} />
+        <RewardTile icon="ribbon" label="Badge proche" value="7 jours" />
+        <RewardTile icon="gift" label="Coffre" value={chestReady ? "Disponible" : "En cours"} />
+      </View>
+      <View style={styles.challengeBox}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.challengeTitle}>Défi hebdomadaire</Text>
+          <Text style={styles.challengeText}>Termine ton rythme prévu pour débloquer un coffre surprise, des XP et un bonus de motivation.</Text>
+        </View>
+        <View style={styles.challengeRing}>
+          <Text style={styles.challengeRingValue}>{weeklyChallengeProgress}%</Text>
+        </View>
+      </View>
+    </Card>
+  );
+}
+
+function TrainingPulseCard({ program }: { program: TrainingProgram | null }) {
+  const preset = presetByGoal(program?.goal_label);
+  const currentWeek = program?.current_week || 1;
+  const totalWeeks = program?.weeks_total || preset.defaultWeeks;
+  const completion = Math.min(100, Math.round((currentWeek / Math.max(1, totalWeeks)) * 100));
+  return (
+    <Card testID="training-pulse-card" style={{ gap: spacing.md }}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md }}>
+        <View style={{ flex: 1 }}>
+          <Text style={[typography.caption, { color: colors.primaryLight, fontWeight: "900" }]}>AVENTURE FIT AI</Text>
+          <Text style={[typography.h3, { marginTop: 3 }]}>Ton plan s&apos;adapte à toi, pas l&apos;inverse.</Text>
+        </View>
+        <View style={styles.xpRing}>
+          <Text style={styles.xpValue}>+80</Text>
+          <Text style={styles.xpLabel}>XP</Text>
+        </View>
+      </View>
+      <View style={styles.pulseGrid}>
+        <PulseStat icon="flame-outline" label="Streak" value="1 j" />
+        <PulseStat icon="trophy-outline" label="Badge proche" value="7 j" />
+        <PulseStat icon="analytics-outline" label="Cycle" value={`${completion}%`} />
+      </View>
+      <View style={styles.aiCoachBox}>
+        <Ionicons name="sparkles-outline" size={16} color={colors.primaryLight} />
+        <Text style={styles.aiCoachText}>{weeklyAiAdvice(program?.weeks?.find((w) => w.week_index === currentWeek)?.session_type, currentWeek)}</Text>
+      </View>
+    </Card>
+  );
+}
+
+function PulseStat({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
+  return (
+    <View style={styles.pulseStat}>
+      <Ionicons name={icon} size={16} color={colors.primaryLight} />
+      <Text style={styles.pulseValue}>{value}</Text>
+      <Text style={styles.pulseLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function RewardTile({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
+  return (
+    <View style={styles.rewardTile}>
+      <Ionicons name={icon} size={18} color={colors.primaryLight} />
+      <Text style={styles.rewardValue}>{value}</Text>
+      <Text style={styles.rewardLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function ExerciseSessionCard({
+  exercise,
+  index,
+  recommended,
+  points,
+  earnedPoints,
+  visual,
+  onPress,
+  testID,
+}: {
+  exercise: Exercise;
+  index: number;
+  recommended: boolean;
+  points: number;
+  earnedPoints: number;
+  visual: ImageSourcePropType;
+  onPress: () => void;
+  testID: string;
+}) {
+  const completed = earnedPoints > 0;
+  const progress = completed ? 100 : Math.min(86, 28 + index * 11);
+  return (
+    <TouchableOpacity
+      style={[styles.exerciseLuxuryCard, completed && styles.exerciseLuxuryCardDone]}
+      onPress={onPress}
+      testID={testID}
+      activeOpacity={0.82}
+    >
+      <ImageBackground source={visual} style={styles.exerciseThumb} imageStyle={styles.exerciseThumbImage} resizeMode="cover">
+        <View style={styles.exerciseThumbShade} />
+        <View style={[styles.exerciseNumLuxury, recommended && styles.exerciseNumReco]}>
+          <Text style={styles.exerciseNumLuxuryText}>{index + 1}</Text>
+        </View>
+      </ImageBackground>
+
+      <View style={styles.exerciseLuxuryBody}>
+        <View style={styles.exerciseLuxuryHeader}>
+          <View style={{ flex: 1 }}>
+            <View style={styles.exerciseNameRow}>
+              <Text style={styles.exerciseLuxuryName} numberOfLines={1}>{exercise.name}</Text>
+              {recommended ? (
+                <View style={styles.recoBadge}>
+                  <Ionicons name="flame" size={9} color="#F87171" />
+                  <Text style={styles.recoBadgeTxt}>IA</Text>
+                </View>
+              ) : null}
+            </View>
+            <Text style={styles.exerciseLuxuryMeta}>{exercise.sets} séries · {exercise.reps} reps · {exercise.rest_s}s repos</Text>
+          </View>
+          <View style={[styles.exercisePointPill, completed && styles.exercisePointPillDone]}>
+            <Ionicons name={completed ? "checkmark" : "star"} size={12} color={completed ? "#081207" : colors.primaryLight} />
+            <Text style={[styles.exercisePointText, completed && styles.exercisePointTextDone]}>
+              {completed ? `+${earnedPoints}` : `+${points}`}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.exerciseMicroStats}>
+          <View style={styles.exerciseMicroStat}>
+            <Text style={styles.exerciseMicroValue}>{exercise.sets}</Text>
+            <Text style={styles.exerciseMicroLabel}>séries</Text>
+          </View>
+          <View style={styles.exerciseMicroStat}>
+            <Text style={styles.exerciseMicroValue}>{exercise.reps}</Text>
+            <Text style={styles.exerciseMicroLabel}>cible</Text>
+          </View>
+          <View style={styles.exerciseMicroStat}>
+            <Text style={styles.exerciseMicroValue}>{Math.round(exercise.rest_s / 15) * 15}s</Text>
+            <Text style={styles.exerciseMicroLabel}>repos</Text>
+          </View>
+        </View>
+
+        <View style={styles.exerciseLuxuryProgress}>
+          <View style={[styles.exerciseLuxuryProgressFill, { width: `${progress}%` }]} />
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function SessionPerformanceGraph({
+  completed,
+  total,
+  earnedPoints,
+}: {
+  completed: boolean;
+  total: number;
+  earnedPoints: number;
+}) {
+  const done = completed ? total : Math.min(total, Math.max(1, Math.round(total * 0.42)));
+  const ratio = total > 0 ? Math.round((done / total) * 100) : 0;
+  return (
+    <View style={styles.sessionGraphPanel}>
+      <View style={styles.sessionGraphRing}>
+        <Text style={styles.sessionGraphRingValue}>{done}/{Math.max(1, total)}</Text>
+        <Text style={styles.sessionGraphRingLabel}>exercices</Text>
+      </View>
+      <View style={{ flex: 1, gap: 8 }}>
+        <View style={styles.sessionGraphTopLine}>
+          <View>
+            <Text style={styles.sessionGraphTitle}>Suivi de séance</Text>
+            <Text style={styles.sessionGraphText}>{completed ? "Séance complète. Coffre prêt." : "Objectif : valider série par série."}</Text>
+          </View>
+          <View style={styles.sessionGraphXp}>
+            <Ionicons name="sparkles" size={12} color={colors.primaryLight} />
+            <Text style={styles.sessionGraphXpText}>+{earnedPoints || 80} pts</Text>
+          </View>
+        </View>
+        <View style={styles.sessionBars}>
+          {[0.36, 0.62, 0.48, 0.78, 0.56, 0.88].map((height, index) => (
+            <View
+              key={`session-bar-${index}`}
+              style={[
+                styles.sessionBar,
+                {
+                  height: 12 + height * 34,
+                  backgroundColor: index < Math.ceil((ratio / 100) * 6) ? colors.primaryLight : "rgba(255,255,255,0.16)",
+                },
+              ]}
+            />
+          ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function SessionGuideStat({ icon, title, text }: { icon: keyof typeof Ionicons.glyphMap; title: string; text: string }) {
+  return (
+    <View style={styles.sessionGuideStat}>
+      <Ionicons name={icon} size={16} color={colors.primaryLight} />
+      <Text style={styles.sessionGuideTitle}>{title}</Text>
+      <Text style={styles.sessionGuideText}>{text}</Text>
+    </View>
+  );
+}
+
+function PhasePreview({ label, weeks, accent }: { label: string; weeks: string; accent: string }) {
+  return (
+    <View style={styles.phasePreview}>
+      <View style={[styles.phaseAccent, { backgroundColor: accent }]} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.phasePreviewLabel}>{label}</Text>
+        <Text style={styles.phasePreviewWeeks}>{weeks}</Text>
+      </View>
+      <View style={styles.sparkline}>
+        {[0.25, 0.52, 0.38, 0.72, 0.58].map((height, index) => (
+          <View key={`${label}-${index}`} style={[styles.sparkBar, { height: 8 + height * 20, backgroundColor: accent }]} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function ReferenceMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.referenceMetric}>
+      <Text style={styles.referenceMetricValue}>{value}</Text>
+      <Text style={styles.referenceMetricLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function SciencePanel() {
+  return (
+    <Card testID="science-panel" style={{ gap: spacing.sm, marginTop: spacing.md }}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+        <View style={styles.scienceIcon}>
+          <Ionicons name="flask-outline" size={16} color={colors.aqua} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={[typography.body, { fontWeight: "900" }]}>Basé sur la science</Text>
+          <Text style={typography.small}>Repères courts, sans jargon.</Text>
+        </View>
+      </View>
+      {SCIENCE_NOTES.slice(0, 4).map((note) => (
+        <View key={note} style={styles.scienceRow}>
+          <View style={styles.scienceDot} />
+          <Text style={styles.scienceText}>{note}</Text>
+        </View>
+      ))}
+    </Card>
+  );
+}
+
 function ProgramWeekCard({
-  week, isExpanded, isCurrent, onToggle, onEditDay,
+  week, totalWeeks, currentWeek, isExpanded, isCurrent, onToggle, onEditDay,
 }: {
   week: ProgramWeek;
+  totalWeeks: number;
+  currentWeek: number;
   isExpanded: boolean;
   isCurrent: boolean;
   onToggle: () => void;
   onEditDay: (dayIndex: number) => void;
 }) {
   const palette = SESSION_COLOR[week.session_type] || SESSION_COLOR.volume;
+  const status = week.week_index < currentWeek ? "Terminée" : isCurrent ? "En cours" : "À venir";
+  const adherence = week.week_index < currentWeek ? 88 : isCurrent ? 68 : 0;
   return (
     <Card style={{ marginBottom: 0, borderLeftWidth: 4, borderLeftColor: palette.fg }} testID={`program-week-${week.week_index}`}>
       <TouchableOpacity onPress={onToggle} activeOpacity={0.7}>
@@ -1607,7 +2278,9 @@ function ProgramWeekCard({
                 </View>
               )}
             </View>
-            <Text style={typography.small}>{week.days.length} séances · {week.days.map((d) => d.focus).join(" · ")}</Text>
+            <Text style={typography.small}>
+              {status} · {phaseForWeek(totalWeeks, week.week_index)} · {week.days.length} séances
+            </Text>
           </View>
           <View style={[styles.weekTypePill, { backgroundColor: palette.bg, borderColor: palette.border }]}>
             <Text style={{ fontSize: 11, fontWeight: "700", color: palette.fg, textTransform: "uppercase" }}>{week.session_type}</Text>
@@ -1617,6 +2290,15 @@ function ProgramWeekCard({
       </TouchableOpacity>
       {isExpanded && (
         <View style={{ marginTop: spacing.md, gap: 6 }}>
+          <View style={styles.weekMetrics}>
+            <MiniMetric label="Adhérence" value={adherence ? `${adherence}%` : "À venir"} />
+            <MiniMetric label="Charge" value={week.week_index <= currentWeek ? "+2%" : "Planifié"} />
+            <MiniMetric label="Fatigue" value={isCurrent ? "Modérée" : week.week_index < currentWeek ? "OK" : "—"} />
+          </View>
+          <View style={styles.aiCoachBox}>
+            <Ionicons name="sparkles-outline" size={15} color={colors.primaryLight} />
+            <Text style={styles.aiCoachText}>{weeklyAiAdvice(week.session_type, week.week_index)}</Text>
+          </View>
           {week.days.map((d) => (
             <TouchableOpacity
               key={d.day_index}
@@ -1644,6 +2326,15 @@ function ProgramWeekCard({
         </View>
       )}
     </Card>
+  );
+}
+
+function MiniMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <View style={styles.miniMetric}>
+      <Text style={styles.miniMetricValue}>{value}</Text>
+      <Text style={styles.miniMetricLabel}>{label}</Text>
+    </View>
   );
 }
 
