@@ -24,7 +24,7 @@ export type AppUser = {
   notif_prefs?: {
     reminders: Array<{
       id: string;
-      kind: "workout" | "protein";
+      kind: "workout" | "protein" | "meal" | "hydration" | "morning" | "weekly" | "level" | "custom";
       hour: number;
       minute: number;
       enabled: boolean;

@@ -7,6 +7,7 @@ import uuid
 import json
 import re
 import logging
+import unicodedata
 from pathlib import Path
 from datetime import datetime, timezone, timedelta, date as dt_date
 from typing import List, Optional, Dict, Any, Set
@@ -361,7 +362,7 @@ class NotifPrefsRequest(BaseModel):
 
 
 class ChallengeStartRequest(BaseModel):
-    type: str  # "pushups" | "abs" | "squats"
+    type: str  # pushups | abs | squats | plank | steps10k | running (+ aliases)
 
 
 class ChallengeCheckDayRequest(BaseModel):
@@ -1194,6 +1195,47 @@ CHALLENGE_BLUEPRINTS: Dict[str, Dict[str, Any]] = {
 }
 
 
+CHALLENGE_ALIASES = {
+    "pushup": "pushups",
+    "pushups": "pushups",
+    "pompe": "pushups",
+    "pompes": "pushups",
+    "defipompes": "pushups",
+    "abs": "abs",
+    "abdo": "abs",
+    "abdos": "abs",
+    "abdominaux": "abs",
+    "defiabdos": "abs",
+    "squat": "squats",
+    "squats": "squats",
+    "defisquats": "squats",
+    "plank": "plank",
+    "planche": "plank",
+    "gainage": "plank",
+    "defigainage": "plank",
+    "steps": "steps10k",
+    "pas": "steps10k",
+    "10000pas": "steps10k",
+    "10kpas": "steps10k",
+    "10k": "steps10k",
+    "steps10k": "steps10k",
+    "defi10000pas": "steps10k",
+    "run": "running",
+    "running": "running",
+    "course": "running",
+    "courseapied": "running",
+    "defirunning": "running",
+}
+
+
+def normalize_challenge_type(raw: str) -> str:
+    """Accept both internal ids and user-facing French labels."""
+    normalized = unicodedata.normalize("NFKD", raw or "")
+    normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+    key = re.sub(r"[^a-z0-9]+", "", normalized.lower())
+    return CHALLENGE_ALIASES.get(key, key)
+
+
 def _challenge_volume_for(day_index: int, level: int) -> int:
     """Volume progressif sur 30 jours. level 1-3 (débutant/intermédiaire/avancé)."""
     base = {1: 10, 2: 20, 3: 35}.get(level, 15)
@@ -1746,7 +1788,7 @@ async def update_notif_prefs(
 # ---- POINTS / LEVELS ----
 
 POINT_RULES = {
-    "workout_completed": 20,
+    "workout_completed": 100,
     "protein_target_hit": 10,
     "calories_on_track": 10,
     "challenge_day": 50,
@@ -1754,6 +1796,10 @@ POINT_RULES = {
     "sleep_bonus_8h": 100,
     "sleep_penalty_6h": -50,
     "sleep_penalty_5h": -100,
+    "missed_workout_penalty": -25,
+    "missed_meal_penalty": -20,
+    "protein_low_penalty": -20,
+    "sleep_missing_penalty": -20,
     "pr_beaten": 25,
     "streak_bonus": 5,
     "combo_bonus": 20,  # 3+ goals in same day
@@ -1822,27 +1868,169 @@ async def evaluate_daily_combos(user_id: str) -> None:
         await award_points(user_id, "combo_bonus", meta={"key": "combo_" + d})
 
 
+def health_state_for(level: int, weekly_steps: int, active_minutes: int, weekly_workouts: int) -> Dict[str, Any]:
+    if level >= 8:
+        title = "Condition solide"
+        summary = "Ton niveau indique une base cardio-musculaire déjà bien installée."
+    elif level >= 5:
+        title = "Rythme protecteur"
+        summary = "Tu construis une routine qui soutient l'énergie, le souffle et la force."
+    elif level >= 3:
+        title = "Base active"
+        summary = "Les premiers effets se jouent sur la régularité et la dépense quotidienne."
+    else:
+        title = "Mise en route"
+        summary = "Chaque séance et chaque marche créent le socle de progression."
+    benefits: List[str] = []
+    if weekly_workouts >= 2:
+        benefits.append("Renforcement musculaire, posture et métabolisme mieux stimulés.")
+    if active_minutes >= 150:
+        benefits.append("Objectif hebdo d'activité atteint : bon signal pour le coeur et l'endurance.")
+    elif active_minutes >= 75:
+        benefits.append("Activité cardio en construction : vise encore quelques minutes actives.")
+    if weekly_steps >= 50000:
+        benefits.append("Beau volume de pas : meilleure dépense quotidienne et récupération active.")
+    elif weekly_steps >= 25000:
+        benefits.append("Les pas soutiennent ta dépense de fond sans ajouter trop de fatigue.")
+    if not benefits:
+        benefits.append("Commence par une séance et une marche : le compteur santé monte vite.")
+    return {
+        "title": title,
+        "summary": summary,
+        "benefits": benefits[:3],
+    }
+
+
+async def evaluate_previous_day_penalties(user_id: str) -> None:
+    """Best-effort daily accountability. Idempotent by date/reason/key."""
+    target_day = now_utc().date() - timedelta(days=1)
+    d = target_day.isoformat()
+    existing_review = await db.points_events.find_one(
+        {"user_id": user_id, "date": d, "reason": "daily_review_marker", "key": f"review_{d}"}
+    )
+    if existing_review:
+        return
+
+    program = await db.programs.find_one({"user_id": user_id, "active": True}, {"_id": 0})
+    training_days = program.get("training_days") if program else None
+    should_train = bool(training_days and target_day.weekday() in set(int(x) for x in training_days))
+    workout_done = await db.workouts.find_one({"user_id": user_id, "date": d, "completed": True})
+    if should_train and not workout_done:
+        await db.points_events.update_one(
+            {"user_id": user_id, "date": d, "reason": "missed_workout_penalty", "key": f"missed_workout_{d}"},
+            {"$setOnInsert": {
+                "id": new_id("pt"),
+                "user_id": user_id,
+                "date": d,
+                "reason": "missed_workout_penalty",
+                "key": f"missed_workout_{d}",
+                "amount": POINT_RULES["missed_workout_penalty"],
+                "meta": {"key": f"missed_workout_{d}"},
+                "created_at": now_utc(),
+            }},
+            upsert=True,
+        )
+
+    profile = await db.profiles.find_one({"user_id": user_id}, {"_id": 0}) or {}
+    protein_target = float(profile.get("protein_g", 0) or 0)
+    meals = await db.meals.find({"user_id": user_id, "date": d}, {"_id": 0, "image_base64": 0}).to_list(200)
+    if not meals:
+        await db.points_events.update_one(
+            {"user_id": user_id, "date": d, "reason": "missed_meal_penalty", "key": f"missed_meal_{d}"},
+            {"$setOnInsert": {
+                "id": new_id("pt"),
+                "user_id": user_id,
+                "date": d,
+                "reason": "missed_meal_penalty",
+                "key": f"missed_meal_{d}",
+                "amount": POINT_RULES["missed_meal_penalty"],
+                "meta": {"key": f"missed_meal_{d}"},
+                "created_at": now_utc(),
+            }},
+            upsert=True,
+        )
+    elif protein_target > 0:
+        protein = sum(float(m.get("protein_g", 0) or 0) for m in meals)
+        if protein < protein_target * 0.75:
+            await db.points_events.update_one(
+                {"user_id": user_id, "date": d, "reason": "protein_low_penalty", "key": f"protein_low_{d}"},
+                {"$setOnInsert": {
+                    "id": new_id("pt"),
+                    "user_id": user_id,
+                    "date": d,
+                    "reason": "protein_low_penalty",
+                    "key": f"protein_low_{d}",
+                    "amount": POINT_RULES["protein_low_penalty"],
+                    "meta": {"key": f"protein_low_{d}", "protein_g": protein, "target_g": protein_target},
+                    "created_at": now_utc(),
+                }},
+                upsert=True,
+            )
+
+    sleep = await db.sleep.find_one({"user_id": user_id, "date": d}, {"_id": 0})
+    if not sleep:
+        await db.points_events.update_one(
+            {"user_id": user_id, "date": d, "reason": "sleep_missing_penalty", "key": f"sleep_missing_{d}"},
+            {"$setOnInsert": {
+                "id": new_id("pt"),
+                "user_id": user_id,
+                "date": d,
+                "reason": "sleep_missing_penalty",
+                "key": f"sleep_missing_{d}",
+                "amount": POINT_RULES["sleep_missing_penalty"],
+                "meta": {"key": f"sleep_missing_{d}"},
+                "created_at": now_utc(),
+            }},
+            upsert=True,
+        )
+
+    await db.points_events.update_one(
+        {"user_id": user_id, "date": d, "reason": "daily_review_marker", "key": f"review_{d}"},
+        {"$setOnInsert": {
+            "id": new_id("pt"),
+            "user_id": user_id,
+            "date": d,
+            "reason": "daily_review_marker",
+            "key": f"review_{d}",
+            "amount": 0,
+            "meta": {"key": f"review_{d}"},
+            "created_at": now_utc(),
+        }},
+        upsert=True,
+    )
+
+
 @api.get("/points/summary")
 async def points_summary(authorization: Optional[str] = Header(default=None)):
     user = await get_current_user(authorization)
+    try:
+        await evaluate_previous_day_penalties(user["user_id"])
+    except Exception as e:
+        log.warning(f"daily penalties failed: {e}")
     today = today_str()
+    today_date = datetime.strptime(today, "%Y-%m-%d").date()
+    week_start = (today_date - timedelta(days=today_date.weekday())).isoformat()
     pipeline_total = [
         {"$match": {"user_id": user["user_id"]}},
         {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
     ]
-    pipeline_today = [
-        {"$match": {"user_id": user["user_id"], "date": today}},
-        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
-    ]
+    pipeline_today = [{"$match": {"user_id": user["user_id"], "date": today}}]
+    pipeline_week = [{"$match": {"user_id": user["user_id"], "date": {"$gte": week_start, "$lte": today}}}]
     cur_t = db.points_events.aggregate(pipeline_total)
-    cur_d = db.points_events.aggregate(pipeline_today)
+    cur_d = db.points_events.aggregate(pipeline_today + [{"$project": {"amount": 1}}])
+    cur_w = db.points_events.aggregate(pipeline_week + [{"$project": {"amount": 1}}])
     total_doc = await cur_t.to_list(1)
-    today_doc = await cur_d.to_list(1)
+    today_events = await cur_d.to_list(200)
+    week_events = await cur_w.to_list(1000)
     total = int(total_doc[0]["total"]) if total_doc else 0
-    points_today = int(today_doc[0]["total"]) if today_doc else 0
+    points_today = int(sum(int(ev.get("amount", 0)) for ev in today_events))
+    points_gained_today = int(sum(max(0, int(ev.get("amount", 0))) for ev in today_events))
+    points_lost_today = int(sum(abs(min(0, int(ev.get("amount", 0)))) for ev in today_events))
+    points_gained_week = int(sum(max(0, int(ev.get("amount", 0))) for ev in week_events))
+    points_lost_week = int(sum(abs(min(0, int(ev.get("amount", 0)))) for ev in week_events))
     # Last 5 events
     recent = await db.points_events.find(
-        {"user_id": user["user_id"]}, {"_id": 0}
+        {"user_id": user["user_id"], "amount": {"$ne": 0}}, {"_id": 0}
     ).sort("created_at", -1).limit(5).to_list(5)
     # Streak: consecutive days with at least one workout_completed
     streak = 0
@@ -1857,7 +2045,34 @@ async def points_summary(authorization: Optional[str] = Header(default=None)):
                 continue  # today not yet completed shouldn't break the streak
             break
     lvl = compute_level(total)
-    return {**lvl, "points_today": points_today, "recent": recent, "streak_days": streak}
+    week_workouts = await db.workouts.count_documents(
+        {"user_id": user["user_id"], "date": {"$gte": week_start, "$lte": today}, "completed": True}
+    )
+    activity_docs = await db.activity.find(
+        {"user_id": user["user_id"], "date": {"$gte": week_start, "$lte": today}}, {"_id": 0}
+    ).to_list(10)
+    weekly_steps = sum(int(a.get("steps", 0) or 0) for a in activity_docs)
+    weekly_active = sum(int(a.get("cardio_minutes", 0) or 0) for a in activity_docs)
+    next_level_points = max(0, int(lvl.get("level_span", 0)) - int(lvl.get("points_in_level", 0)))
+    return {
+        **lvl,
+        "points_today": points_today,
+        "points_gained_today": points_gained_today,
+        "points_lost_today": points_lost_today,
+        "points_net_today": points_today,
+        "points_gained_week": points_gained_week,
+        "points_lost_week": points_lost_week,
+        "points_net_week": points_gained_week - points_lost_week,
+        "next_level_points": next_level_points,
+        "health_state": health_state_for(lvl["level"], weekly_steps, weekly_active, week_workouts),
+        "weekly_activity": {
+            "workouts": week_workouts,
+            "steps": weekly_steps,
+            "active_minutes": weekly_active,
+        },
+        "recent": recent,
+        "streak_days": streak,
+    }
 
 
 def sleep_points_for(hours: float) -> tuple[str, int]:
@@ -2494,7 +2709,7 @@ async def challenge_start(
     body: ChallengeStartRequest, authorization: Optional[str] = Header(default=None)
 ):
     user = await get_current_user(authorization)
-    ch_type = body.type.lower()
+    ch_type = normalize_challenge_type(body.type)
     if ch_type not in CHALLENGE_BLUEPRINTS:
         raise HTTPException(400, "Type invalide")
     # Stop any active challenge of the same type
@@ -2720,6 +2935,14 @@ async def program_day_to_workout(
     if not target_d:
         raise HTTPException(404, "Program day not found")
 
+    training_days = prog.get("training_days") or []
+    day_labels = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+    raw_day_index = int(target_d.get("day_index", day_index))
+    if raw_day_index < len(training_days):
+        title_day = day_labels[int(training_days[raw_day_index]) % 7]
+    else:
+        title_day = f"J{raw_day_index + 1}"
+
     exercises: List[Dict[str, Any]] = []
     for exercise in target_d.get("exercises") or []:
         if exercise.get("checked") is False:
@@ -2738,7 +2961,7 @@ async def program_day_to_workout(
         "id": new_id("wk"),
         "user_id": user["user_id"],
         "date": target_date,
-        "title": f"{str(prog.get('split', 'FULLBODY')).upper()} J{int(target_d.get('day_index', day_index)) + 1}",
+        "title": f"{str(prog.get('split', 'FULLBODY')).upper()} {title_day}",
         "focus": str(target_d.get("focus") or prog.get("goal_label") or "Séance du jour"),
         "duration_min": int(target_d.get("duration_min", 45) or 45),
         "exercises": exercises,
@@ -2963,9 +3186,20 @@ async def workouts_history(
     history: List[Dict[str, Any]] = []
     for w in items:
         # Attach perf records logged for this workout
-        perfs = await db.performances.find(
+        perfs = await db.exercise_perf.find(
             {"user_id": user["user_id"], "workout_id": w.get("id")}, {"_id": 0}
         ).sort("created_at", 1).to_list(50)
+        point_rows = await db.points_events.find(
+            {
+                "user_id": user["user_id"],
+                "$or": [
+                    {"meta.key": f"wk_{w.get('id')}"},
+                    {"meta.key": {"$regex": f"^pr_{re.escape(str(w.get('id')))}_"}},
+                ],
+            },
+            {"_id": 0, "amount": 1},
+        ).to_list(50)
+        points_earned = int(sum(max(0, int(p.get("amount", 0) or 0)) for p in point_rows))
         history.append({
             "id": w.get("id"),
             "date": w.get("date"),
@@ -2974,6 +3208,7 @@ async def workouts_history(
             "session_type": w.get("session_type", "volume"),
             "duration_min": w.get("duration_min", 45),
             "completed": True,
+            "points_earned": points_earned,
             "exercises": [e for e in (w.get("exercises") or []) if e.get("checked", True) is not False],
             "performances": perfs,
         })
@@ -2986,6 +3221,32 @@ async def delete_all_workouts(authorization: Optional[str] = Header(default=None
     user = await get_current_user(authorization)
     result = await db.workouts.delete_many({"user_id": user["user_id"]})
     return {"deleted": result.deleted_count}
+
+
+async def cleanup_workout_points(user_id: str, workout_id: str) -> int:
+    result = await db.points_events.delete_many(
+        {
+            "user_id": user_id,
+            "$or": [
+                {"meta.key": f"wk_{workout_id}"},
+                {"meta.key": {"$regex": f"^pr_{re.escape(workout_id)}_"}},
+            ],
+        }
+    )
+    return int(result.deleted_count)
+
+
+@api.delete("/workouts/{workout_id}")
+async def delete_workout(workout_id: str, authorization: Optional[str] = Header(default=None)):
+    """Delete one workout from history/calendar and remove its direct points/performance records."""
+    user = await get_current_user(authorization)
+    workout = await db.workouts.find_one({"id": workout_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not workout:
+        raise HTTPException(404, "Workout not found")
+    await db.workouts.delete_one({"id": workout_id, "user_id": user["user_id"]})
+    await db.exercise_perf.delete_many({"user_id": user["user_id"], "workout_id": workout_id})
+    deleted_points = await cleanup_workout_points(user["user_id"], workout_id)
+    return {"ok": True, "deleted_points": deleted_points}
 
 
 @api.put("/workouts/{workout_id}")
@@ -3647,13 +3908,7 @@ async def uncomplete_workout(workout_id: str, authorization: Optional[str] = Hea
     if res.matched_count == 0:
         raise HTTPException(404, "Workout not found")
     try:
-        await db.points_events.delete_many(
-            {
-                "user_id": user["user_id"],
-                "reason": "workout_completed",
-                "meta.key": f"wk_{workout_id}",
-            }
-        )
+        await cleanup_workout_points(user["user_id"], workout_id)
     except Exception as e:
         log.warning(f"uncomplete_workout points cleanup: {e}")
     return {"ok": True}

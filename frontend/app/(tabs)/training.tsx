@@ -9,6 +9,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import * as Haptics from "expo-haptics";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
+import * as Calendar from "expo-calendar";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { Card, Button, SectionTitle, Stat } from "@/src/components/UI";
@@ -22,7 +23,7 @@ import { PROGRAM_PRESETS, phaseForWeek, presetByGoal } from "@/src/lib/programPr
 type Exercise = { name: string; sets: number; reps: string; rest_s: number; checked?: boolean; is_recommended?: boolean };
 type Workout = {
   id: string; date: string; title: string; focus: string; duration_min: number;
-  exercises: Exercise[]; completed: boolean; session_type?: string;
+  exercises: Exercise[]; completed: boolean; session_type?: string; points_earned?: number;
 };
 type Activity = { date: string; steps: number; cardio_minutes: number; cardio_type?: string };
 type LibExercise = { id: string; name: string; category: string; equipment: string };
@@ -100,6 +101,8 @@ const REST_DEFAULTS: Record<string, number> = {
   endurance: 45,
 };
 
+const WEEKDAY_SHORT = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+
 const EXERCISE_VISUALS: ImageSourcePropType[] = [
   require("../../assets/images/fitai-hero-activities-hd.png"),
   require("../../assets/images/fitai-hero-program-hd.png"),
@@ -142,6 +145,12 @@ function defaultTrainingDays(frequency: number) {
   return [0, 2, 4];
 }
 
+function sessionLabelForIndex(dayIndex: number, trainingDays?: number[] | null) {
+  const day = trainingDays?.[dayIndex];
+  if (typeof day === "number" && WEEKDAY_SHORT[day]) return WEEKDAY_SHORT[day];
+  return `J${dayIndex + 1}`;
+}
+
 function toLocalIsoDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
@@ -178,7 +187,7 @@ function plannedWorkoutsFromProgram(program: TrainingProgram | null): CalendarSy
     events.push({
       id: `program-${program.id}-${weekIndex}-${day.day_index}`,
       date: toLocalIsoDate(date),
-      title: `${program.split.toUpperCase()} J${day.day_index + 1}`,
+      title: `${program.split.toUpperCase()} ${sessionLabelForIndex(day.day_index, trainingDays)}`,
       focus: day.focus || program.goal_label || "Séance FIT AI",
       duration_min: 45,
       exercises: day.exercises.filter((exercise) => exercise.checked !== false),
@@ -240,6 +249,65 @@ function buildTrainingCalendar(workouts: CalendarSyncWorkout[]) {
     });
   lines.push("END:VCALENDAR");
   return `${lines.join("\r\n")}\r\n`;
+}
+
+async function getOrCreateFitAiCalendarId() {
+  const existing = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+  const current = existing.find((item) => item.title === "FIT AI" && item.allowsModifications);
+  if (current?.id) return current.id;
+
+  if (Platform.OS === "ios") {
+    const defaultCalendar = await Calendar.getDefaultCalendarAsync();
+    return Calendar.createCalendarAsync({
+      title: "FIT AI",
+      color: "#B6FF3F",
+      entityType: Calendar.EntityTypes.EVENT,
+      sourceId: defaultCalendar.sourceId,
+      source: defaultCalendar.source,
+      name: "FIT AI",
+      ownerAccount: "FIT AI",
+      accessLevel: Calendar.CalendarAccessLevel.OWNER,
+    });
+  }
+
+  return Calendar.createCalendarAsync({
+    title: "FIT AI",
+    color: "#B6FF3F",
+    entityType: Calendar.EntityTypes.EVENT,
+    source: { name: "FIT AI", isLocalAccount: true, type: Calendar.SourceType.LOCAL },
+    name: "FIT AI",
+    ownerAccount: "FIT AI",
+    accessLevel: Calendar.CalendarAccessLevel.OWNER,
+  });
+}
+
+async function syncWorkoutsToNativeCalendar(workouts: CalendarSyncWorkout[]) {
+  if (Platform.OS === "web") return 0;
+  const permission = await Calendar.requestCalendarPermissionsAsync();
+  if (!permission.granted) return 0;
+  const calendarId = await getOrCreateFitAiCalendarId();
+  let count = 0;
+  for (const workout of workouts.slice(0, 120)) {
+    const startDate = new Date(`${workout.date}T18:00:00`);
+    const endDate = new Date(startDate);
+    endDate.setMinutes(endDate.getMinutes() + Math.max(20, workout.duration_min || 45));
+    const exercises = workout.exercises
+      .map((exercise) => `${exercise.name} - ${exercise.sets} x ${exercise.reps}`)
+      .join("\n");
+    try {
+      await Calendar.createEventAsync(calendarId, {
+        title: `FIT AI - ${workout.focus || workout.title}`,
+        startDate,
+        endDate,
+        notes: `${workout.title}\n${workout.session_type || "Séance"} · ${workout.duration_min || 45} min\n${exercises}`,
+        alarms: [{ relativeOffset: -60 }],
+      });
+      count += 1;
+    } catch (e) {
+      console.warn("native calendar event", e);
+    }
+  }
+  return count;
 }
 
 // Phase 5 — C4: red-highlight AI-recommended exercises per session type.
@@ -417,7 +485,33 @@ export default function Training() {
   const uncompleteWorkout = async (id: string) => {
     await api(`/workouts/${id}/uncomplete`, { method: "POST" });
     await load();
+    await loadHistory();
     if (tab === "calendar") loadCalendar(calMonth);
+  };
+
+  const deleteHistoryWorkout = (workout: Workout) => {
+    Alert.alert(
+      "Supprimer la séance",
+      "La séance, ses performances et ses points directs seront retirés de l'historique.",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Supprimer",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await api(`/workouts/${workout.id}`, { method: "DELETE" });
+              setHistoryExpanded(null);
+              await load();
+              await loadHistory();
+              if (tab === "calendar") loadCalendar(calMonth);
+            } catch {
+              Alert.alert("Erreur", "Impossible de supprimer cette séance.");
+            }
+          },
+        },
+      ]
+    );
   };
 
   const toggleWorkoutComplete = async (workout: Workout) => {
@@ -508,6 +602,14 @@ export default function Training() {
       if (events.length === 0) {
         Alert.alert("Agenda", "Aucune séance à synchroniser pour le moment.");
         return;
+      }
+
+      if (Platform.OS !== "web") {
+        const synced = await syncWorkoutsToNativeCalendar(events);
+        if (synced > 0) {
+          Alert.alert("Agenda synchronisé", `${synced} séance${synced > 1 ? "s" : ""} ajoutée${synced > 1 ? "s" : ""} dans le calendrier FIT AI.`);
+          return;
+        }
       }
 
       const ics = buildTrainingCalendar(events);
@@ -863,6 +965,7 @@ export default function Training() {
     setEditorOpen(false);
     setEditWorkout(null);
     await load();
+    if (tab === "history") await loadHistory();
   };
 
   const moveExerciseInEditor = (from: number, to: number) => {
@@ -1118,7 +1221,7 @@ export default function Training() {
   const plannedTodayWorkout: Workout | null = todayWorkout || (program && activeProgramWeek && selectedDay ? {
     id: `prog:${program.id}:${activeProgramWeek.week_index}:${selectedDay.day_index}`,
     date: today,
-    title: `${program.split.toUpperCase()} J${selectedDay.day_index + 1}`,
+    title: `${program.split.toUpperCase()} ${sessionLabelForIndex(selectedDay.day_index, program.training_days)}`,
     focus: selectedDay.focus,
     duration_min: 45,
     exercises: selectedDay.exercises.map((exercise) => ({ ...exercise, checked: exercise.checked !== false })),
@@ -1143,7 +1246,7 @@ export default function Training() {
     ? Math.min(100, Math.round(((program.current_week + 1) / program.weeks_total) * 100))
     : 0;
   const todayPlanLabel = program
-    ? `${(program.split || "fullbody").toUpperCase()} J${(selectedDay?.day_index ?? 0) + 1}`
+    ? `${(program.split || "fullbody").toUpperCase()} ${sessionLabelForIndex(selectedDay?.day_index ?? 0, program.training_days)}`
     : plannedTodayWorkout?.title || "FULLBODY J1";
   // Library grouped by category, used in editor
   const libByCategory = useMemo(() => {
@@ -1360,6 +1463,7 @@ export default function Training() {
                 currentWeek={program.current_week}
                 isCurrent={program.current_week === activeProgramWeek.week_index}
                 selectedDay={selectedDay}
+                trainingDays={program.training_days}
                 onEditDay={(dayIndex) => openProgramDayEditor(program, activeProgramWeek.week_index, dayIndex)}
               />
             )}
@@ -1472,6 +1576,10 @@ export default function Training() {
                             {new Date(w.date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "short" })} · {w.exercises.length} exercices · {w.duration_min} min
                           </Text>
                         </View>
+                        <View style={styles.historyPointsPill}>
+                          <Ionicons name="star" size={12} color={colors.primaryLight} />
+                          <Text style={styles.historyPointsText}>+{w.points_earned || 100} pts</Text>
+                        </View>
                         <TypeChip type={(w.session_type as SessionKey) || "volume"} compact />
                         <Ionicons name={isOpen ? "chevron-up" : "chevron-down"} size={18} color={colors.textMuted} />
                       </View>
@@ -1483,14 +1591,32 @@ export default function Training() {
                             • {e.name} — {e.sets} × {e.reps}
                           </Text>
                         ))}
-                        <TouchableOpacity
-                          onPress={() => uncompleteWorkout(w.id)}
-                          style={styles.historyUncompleteButton}
-                          testID={`history-uncomplete-${w.id}`}
-                        >
-                          <Ionicons name="arrow-undo-outline" size={14} color={colors.primaryLight} />
-                          <Text style={styles.historyUncompleteText}>Annuler cette séance effectuée</Text>
-                        </TouchableOpacity>
+                        <View style={styles.historyActionRow}>
+                          <TouchableOpacity
+                            onPress={() => openEditor(w)}
+                            style={styles.historyActionButton}
+                            testID={`history-edit-${w.id}`}
+                          >
+                            <Ionicons name="create-outline" size={14} color={colors.primaryLight} />
+                            <Text style={styles.historyActionText}>Modifier</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => uncompleteWorkout(w.id)}
+                            style={styles.historyActionButton}
+                            testID={`history-uncomplete-${w.id}`}
+                          >
+                            <Ionicons name="arrow-undo-outline" size={14} color={colors.primaryLight} />
+                            <Text style={styles.historyActionText}>Annuler</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            onPress={() => deleteHistoryWorkout(w)}
+                            style={[styles.historyActionButton, styles.historyDeleteButton]}
+                            testID={`history-delete-${w.id}`}
+                          >
+                            <Ionicons name="trash-outline" size={14} color={colors.alert} />
+                            <Text style={[styles.historyActionText, { color: colors.alert }]}>Supprimer</Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
                     )}
                   </Card>
@@ -2429,6 +2555,12 @@ const styles = StyleSheet.create({
   histDot: { width: 8, height: 8, borderRadius: 4 },
   historyUncompleteButton: { minHeight: 38, marginTop: spacing.sm, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.25)", backgroundColor: "rgba(182,255,63,0.08)", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
   historyUncompleteText: { color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
+  historyPointsPill: { minHeight: 28, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.08)" },
+  historyPointsText: { color: colors.primaryLight, fontSize: 10.5, fontWeight: "900" },
+  historyActionRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: spacing.sm },
+  historyActionButton: { flex: 1, minWidth: 96, minHeight: 38, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.25)", backgroundColor: "rgba(182,255,63,0.08)", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 10 },
+  historyActionText: { color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
+  historyDeleteButton: { borderColor: "rgba(255,94,94,0.35)", backgroundColor: "rgba(255,94,94,0.08)" },
   // Timer overlay
   timerOverlay: { position: "absolute", left: 0, right: 0, bottom: spacing.lg, alignItems: "center", padding: spacing.md, zIndex: 100, elevation: 10 },
   timerCard: { backgroundColor: "rgba(6,20,10,0.97)", padding: spacing.md, borderRadius: radius.lg, alignItems: "center", borderWidth: 2, borderColor: colors.primaryLight, width: "92%", maxWidth: 360, gap: 4 },
@@ -2498,9 +2630,9 @@ const styles = StyleSheet.create({
   runnerParamCard: { flex: 1, minHeight: 124, alignItems: "center", justifyContent: "space-between", padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.11)", backgroundColor: "rgba(255,255,255,0.055)" },
   runnerParamInput: { minWidth: 0, color: colors.textMain, fontSize: 26, lineHeight: 30, fontWeight: "900", paddingVertical: 0, textAlign: "center" },
   runnerParamLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "900" },
-  runnerParamUnit: { color: colors.textMuted, fontSize: 11, fontWeight: "900", marginBottom: 4 },
-  runnerWeightLine: { width: "100%", flexDirection: "row", alignItems: "flex-end", justifyContent: "center", gap: 3 },
-  runnerWeightInput: { width: 66, color: colors.textMain, fontSize: 25, lineHeight: 30, fontWeight: "900", paddingVertical: 0, textAlign: "center" },
+  runnerParamUnit: { color: colors.textMuted, fontSize: 11, fontWeight: "900", marginBottom: 5, width: 20, textAlign: "left" },
+  runnerWeightLine: { width: "100%", minHeight: 34, flexDirection: "row", alignItems: "flex-end", justifyContent: "center", gap: 2 },
+  runnerWeightInput: { width: 58, color: colors.textMain, fontSize: 24, lineHeight: 30, fontWeight: "900", paddingVertical: 0, textAlign: "right" },
   runnerTinyStepper: { flexDirection: "row", gap: 6 },
   runnerTinyStepButton: { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.06)" },
   runnerModifyPill: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 7, paddingVertical: 4, borderRadius: radius.full, backgroundColor: "rgba(182,255,63,0.08)" },
@@ -3080,13 +3212,14 @@ function ProgramActionsFooter({
 }
 
 function ProgramJourneyCard({
-  week, totalWeeks, currentWeek, isCurrent, selectedDay, onEditDay,
+  week, totalWeeks, currentWeek, isCurrent, selectedDay, trainingDays, onEditDay,
 }: {
   week: ProgramWeek;
   totalWeeks: number;
   currentWeek: number;
   isCurrent: boolean;
   selectedDay?: ProgramDay;
+  trainingDays?: number[] | null;
   onEditDay: (dayIndex: number) => void;
 }) {
   const phase = phaseForWeek(totalWeeks, week.week_index);
@@ -3123,7 +3256,9 @@ function ProgramJourneyCard({
               testID={`program-day-${week.week_index}-${d.day_index}`}
             >
               <View style={[styles.programJourneyDayBadge, active && styles.programJourneyDayBadgeActive]}>
-                <Text style={[styles.programJourneyDayBadgeText, active && styles.programJourneyDayBadgeTextActive]}>J{d.day_index + 1}</Text>
+                <Text style={[styles.programJourneyDayBadgeText, active && styles.programJourneyDayBadgeTextActive]}>
+                  {sessionLabelForIndex(d.day_index, trainingDays)}
+                </Text>
               </View>
               <View style={{ flex: 1 }}>
                 <View style={styles.programJourneyDayTop}>

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { View, Text, StyleSheet, ScrollView, RefreshControl, TouchableOpacity, TextInput, Modal } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
@@ -14,6 +14,7 @@ import { HydrationCard, useDailyHydration } from "@/src/components/HydrationCard
 import { SleepCard } from "@/src/components/SleepCard";
 import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { syncPhoneStepsToday } from "@/src/lib/steps";
+import { scheduleAutomaticFitAiReminders } from "@/src/lib/notifications";
 import { getSimpleMode, setSimpleMode as saveSimpleMode } from "@/src/lib/simpleMode";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
@@ -49,6 +50,27 @@ type WeekMacros = {
   tracked_days: number;
 };
 
+type PointsSummary = {
+  level: number;
+  points_total: number;
+  points_in_level: number;
+  level_span: number;
+  evolution: 1 | 2 | 3;
+  points_today: number;
+  points_gained_today?: number;
+  points_lost_today?: number;
+  points_net_today?: number;
+  points_gained_week?: number;
+  points_lost_week?: number;
+  points_net_week?: number;
+  next_level_points?: number;
+  streak_days: number;
+  health_state?: { title: string; summary: string; benefits: string[] };
+  weekly_activity?: { workouts: number; steps: number; active_minutes: number };
+};
+
+type WeekWorkout = { id: string; date: string; completed?: boolean };
+
 export default function Dashboard() {
   const router = useRouter();
   const { user } = useAuth();
@@ -65,32 +87,32 @@ export default function Dashboard() {
   const [savingActive, setSavingActive] = useState(false);
   const hydration = useDailyHydration(WATER_GOAL_ML);
   // Phase 5: points / share
-  const [points, setPoints] = useState<{
-    level: number;
-    points_total: number;
-    points_in_level: number;
-    level_span: number;
-    evolution: 1 | 2 | 3;
-    points_today: number;
-    streak_days: number;
-  } | null>(null);
+  const [points, setPoints] = useState<PointsSummary | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
   const [programSplit, setProgramSplit] = useState<string | null>(null);
+  const [trainingDays, setTrainingDays] = useState<number[]>([0, 2, 4]);
+  const [weeklyWorkoutDone, setWeeklyWorkoutDone] = useState(0);
+  const [weeklyWorkoutPlanned, setWeeklyWorkoutPlanned] = useState(3);
   const [simpleMode, setSimpleMode] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const [d, wm, ps, prog, simple] = await Promise.all([
+      const [d, wm, ps, prog, wk, simple] = await Promise.all([
         api<DashboardData>("/dashboard/day"),
         api<WeekMacros>("/dashboard/week-macros").catch(() => null),
-        api<any>("/points/summary").catch(() => null),
-        api<{ program: { split?: string } | null }>("/program/current").catch(() => null),
+        api<PointsSummary>("/points/summary").catch(() => null),
+        api<{ program: { split?: string; frequency?: number; training_days?: number[] | null } | null }>("/program/current").catch(() => null),
+        api<WeekWorkout[]>("/workouts/week").catch(() => []),
         getSimpleMode().catch(() => false),
       ]);
       setData(d);
       setWeekMacros(wm);
       setPoints(ps);
       setProgramSplit(prog?.program?.split || null);
+      const days = prog?.program?.training_days?.length ? prog.program.training_days : [0, 2, 4];
+      setTrainingDays(days);
+      setWeeklyWorkoutDone(wk.filter((item) => item.completed).length);
+      setWeeklyWorkoutPlanned(prog?.program?.frequency || days.length || 3);
       setSimpleMode(Boolean(simple));
     } catch (e) {
       console.warn("dashboard load", e);
@@ -108,6 +130,17 @@ export default function Dashboard() {
       load();
     }, [load])
   );
+
+  useEffect(() => {
+    if (!data || !points) return;
+    scheduleAutomaticFitAiReminders({
+      trainingDays,
+      weeklyDone: weeklyWorkoutDone,
+      weeklyPlanned: weeklyWorkoutPlanned,
+      nextLevelPoints: points.next_level_points || 0,
+      hydrationLow: hydration.amountMl < WATER_GOAL_ML * 0.6,
+    }).catch((e) => console.warn("auto notifications", e));
+  }, [data, points, trainingDays, weeklyWorkoutDone, weeklyWorkoutPlanned, hydration.amountMl]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -328,6 +361,7 @@ export default function Dashboard() {
         </View>
 
         <LevelProgressCard level={level} xpInLevel={xpInLevel} totalXp={totalXp} />
+        <PointsHealthCard points={points} />
 
         <CalorieRemainingCard
           consumed={data.consumed_calories}
@@ -626,6 +660,54 @@ function LevelProgressCard({ level, xpInLevel, totalXp }: { level: number; xpInL
   );
 }
 
+function PointsHealthCard({ points }: { points: PointsSummary | null }) {
+  if (!points) return null;
+  const gainedToday = points.points_gained_today ?? Math.max(0, points.points_today || 0);
+  const lostToday = points.points_lost_today ?? 0;
+  const weekGain = points.points_gained_week ?? 0;
+  const next = points.next_level_points ?? Math.max(0, XP_PER_LEVEL - (points.points_in_level || 0));
+  return (
+    <Card testID="dashboard-points-card" style={styles.pointsHealthCard}>
+      <View style={styles.pointsHealthTop}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.pointsHealthLabel}>Points aujourd&apos;hui</Text>
+          <Text style={styles.pointsHealthValue}>+{gainedToday} / -{lostToday}</Text>
+        </View>
+        <View style={styles.pointsTotalPill}>
+          <Ionicons name="star" size={14} color={colors.primaryLight} />
+          <Text style={styles.pointsTotalText}>{points.points_total.toLocaleString("fr-FR")} pts</Text>
+        </View>
+      </View>
+      <View style={styles.pointsMiniGrid}>
+        <View style={styles.pointsMini}>
+          <Text style={styles.pointsMiniValue}>+{weekGain}</Text>
+          <Text style={styles.pointsMiniLabel}>semaine</Text>
+        </View>
+        <View style={styles.pointsMini}>
+          <Text style={styles.pointsMiniValue}>{next}</Text>
+          <Text style={styles.pointsMiniLabel}>prochain niveau</Text>
+        </View>
+        <View style={styles.pointsMini}>
+          <Text style={styles.pointsMiniValue}>{points.weekly_activity?.workouts || 0}</Text>
+          <Text style={styles.pointsMiniLabel}>séances</Text>
+        </View>
+      </View>
+      {points.health_state ? (
+        <View style={styles.healthStateBox}>
+          <Ionicons name="heart-circle-outline" size={18} color={colors.primaryLight} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.healthStateTitle}>{points.health_state.title}</Text>
+            <Text style={styles.healthStateText}>{points.health_state.summary}</Text>
+            {points.health_state.benefits?.[0] ? (
+              <Text style={styles.healthBenefitText}>{points.health_state.benefits[0]}</Text>
+            ) : null}
+          </View>
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
 function CalorieRemainingCard({
   consumed,
   remaining,
@@ -851,6 +933,20 @@ const styles = StyleSheet.create({
   levelTrack: { height: 8, borderRadius: 4, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.12)", marginTop: spacing.sm },
   levelFill: { height: "100%", borderRadius: 4, backgroundColor: colors.primaryLight },
   levelHint: { color: colors.textMuted, fontSize: 10.5, lineHeight: 14, marginTop: 6, fontWeight: "700" },
+  pointsHealthCard: { gap: spacing.md, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(3,22,15,0.58)" },
+  pointsHealthTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
+  pointsHealthLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "900", textTransform: "uppercase" },
+  pointsHealthValue: { color: colors.textMain, fontSize: 25, lineHeight: 29, fontWeight: "900", marginTop: 2 },
+  pointsTotalPill: { minHeight: 34, flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.26)", backgroundColor: "rgba(182,255,63,0.10)" },
+  pointsTotalText: { color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
+  pointsMiniGrid: { flexDirection: "row", gap: spacing.sm },
+  pointsMini: { flex: 1, minHeight: 56, justifyContent: "center", alignItems: "center", borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.055)" },
+  pointsMiniValue: { color: colors.textMain, fontSize: 16, fontWeight: "900" },
+  pointsMiniLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "800", marginTop: 2 },
+  healthStateBox: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(182,255,63,0.20)", backgroundColor: "rgba(182,255,63,0.07)" },
+  healthStateTitle: { color: colors.primaryLight, fontSize: 13, fontWeight: "900" },
+  healthStateText: { color: colors.textSecondary, fontSize: 11.5, lineHeight: 16, fontWeight: "700", marginTop: 2 },
+  healthBenefitText: { color: colors.textMuted, fontSize: 10.5, lineHeight: 15, fontWeight: "700", marginTop: 4 },
   calorieHeroCard: { gap: spacing.md, borderColor: "rgba(182,255,63,0.28)", backgroundColor: "rgba(3,22,15,0.66)" },
   calorieHeroTop: { flexDirection: "row", alignItems: "center", gap: spacing.md },
   calorieHeroLabel: { color: colors.primaryLight, fontSize: 12, fontWeight: "900", textTransform: "uppercase" },
