@@ -9,7 +9,7 @@ import * as ImagePicker from "expo-image-picker";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
-import { Card, Button, SectionTitle, WeekBars, LineChart1RM, ProgressRing } from "@/src/components/UI";
+import { Card, Button, SectionTitle, WeekBars, LineChart1RM } from "@/src/components/UI";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type Transfo = {
@@ -47,6 +47,14 @@ type Workout = {
 };
 
 type HistoryWeek = { label: string; sessions: number; duration: number; time: number; sleepAvg: number; sleepLow: boolean };
+type MuscleVolumeItem = {
+  muscle: string;
+  week_total: number;
+  total: number;
+  series: { week: string; volume: number }[];
+  top_exercises: { name: string; volume: number }[];
+};
+type MuscleVolumePayload = { weeks: string[]; items: MuscleVolumeItem[] };
 
 export default function Progress() {
   const [transfos, setTransfos] = useState<Transfo[]>([]);
@@ -54,6 +62,7 @@ export default function Progress() {
   const [perf, setPerf] = useState<PerfPayload>({ items: [], personal_bests: [] });
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [history, setHistory] = useState<Workout[]>([]);
+  const [muscleVolume, setMuscleVolume] = useState<MuscleVolumePayload | null>(null);
   const [sleepByDate, setSleepByDate] = useState<Record<string, number>>({});
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -63,18 +72,20 @@ export default function Progress() {
 
   const load = useCallback(async () => {
     try {
-      const [list, w, p, wk, hist] = await Promise.all([
+      const [list, w, p, wk, hist, mv] = await Promise.all([
         api<Transfo[]>("/transformations"),
         api<Week>("/dashboard/week"),
         api<PerfPayload>("/perf/recent?limit=200"),
         api<Workout[]>("/workouts/week").catch(() => []),
         api<Workout[]>("/workouts/history?limit=40").catch(() => []),
+        api<MuscleVolumePayload>("/perf/muscle-volume?weeks=8").catch(() => null),
       ]);
       setTransfos(list);
       setWeek(w);
       setPerf(p);
       setWorkouts(wk || []);
       setHistory(hist || []);
+      setMuscleVolume(mv);
       if (!selectedExercise && p.personal_bests.length > 0) {
         const counts: Record<string, number> = {};
         p.items.forEach((it) => { counts[it.exercise_name] = (counts[it.exercise_name] || 0) + 1; });
@@ -131,21 +142,10 @@ export default function Progress() {
     }
   };
 
-  const toggleWorkout = async (workout: Workout) => {
-    try {
-      await api(`/workouts/${workout.id}/${workout.completed ? "uncomplete" : "complete"}`, { method: "POST" });
-      await load();
-    } catch (e) {
-      console.warn("progress toggle workout", e);
-    }
-  };
-
   const totalWeekSteps = week?.days.reduce((s, d) => s + d.steps, 0) || 0;
   const totalCardioMin = week?.days.reduce((s, d) => s + d.cardio_minutes, 0) || 0;
   const totalConsumed = week?.days.reduce((s, d) => s + d.consumed, 0) || 0;
   const burnedEstimate = Math.round(totalWeekSteps * 0.04 + totalCardioMin * 7 + workouts.filter((w) => w.completed).length * 260);
-  const completedWorkouts = workouts.filter((w) => w.completed).length;
-  const plannedWorkouts = Math.max(workouts.length || 0, 5);
   const historyWeeks = buildHistoryWeeks(history, sleepByDate);
   const weekSleepValues = (week?.days || []).map((day) => sleepByDate[day.date] || 0).filter((hours) => hours > 0);
   const avgWeekSleep = weekSleepValues.length
@@ -197,13 +197,6 @@ export default function Progress() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <FollowSummaryCard
-          workouts={workouts}
-          completed={completedWorkouts}
-          planned={plannedWorkouts}
-          onCheck={toggleWorkout}
-        />
-
         <View style={styles.wellnessCompactRow}>
           <View style={styles.wellnessCompactItem}>
             <HydrationCard compact />
@@ -217,11 +210,11 @@ export default function Progress() {
           steps={totalWeekSteps}
           consumed={totalConsumed}
           burned={burnedEstimate}
-          completed={completedWorkouts}
-          planned={plannedWorkouts}
           sleepAvg={avgWeekSleep}
           sleepLow={lowWeekSleep}
         />
+
+        <MuscleVolumeCard payload={muscleVolume} />
 
         <HistoryWeeksCard weeks={historyWeeks} />
 
@@ -430,65 +423,16 @@ export default function Progress() {
   );
 }
 
-function FollowSummaryCard({
-  workouts,
-  completed,
-  planned,
-  onCheck,
-}: {
-  workouts: Workout[];
-  completed: number;
-  planned: number;
-  onCheck: (workout: Workout) => void;
-}) {
-  const ratio = planned > 0 ? completed / planned : 0;
-  const dayLabels = ["L", "M", "M", "J", "V", "S", "D"];
-  return (
-    <Card testID="follow-summary-card" style={styles.followSummary}>
-      <ProgressRing progress={ratio} size={118} stroke={9}>
-        <Text style={styles.followRingKicker}>Cette semaine</Text>
-        <Text style={styles.followRingValue}>{completed}/{planned}</Text>
-        <Text style={styles.followRingLabel}>séances</Text>
-      </ProgressRing>
-      <View style={styles.followDaysRow}>
-        {dayLabels.map((label, index) => {
-          const workout = workouts[index];
-          const done = workout?.completed;
-          return (
-            <TouchableOpacity
-              key={`${label}-${index}`}
-              onPress={() => workout && onCheck(workout)}
-              disabled={!workout}
-              style={styles.followDay}
-              testID={`follow-day-${index}`}
-            >
-              <Text style={styles.followDayLabel}>{label}</Text>
-              <View style={[styles.followDayCircle, done && styles.followDayCircleOn, !workout && styles.followDayCircleEmpty]}>
-                {done ? <Ionicons name="checkmark" size={13} color="#102108" /> : workout ? <Ionicons name="add" size={13} color={colors.textSecondary} /> : null}
-              </View>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-      <Text style={styles.followMotivation}>Top ! Continue comme ça.</Text>
-    </Card>
-  );
-}
-
 function WeeklyFollowRecap({
   steps,
   consumed,
   burned,
-  completed,
-  planned,
   sleepAvg,
   sleepLow,
 }: {
   steps: number;
   consumed: number;
   burned: number;
-  completed: number;
-  planned: number;
   sleepAvg: number;
   sleepLow: boolean;
 }) {
@@ -499,7 +443,6 @@ function WeeklyFollowRecap({
         <RecapStat icon="footsteps" label="Pas" value={steps.toLocaleString("fr-FR")} />
         <RecapStat icon="restaurant-outline" label="Calories consommées" value={`${consumed.toLocaleString("fr-FR")} kcal`} />
         <RecapStat icon="flame-outline" label="Calories brûlées" value={`${burned.toLocaleString("fr-FR")} kcal`} />
-        <RecapStat icon="barbell-outline" label="Séances" value={`${completed}/${planned}`} />
         <RecapStat icon="moon-outline" label="Sommeil moyen" value={sleepAvg > 0 ? `${sleepAvg.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} h` : "À saisir"} warning={sleepLow} />
       </View>
       {sleepLow ? (
@@ -520,6 +463,92 @@ function RecapStat({ icon, label, value, warning }: { icon: keyof typeof Ionicon
       <Text style={styles.recapLabel}>{label}</Text>
     </View>
   );
+}
+
+function MuscleVolumeCard({ payload }: { payload: MuscleVolumePayload | null }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const items = payload?.items || [];
+  const maxVolume = Math.max(1, ...items.flatMap((item) => item.series.map((point) => point.volume)));
+
+  return (
+    <Card testID="muscle-volume-card" style={{ gap: spacing.md }}>
+      <View style={styles.muscleHeader}>
+        <SectionTitle title="Kg soulevés par muscle" />
+        <View style={styles.muscleWeekChip}>
+          <Ionicons name="barbell-outline" size={13} color={colors.primaryLight} />
+          <Text style={styles.muscleWeekText}>Semaine</Text>
+        </View>
+      </View>
+
+      {items.length === 0 ? (
+        <Text style={typography.small}>
+          Termine une séance avec charges et répétitions pour afficher tes volumes par groupe musculaire.
+        </Text>
+      ) : (
+        items.map((item) => {
+          const isOpen = expanded === item.muscle;
+          const progress = Math.min(1, item.week_total / Math.max(1, Math.max(...items.map((muscle) => muscle.week_total))));
+          return (
+            <View key={item.muscle} style={styles.muscleBlock}>
+              <TouchableOpacity
+                onPress={() => setExpanded(isOpen ? null : item.muscle)}
+                style={styles.muscleRow}
+                testID={`muscle-volume-${item.muscle}`}
+              >
+                <View style={styles.muscleIcon}>
+                  <Ionicons name={muscleIconFor(item.muscle)} size={18} color={colors.primaryLight} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <View style={styles.muscleTitleRow}>
+                    <Text style={styles.muscleTitle}>{item.muscle}</Text>
+                    <Text style={styles.muscleKg}>{Math.round(item.week_total).toLocaleString("fr-FR")} kg</Text>
+                  </View>
+                  <View style={styles.muscleTrack}>
+                    <View style={[styles.muscleFill, { width: `${Math.max(6, progress * 100)}%` }]} />
+                  </View>
+                </View>
+                <Ionicons name={isOpen ? "chevron-up" : "chevron-down"} size={17} color={colors.textMuted} />
+              </TouchableOpacity>
+              {isOpen ? (
+                <View style={styles.muscleDetail}>
+                  <View style={styles.muscleBars}>
+                    {item.series.map((point) => (
+                      <View key={point.week} style={styles.muscleBarCol}>
+                        <View style={styles.muscleBar}>
+                          <View style={[styles.muscleBarFill, { height: `${Math.max(5, (point.volume / maxVolume) * 100)}%` }]} />
+                        </View>
+                        <Text style={styles.muscleBarLabel}>{point.week.slice(5).replace("-", "/")}</Text>
+                      </View>
+                    ))}
+                  </View>
+                  {item.top_exercises.length > 0 ? (
+                    <View style={styles.muscleTopList}>
+                      {item.top_exercises.slice(0, 3).map((exercise) => (
+                        <View key={exercise.name} style={styles.muscleTopExercise}>
+                          <Text style={styles.muscleTopName} numberOfLines={1}>{exercise.name}</Text>
+                          <Text style={styles.muscleTopKg}>{Math.round(exercise.volume).toLocaleString("fr-FR")} kg</Text>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
+          );
+        })
+      )}
+    </Card>
+  );
+}
+
+function muscleIconFor(muscle: string): keyof typeof Ionicons.glyphMap {
+  const key = muscle.toLowerCase();
+  if (key.includes("jamb") || key.includes("fess")) return "walk-outline";
+  if (key.includes("dos")) return "body-outline";
+  if (key.includes("pector")) return "barbell-outline";
+  if (key.includes("bras") || key.includes("épaule") || key.includes("epaule")) return "fitness-outline";
+  if (key.includes("core")) return "ellipse-outline";
+  return "barbell-outline";
 }
 
 function HistoryWeeksCard({ weeks }: { weeks: HistoryWeek[] }) {
@@ -890,17 +919,6 @@ const styles = StyleSheet.create({
   heroMetricValue: { fontSize: 20, fontWeight: "900", color: "#FFFFFF" },
   heroMetricLabel: { fontSize: 10, color: "rgba(255,255,255,0.68)", marginTop: 2 },
   content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: 130 },
-  followSummary: { alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm },
-  followRingKicker: { color: colors.textSecondary, fontSize: 9.5, fontWeight: "800" },
-  followRingValue: { color: colors.textMain, fontSize: 26, lineHeight: 29, fontWeight: "900", marginTop: 1 },
-  followRingLabel: { color: colors.textSecondary, fontSize: 10, fontWeight: "800" },
-  followDaysRow: { flexDirection: "row", justifyContent: "space-between", width: "100%", gap: 4 },
-  followDay: { alignItems: "center", gap: 6, flex: 1 },
-  followDayLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: "900" },
-  followDayCircle: { width: 27, height: 27, borderRadius: 14, borderWidth: 1, borderColor: colors.borderBright, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
-  followDayCircleOn: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
-  followDayCircleEmpty: { borderColor: "rgba(255,255,255,0.12)", backgroundColor: "rgba(255,255,255,0.025)" },
-  followMotivation: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
   wellnessCompactRow: { flexDirection: "row", gap: spacing.sm },
   wellnessCompactItem: { flex: 1, minWidth: 0 },
   trendGrid: { gap: spacing.sm },
@@ -914,6 +932,27 @@ const styles = StyleSheet.create({
   recapLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "800" },
   sleepWarningBox: { minHeight: 38, flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,179,63,0.30)", backgroundColor: "rgba(255,179,63,0.09)" },
   sleepWarningText: { color: colors.amber, fontSize: 11.5, fontWeight: "900", flex: 1 },
+  muscleHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  muscleWeekChip: { flexDirection: "row", alignItems: "center", gap: 5, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.08)", paddingHorizontal: 9, minHeight: 28 },
+  muscleWeekText: { color: colors.primaryLight, fontSize: 10.5, fontWeight: "900" },
+  muscleBlock: { gap: spacing.sm },
+  muscleRow: { minHeight: 66, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: "rgba(255,255,255,0.05)", padding: spacing.sm },
+  muscleIcon: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(182,255,63,0.12)", borderWidth: 1, borderColor: "rgba(182,255,63,0.20)" },
+  muscleTitleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  muscleTitle: { flex: 1, color: colors.textMain, fontSize: 13.5, fontWeight: "900" },
+  muscleKg: { color: colors.primaryLight, fontSize: 12.5, fontWeight: "900" },
+  muscleTrack: { height: 7, borderRadius: 99, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.10)", marginTop: 8 },
+  muscleFill: { height: "100%", borderRadius: 99, backgroundColor: colors.primaryLight },
+  muscleDetail: { marginTop: -2, marginHorizontal: 4, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(3,22,15,0.42)", padding: spacing.sm, gap: spacing.sm },
+  muscleBars: { height: 88, flexDirection: "row", alignItems: "flex-end", gap: 8 },
+  muscleBarCol: { flex: 1, alignItems: "center", gap: 5 },
+  muscleBar: { width: "100%", height: 58, borderRadius: 8, overflow: "hidden", justifyContent: "flex-end", backgroundColor: "rgba(255,255,255,0.08)" },
+  muscleBarFill: { width: "100%", borderRadius: 8, backgroundColor: "rgba(182,255,63,0.78)" },
+  muscleBarLabel: { color: colors.textMuted, fontSize: 9.5, fontWeight: "800" },
+  muscleTopList: { gap: 6 },
+  muscleTopExercise: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm, borderRadius: radius.sm, backgroundColor: "rgba(255,255,255,0.05)", paddingHorizontal: spacing.sm },
+  muscleTopName: { flex: 1, color: colors.textSecondary, fontSize: 11.5, fontWeight: "800" },
+  muscleTopKg: { color: colors.primaryLight, fontSize: 11.5, fontWeight: "900" },
   historyWeekRow: { minHeight: 56, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: "rgba(255,255,255,0.05)", padding: spacing.sm },
   historyWeekIcon: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryPale },
   historyWeekTitle: { color: colors.textMain, fontSize: 13, fontWeight: "900" },

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Animated, Easing, Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { Animated, Easing, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import type { ImageSourcePropType } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
@@ -10,6 +10,7 @@ import { api } from "@/src/api";
 import { ProgressRing } from "@/src/components/UI";
 import { PROGRAMS, type Freq, type Split } from "@/src/components/ProgramCarousel";
 import { markCommitmentSigned } from "@/src/lib/commitment";
+import { normalizeTrainingTimePreference, readDefaultTrainingTime, saveDefaultTrainingTime } from "@/src/lib/trainingPreferences";
 import { colors, radius, spacing, typography } from "@/src/theme";
 
 type Step =
@@ -342,6 +343,7 @@ export default function CommitmentExperience() {
   const [activityInput, setActivityInput] = useState<string>("moderate");
   const [dailyProteinServings, setDailyProteinServings] = useState<string>("2");
   const [proteinHabit, setProteinHabit] = useState<ProteinHabit>("mixed");
+  const [preferredTrainingTime, setPreferredTrainingTime] = useState("18:30");
   const [selectedStructure, setSelectedStructure] = useState<StructureKey | null>(null);
   const [showRecommendation, setShowRecommendation] = useState(false);
   const [holdProgress, setHoldProgress] = useState(0);
@@ -365,6 +367,12 @@ export default function CommitmentExperience() {
         if (nextProfile.activity_level) setActivityInput(nextProfile.activity_level);
       })
       .catch(() => setProfile({}));
+  }, []);
+
+  useEffect(() => {
+    readDefaultTrainingTime()
+      .then(setPreferredTrainingTime)
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -444,6 +452,13 @@ export default function CommitmentExperience() {
     setStep("loading");
   };
 
+  const startFromCadence = () => {
+    const normalized = normalizeTrainingTimePreference(preferredTrainingTime);
+    setPreferredTrainingTime(normalized);
+    saveDefaultTrainingTime(normalized).catch(() => undefined);
+    next();
+  };
+
   const next = () => {
     const nextStep = STEPS[Math.min(STEPS.length - 1, currentStepIndex + 1)]?.key;
     if (!nextStep) return;
@@ -498,7 +513,16 @@ export default function CommitmentExperience() {
   };
 
   if (step === "cadence") {
-    return <LandingMockup selectedTrainingDays={trainingDays} onNext={next} onTrainingDays={setTrainingDays} />;
+    return (
+      <LandingMockup
+        selectedTrainingDays={trainingDays}
+        preferredTrainingTime={preferredTrainingTime}
+        onNext={startFromCadence}
+        onTrainingDays={setTrainingDays}
+        onTrainingTimeChange={setPreferredTrainingTime}
+        onTrainingTimeBlur={() => setPreferredTrainingTime(normalizeTrainingTimePreference(preferredTrainingTime))}
+      />
+    );
   }
 
   const backgroundSource = COMMITMENT_STEP_BACKGROUNDS[step];
@@ -748,12 +772,18 @@ export default function CommitmentExperience() {
 
 function LandingMockup({
   selectedTrainingDays,
+  preferredTrainingTime,
   onNext,
   onTrainingDays,
+  onTrainingTimeChange,
+  onTrainingTimeBlur,
 }: {
   selectedTrainingDays: number;
+  preferredTrainingTime: string;
   onNext: () => void;
   onTrainingDays: (value: number) => void;
+  onTrainingTimeChange: (value: string) => void;
+  onTrainingTimeBlur: () => void;
 }) {
   return (
     <View style={styles.cadenceScreen} testID="commitment-screen">
@@ -842,6 +872,26 @@ function LandingMockup({
               <Ionicons name="shield-checkmark-outline" size={20} color={colors.primaryLight} />
               <Text style={styles.cadenceSecurityText}>{"On s'en sert pour choisir le bon volume, sans te surcharger."}</Text>
             </View>
+          </View>
+
+          <View style={styles.cadenceTimePanel}>
+            <View style={styles.cadenceTimeIcon}>
+              <Ionicons name="time-outline" size={21} color={colors.primaryLight} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.cadenceTimeTitle}>Heure d&apos;entraînement habituelle</Text>
+              <Text style={styles.cadenceTimeText}>Elle servira pour les rappels et le calendrier.</Text>
+            </View>
+            <TextInput
+              value={preferredTrainingTime}
+              onChangeText={onTrainingTimeChange}
+              onBlur={onTrainingTimeBlur}
+              placeholder="18:30"
+              placeholderTextColor="rgba(255,255,255,0.45)"
+              keyboardType="numbers-and-punctuation"
+              style={styles.cadenceTimeInput}
+              testID="commitment-training-time"
+            />
           </View>
 
           <TouchableOpacity activeOpacity={0.9} onPress={onNext} style={styles.cadenceContinue} testID="commitment-generate">
@@ -1241,6 +1291,42 @@ const styles = StyleSheet.create({
   cadenceOptionDetailActive: { color: "rgba(255,255,255,0.92)" },
   cadenceSecurityRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingTop: spacing.sm },
   cadenceSecurityText: { color: "rgba(255,255,255,0.82)", fontSize: 15, lineHeight: 21, flex: 1, fontWeight: "600" },
+  cadenceTimePanel: {
+    minHeight: 94,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    padding: spacing.md,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.24)",
+    backgroundColor: "rgba(6,24,15,0.64)",
+  },
+  cadenceTimeIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(182,255,63,0.14)",
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.22)",
+  },
+  cadenceTimeTitle: { color: colors.textMain, fontSize: 15, fontWeight: "900" },
+  cadenceTimeText: { color: "rgba(255,255,255,0.70)", fontSize: 12.5, lineHeight: 17, marginTop: 2, fontWeight: "700" },
+  cadenceTimeInput: {
+    width: 86,
+    minHeight: 48,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.28)",
+    backgroundColor: "rgba(255,255,255,0.10)",
+    color: colors.textMain,
+    fontSize: 17,
+    fontWeight: "900",
+    textAlign: "center",
+    paddingHorizontal: 8,
+  },
   cadenceContinue: {
     minHeight: 70,
     borderRadius: radius.full,

@@ -22,6 +22,7 @@ const SPLIT_LABELS: Record<string, string> = {
   ppl: "PPL",
   fullbody: "Full Body",
   split: "Split",
+  upper_lower: "Upper / Lower",
   home: "Home",
 };
 
@@ -41,13 +42,6 @@ type DashboardData = {
   workout: { title?: string; focus?: string; completed?: boolean; duration_min?: number } | null;
   meals_count: number;
   balance: number;
-};
-
-type WeekMacros = {
-  days: { date: string; calories: number; protein_g: number; carbs_g: number; fat_g: number }[];
-  avg: { calories: number; protein_g: number; carbs_g: number; fat_g: number };
-  targets: { calories: number; protein_g: number; carbs_g: number; fat_g: number };
-  tracked_days: number;
 };
 
 type PointsSummary = {
@@ -75,7 +69,6 @@ export default function Dashboard() {
   const router = useRouter();
   const { user } = useAuth();
   const [data, setData] = useState<DashboardData | null>(null);
-  const [weekMacros, setWeekMacros] = useState<WeekMacros | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [stepsModal, setStepsModal] = useState(false);
   const [stepsInput, setStepsInput] = useState("");
@@ -97,16 +90,14 @@ export default function Dashboard() {
 
   const load = useCallback(async () => {
     try {
-      const [d, wm, ps, prog, wk, simple] = await Promise.all([
+      const [d, ps, prog, wk, simple] = await Promise.all([
         api<DashboardData>("/dashboard/day"),
-        api<WeekMacros>("/dashboard/week-macros").catch(() => null),
         api<PointsSummary>("/points/summary").catch(() => null),
         api<{ program: { split?: string; frequency?: number; training_days?: number[] | null } | null }>("/program/current").catch(() => null),
         api<WeekWorkout[]>("/workouts/week").catch(() => []),
         getSimpleMode().catch(() => false),
       ]);
       setData(d);
-      setWeekMacros(wm);
       setPoints(ps);
       setProgramSplit(prog?.program?.split || null);
       const days = prog?.program?.training_days?.length ? prog.program.training_days : [0, 2, 4];
@@ -139,6 +130,7 @@ export default function Dashboard() {
       weeklyPlanned: weeklyWorkoutPlanned,
       nextLevelPoints: points.next_level_points || 0,
       hydrationLow: hydration.amountMl < WATER_GOAL_ML * 0.6,
+      pointsToday: points.points_gained_today ?? Math.max(0, points.points_today || 0),
     }).catch((e) => console.warn("auto notifications", e));
   }, [data, points, trainingDays, weeklyWorkoutDone, weeklyWorkoutPlanned, hydration.amountMl]);
 
@@ -220,6 +212,8 @@ export default function Dashboard() {
   const totalXp = points?.points_total ?? fallbackXp;
   const level = Math.floor(totalXp / XP_PER_LEVEL) + 1;
   const xpInLevel = totalXp % XP_PER_LEVEL;
+  const gainedToday = points?.points_gained_today ?? Math.max(0, points?.points_today || fallbackXp);
+  const workoutLabel = data.workout?.focus || data.workout?.title || "Séance du jour";
 
   if (simpleMode) {
     return (
@@ -260,7 +254,7 @@ export default function Dashboard() {
 
           <Card style={styles.simpleWorkoutCard} testID="dashboard-simple-workout">
             <Text style={styles.simpleLabel}>Programme</Text>
-            <Text style={styles.simpleWorkoutTitle}>{data.workout?.focus || "Séance du jour"}</Text>
+            <Text style={styles.simpleWorkoutTitle}>{workoutLabel}</Text>
             <Text style={styles.simpleSub}>
               {data.workout?.duration_min || ACTIVE_MINUTES_GOAL} min · {workoutDone ? "terminée" : "prête"}
             </Text>
@@ -324,10 +318,9 @@ export default function Dashboard() {
               <Text style={styles.hello}>Bonjour,{"\n"}{firstName} !</Text>
               <Text style={styles.heroSubtitle}>Prête à te dépasser aujourd&apos;hui ?</Text>
               <MotivationalScript style={styles.heroScript}>déploie ton énergie.</MotivationalScript>
-              <View style={styles.todayGoals}>
-                <GoalPill icon="barbell-outline" label={data.workout?.focus || "Séance"} value={workoutDone ? "terminée" : "à faire"} />
-                <GoalPill icon="walk-outline" label="Pas" value={`${Math.round(stepsProgress * 100)}%`} />
-                <GoalPill icon="water-outline" label="Eau" value={`${Math.round(hydration.progress * 100)}%`} />
+              <View style={styles.heroPointsPill} testID="dashboard-hero-points">
+                <Ionicons name="star" size={14} color="#102108" />
+                <Text style={styles.heroPointsText}>+{gainedToday} pts aujourd&apos;hui</Text>
               </View>
             </View>
           {user?.mascot?.animal ? (
@@ -348,13 +341,13 @@ export default function Dashboard() {
               </ProgressRing>
               <View style={{ flex: 1 }}>
                 <Text style={styles.objectiveLabel}>Objectif du jour</Text>
-                <Text style={styles.objectiveTitle}>{data.workout?.focus || "Boucle active"}</Text>
+                <Text style={styles.objectiveTitle}>{workoutLabel}</Text>
                 <Text style={styles.objectiveMeta}>
                   {data.workout?.duration_min || ACTIVE_MINUTES_GOAL} min · {workoutDone ? "séance validée" : "à valider"}
                 </Text>
               </View>
               <TouchableOpacity onPress={() => router.push("/(tabs)/training")} style={styles.continueBtn} testID="dashboard-continue-workout">
-                <Text style={styles.continueText}>Commencer séance</Text>
+                <Text style={styles.continueText}>{workoutDone ? "Validée" : "Programme"}</Text>
               </TouchableOpacity>
             </View>
           </Card>
@@ -435,43 +428,6 @@ export default function Dashboard() {
         <HydrationCard goalMl={WATER_GOAL_ML} />
 
         <SleepCard />
-
-        {/* Weekly macros recap */}
-        {weekMacros && weekMacros.tracked_days > 0 && (
-          <Card testID="dashboard-week-macros-card">
-            <SectionTitle title={`Macros · 7 derniers jours (${weekMacros.tracked_days}j suivis)`} />
-            <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm, marginBottom: spacing.md }}>
-              <WeekMacroStat label="kcal/jour" value={weekMacros.avg.calories} target={weekMacros.targets.calories} />
-              <WeekMacroStat label="Protéines" value={weekMacros.avg.protein_g} target={weekMacros.targets.protein_g} unit="g" />
-              <WeekMacroStat label="Glucides" value={weekMacros.avg.carbs_g} target={weekMacros.targets.carbs_g} unit="g" />
-              <WeekMacroStat label="Lipides" value={weekMacros.avg.fat_g} target={weekMacros.targets.fat_g} unit="g" />
-            </View>
-            <View style={styles.weekDaysRow}>
-              {weekMacros.days.map((d) => {
-                const ratio = weekMacros.targets.calories > 0 ? d.calories / weekMacros.targets.calories : 0;
-                const heightPct = Math.min(100, Math.max(4, ratio * 100));
-                const isToday = d.date === data.date;
-                const dayLabel = new Date(d.date).toLocaleDateString("fr-FR", { weekday: "narrow" });
-                return (
-                  <View key={d.date} style={{ alignItems: "center", flex: 1 }}>
-                    <View style={styles.weekBarTrack}>
-                      <View style={[
-                        styles.weekBarFill,
-                        {
-                          height: `${heightPct}%`,
-                          backgroundColor: d.calories === 0 ? colors.border : ratio > 1.05 ? colors.alert : isToday ? colors.primary : colors.primaryLight,
-                        },
-                      ]} />
-                    </View>
-                    <Text style={[typography.small, { fontSize: 10, marginTop: 4, color: isToday ? colors.primary : colors.textMuted, fontWeight: isToday ? "700" : "500" }]}>
-                      {dayLabel}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
-          </Card>
-        )}
 
         {/* Energy balance */}
         <Card testID="dashboard-burned-card">
@@ -613,16 +569,6 @@ function BurnRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap;
       </View>
       <Text style={[typography.body, { flex: 1 }]}>{label}</Text>
       <Text style={[typography.body, { fontWeight: "600" }]}>{value.toLocaleString("fr-FR")} <Text style={typography.small}>kcal</Text></Text>
-    </View>
-  );
-}
-
-function GoalPill({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
-  return (
-    <View style={styles.goalPill}>
-      <Ionicons name={icon} size={13} color={colors.primaryLight} />
-      <Text style={styles.goalPillText}>{label}</Text>
-      <Text style={styles.goalPillValue}>{value}</Text>
     </View>
   );
 }
@@ -843,25 +789,6 @@ function TodayMetricCard({
   );
 }
 
-function WeekMacroStat({ label, value, target, unit }: { label: string; value: number; target: number; unit?: string }) {
-  const pct = target > 0 ? Math.round((value / target) * 100) : 0;
-  const onTrack = pct >= 90 && pct <= 110;
-  const color = onTrack ? colors.primaryLight : pct < 90 ? colors.textSecondary : colors.alert;
-  return (
-    <View style={{ alignItems: "center", flex: 1 }}>
-      <Text style={[typography.caption, { fontWeight: "600" }]}>{label}</Text>
-      <Text style={[typography.body, { fontWeight: "700", marginTop: 2 }]}>
-        {value.toLocaleString("fr-FR")}{unit ? <Text style={[typography.small, { fontSize: 11 }]}> {unit}</Text> : null}
-      </Text>
-      {target > 0 && (
-        <Text style={[typography.small, { fontSize: 10, color, fontWeight: "700", marginTop: 1 }]}>
-          {pct}% obj.
-        </Text>
-      )}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   content: { padding: spacing.lg, gap: spacing.md, paddingBottom: 130 },
   simpleContent: { padding: spacing.lg, gap: spacing.lg, paddingBottom: 130 },
@@ -894,10 +821,8 @@ const styles = StyleSheet.create({
   hello: { fontSize: 39, lineHeight: 41, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0, marginTop: spacing.sm, maxWidth: 220 },
   heroSubtitle: { ...typography.body, color: "rgba(255,255,255,0.82)", marginTop: spacing.sm, maxWidth: 220, lineHeight: 21 },
   heroScript: { fontSize: 25, lineHeight: 29, marginTop: spacing.sm, maxWidth: 245 },
-  todayGoals: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: spacing.md, maxWidth: 305 },
-  goalPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: radius.full, backgroundColor: "rgba(4,22,14,0.58)", borderWidth: 1, borderColor: "rgba(182,255,63,0.18)" },
-  goalPillText: { color: "rgba(255,255,255,0.78)", fontSize: 10.5, fontWeight: "800" },
-  goalPillValue: { color: colors.primaryLight, fontSize: 10.5, fontWeight: "900" },
+  heroPointsPill: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5, marginTop: spacing.md, paddingHorizontal: 10, paddingVertical: 7, borderRadius: radius.full, backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: "rgba(255,255,255,0.32)" },
+  heroPointsText: { color: "#102108", fontSize: 11.5, fontWeight: "900" },
   heroRingValue: { color: colors.textMain, fontSize: 15, fontWeight: "900" },
   objectiveLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "800" },
   objectiveTitle: { color: colors.textMain, fontSize: 16, fontWeight: "900", marginTop: 1 },
@@ -936,12 +861,12 @@ const styles = StyleSheet.create({
   pointsHealthCard: { gap: spacing.md, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(3,22,15,0.58)" },
   pointsHealthTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
   pointsHealthLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "900", textTransform: "uppercase" },
-  pointsHealthValue: { color: colors.textMain, fontSize: 25, lineHeight: 29, fontWeight: "900", marginTop: 2 },
+  pointsHealthValue: { color: colors.textMain, fontSize: 20, lineHeight: 24, fontWeight: "900", marginTop: 2 },
   pointsTotalPill: { minHeight: 34, flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.26)", backgroundColor: "rgba(182,255,63,0.10)" },
   pointsTotalText: { color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
   pointsMiniGrid: { flexDirection: "row", gap: spacing.sm },
   pointsMini: { flex: 1, minHeight: 56, justifyContent: "center", alignItems: "center", borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.055)" },
-  pointsMiniValue: { color: colors.textMain, fontSize: 16, fontWeight: "900" },
+  pointsMiniValue: { color: colors.textMain, fontSize: 14, fontWeight: "900" },
   pointsMiniLabel: { color: colors.textMuted, fontSize: 10, fontWeight: "800", marginTop: 2 },
   healthStateBox: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(182,255,63,0.20)", backgroundColor: "rgba(182,255,63,0.07)" },
   healthStateTitle: { color: colors.primaryLight, fontSize: 13, fontWeight: "900" },
@@ -1017,7 +942,4 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 8, borderRadius: radius.full,
     backgroundColor: "rgba(74,222,128,0.15)", borderWidth: 1, borderColor: "rgba(74,222,128,0.3)",
   },
-  weekDaysRow: { flexDirection: "row", alignItems: "flex-end", justifyContent: "space-between", gap: 6, height: 80 },
-  weekBarTrack: { width: 18, height: 60, backgroundColor: "rgba(255,255,255,0.08)", borderRadius: radius.sm, overflow: "hidden", justifyContent: "flex-end", borderWidth: 1, borderColor: "rgba(255,255,255,0.12)" },
-  weekBarFill: { width: "100%", borderTopLeftRadius: radius.sm, borderTopRightRadius: radius.sm },
 });

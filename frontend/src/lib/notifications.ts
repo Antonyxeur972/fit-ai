@@ -173,6 +173,7 @@ export type AutoReminderOptions = {
   weeklyPlanned?: number;
   nextLevelPoints?: number;
   hydrationLow?: boolean;
+  pointsToday?: number;
 };
 
 export async function scheduleAutomaticFitAiReminders(options: AutoReminderOptions = {}): Promise<number> {
@@ -186,6 +187,7 @@ export async function scheduleAutomaticFitAiReminders(options: AutoReminderOptio
   const weeklyDone = Math.max(0, options.weeklyDone ?? 0);
   const weeklyPlanned = Math.max(1, options.weeklyPlanned ?? trainingDays.length);
   const nextLevelPoints = Math.max(0, options.nextLevelPoints ?? 0);
+  const pointsToday = Math.max(0, options.pointsToday ?? 0);
 
   ids.push(...await scheduleWeeklyNotification({
     title: "Bonjour FIT AI",
@@ -253,6 +255,17 @@ export async function scheduleAutomaticFitAiReminders(options: AutoReminderOptio
     hour: 21,
     minute: 30,
   }));
+
+  if (pointsToday > 0) {
+    ids.push(...await scheduleWeeklyNotification({
+      title: `+${pointsToday} points aujourd'hui`,
+      body: "Bien joué. Garde ce rythme demain avec une séance, une bonne hydratation ou tes protéines.",
+      data: { kind: "auto_points_today" },
+      days: ALL_DAYS,
+      hour: 21,
+      minute: 35,
+    }));
+  }
 
   await writeNotificationIds(AUTO_NOTIFICATION_IDS_KEY, ids);
   return ids.length;

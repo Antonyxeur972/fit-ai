@@ -36,6 +36,14 @@ type ChallengeDay = {
 };
 
 type ChallengeType = "pushups" | "abs" | "squats" | "plank" | "steps10k" | "running";
+const CHALLENGE_START_ALIASES: Record<ChallengeType, string> = {
+  pushups: "pompes",
+  abs: "abdos",
+  squats: "squats",
+  plank: "gainage",
+  steps10k: "10000 pas",
+  running: "running",
+};
 
 type ActiveChallenge = {
   id: string;
@@ -111,7 +119,13 @@ export default function ChallengesTab() {
   const startChallenge = async (type: ChallengeType) => {
     setChallengeBusy(type);
     try {
-      await api("/challenges/start", { method: "POST", body: { type } });
+      try {
+        await api("/challenges/start", { method: "POST", body: { type } });
+      } catch (firstError) {
+        const alias = CHALLENGE_START_ALIASES[type];
+        if (!alias || alias === type) throw firstError;
+        await api("/challenges/start", { method: "POST", body: { type: alias } });
+      }
       await load();
     } catch (e: any) {
       Alert.alert("Défi indisponible", e?.message || "Impossible de démarrer ce défi pour le moment.");

@@ -297,13 +297,14 @@ class RecipeFromIngredientsRequest(BaseModel):
 
 class ProgramCreateRequest(BaseModel):
     weeks: int  # 4-24
-    frequency: int  # 3 | 5 | 7
-    split: str  # "ppl" | "fullbody" | "split" | "home"
+    frequency: int  # 2..7
+    split: str  # "ppl" | "fullbody" | "split" | "upper_lower" | "home"
     goal_label: Optional[str] = "Hypertrophie"
     goal: Optional[str] = None  # "muscle" | "strength" | "fat_loss" | "endurance"
     cycle_pattern: Optional[List[str]] = None  # legacy
     block_weeks: Optional[Dict[str, int]] = None  # {"volume": 2, "puissance": 1, "force": 2}
     training_days: Optional[List[int]] = None  # weekdays 0=Mon..6=Sun, len == frequency
+    training_times: Optional[Dict[str, str]] = None  # {"0": "18:30", ...} by weekday
 
 
 class ProgramDayUpdate(BaseModel):
@@ -1001,7 +1002,14 @@ FOCUS_BLUEPRINTS: Dict[str, List[str]] = {
     "Push": ["Développé couché barre", "Développé incliné haltères", "Dips lestés (penché avant)", "Élévations latérales", "Extensions triceps poulie"],
     "Pull": ["Tractions pronation", "Rowing barre (Yates / Pendlay)", "Tirage horizontal poulie", "Curl barre", "Curl marteau"],
     "Legs": ["Squat barre arrière", "Soulevé de terre roumain", "Presse à cuisses", "Fentes avant haltères", "Mollets debout machine"],
-    "FullBody": ["Squat barre arrière", "Développé couché barre", "Rowing barre (Yates / Pendlay)", "Développé militaire barre", "Crunchs"],
+    "FullBody A": ["Squat barre arrière", "Développé couché barre", "Rowing barre (Yates / Pendlay)", "Curl marteau", "Planche"],
+    "FullBody B": ["Presse à cuisses", "Développé incliné haltères", "Tirage vertical poulie", "Extensions triceps poulie", "Crunchs"],
+    "FullBody C": ["Soulevé de terre roumain", "Développé militaire barre", "Tirage horizontal poulie", "Curl barre", "Fentes avant haltères"],
+    "FullBody D": ["Front squat", "Pompes", "Tractions pronation", "Élévations latérales", "Leg raises"],
+    "FullBody E": ["Hip thrust barre", "Développé couché haltères", "Rowing haltère unilatéral", "Dips triceps", "Planche latérale"],
+    "FullBody": ["Squat barre arrière", "Développé couché barre", "Rowing barre (Yates / Pendlay)", "Curl marteau", "Planche"],
+    "Upper": ["Développé couché barre", "Tractions pronation", "Développé militaire barre", "Rowing barre (Yates / Pendlay)", "Extensions triceps poulie"],
+    "Lower": ["Squat barre arrière", "Soulevé de terre roumain", "Presse à cuisses", "Leg curl machine", "Mollets debout machine"],
     "Pectoraux": ["Développé couché barre", "Développé incliné haltères", "Écarté couché haltères", "Pec-deck (butterfly)", "Pompes"],
     "Dos": ["Tractions pronation", "Soulevé de terre barre", "Rowing barre (Yates / Pendlay)", "Tirage vertical poulie", "Shrugs (trapèzes)"],
     "Épaules": ["Développé militaire barre", "Élévations latérales", "Élévations frontales", "Oiseau (rear delt fly)", "Rotations externes"],
@@ -1042,29 +1050,30 @@ RECOMMENDED_BY_GOAL: Dict[str, Set[str]] = {
 
 def _focus_sequence(frequency: int, split: str) -> List[str]:
     sp = (split or "ppl").lower()
+    frequency = max(2, min(int(frequency), 7))
     if sp == "home":
         # bodyweight only
-        if frequency == 3:
+        if frequency <= 3:
             return ["HomePush", "HomePull", "HomeLegs"]
-        if frequency == 5:
+        if frequency <= 5:
             return ["HomePush", "HomePull", "HomeLegs", "HomeCore", "HomeFullBody"]
         return ["HomePush", "HomePull", "HomeLegs", "HomeCore", "HomeFullBody", "HomeFullBody", "Cardio"]
     if sp == "fullbody":
-        if frequency == 3:
-            return ["FullBody", "FullBody", "FullBody"]
-        if frequency == 5:
-            return ["FullBody"] * 5
-        return ["FullBody"] * 6 + ["Cardio"]
+        seq = ["FullBody A", "FullBody B", "FullBody C", "FullBody D", "FullBody E", "FullBody A", "Cardio"]
+        return seq[:frequency]
+    if sp in ("upper_lower", "halfbody", "half_body"):
+        seq = ["Upper", "Lower", "Upper", "Lower", "Upper", "Lower", "Core"]
+        return seq[:frequency]
     if sp == "split":
-        if frequency == 3:
+        if frequency <= 3:
             return ["Push", "Pull", "Legs"]
-        if frequency == 5:
+        if frequency <= 5:
             return ["Pectoraux", "Dos", "Épaules", "Bras", "Jambes"]
         return ["Pectoraux", "Dos", "Épaules", "Bras", "Jambes", "Core", "Cardio"]
-    if frequency == 3:
+    if frequency <= 3:
         return ["Push", "Pull", "Legs"]
-    if frequency == 5:
-        return ["Push", "Pull", "Legs", "Push", "Pull"]
+    if frequency <= 5:
+        return ["Push", "Pull", "Legs", "Push", "Pull"][:frequency]
     return ["Push", "Pull", "Legs", "Push", "Pull", "Legs", "Repos actif"]
 
 
@@ -1103,7 +1112,7 @@ def _expand_block_weeks(block_weeks: Optional[Dict[str, int]]) -> List[str]:
     pattern: List[str] = []
     for block in ORDERED_BLOCK_SEQUENCE:
         n = int(bw.get(block, 1))
-        n = max(1, min(n, 3))  # 1-3 weeks per block
+        n = max(1, min(n, 8))  # allow longer blocks when the user customizes the cycle
         pattern.extend([block] * n)
     return pattern  # e.g. [v,v,p,f,f] = 5 weeks per cycle
 
@@ -1117,7 +1126,7 @@ def generate_program_structure(
     goal: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     weeks = max(1, min(int(weeks), 24))
-    frequency = frequency if frequency in (3, 5, 7) else 3
+    frequency = max(2, min(int(frequency), 7))
     # Phase 3: block-based pattern takes priority over legacy cycle_pattern
     if block_weeks is not None:
         pattern = _expand_block_weeks(block_weeks)
@@ -1213,18 +1222,26 @@ CHALLENGE_ALIASES = {
     "planche": "plank",
     "gainage": "plank",
     "defigainage": "plank",
+    "defigainage30jours": "plank",
     "steps": "steps10k",
     "pas": "steps10k",
     "10000pas": "steps10k",
+    "10000": "steps10k",
     "10kpas": "steps10k",
     "10k": "steps10k",
     "steps10k": "steps10k",
     "defi10000pas": "steps10k",
+    "defi10kpas": "steps10k",
+    "defipas": "steps10k",
+    "10000steps": "steps10k",
+    "marche": "steps10k",
     "run": "running",
+    "runner": "running",
     "running": "running",
     "course": "running",
     "courseapied": "running",
     "defirunning": "running",
+    "defirunning30jours": "running",
 }
 
 
@@ -2577,8 +2594,12 @@ async def program_create(
 ):
     user = await get_current_user(authorization)
     weeks = max(4, min(int(body.weeks), 24))
-    frequency = body.frequency if body.frequency in (3, 5, 7) else 3
-    split = body.split if body.split in ("ppl", "fullbody", "split", "home") else "ppl"
+    frequency = max(2, min(int(body.frequency), 7))
+    raw_split = (body.split or "ppl").lower()
+    split_aliases = {"halfbody": "upper_lower", "half_body": "upper_lower", "upperlower": "upper_lower"}
+    split = split_aliases.get(raw_split, raw_split)
+    if split not in ("ppl", "fullbody", "split", "upper_lower", "home"):
+        split = "ppl"
     # Get goal from profile if not provided
     goal = body.goal
     if not goal:
@@ -2594,6 +2615,15 @@ async def program_create(
         {"user_id": user["user_id"], "active": True},
         {"$set": {"active": False, "deactivated_at": now_utc()}},
     )
+    # Applying a new structure must immediately affect today's and future sessions.
+    # Completed history stays intact; unfinished generated sessions are replaced.
+    await db.workouts.delete_many(
+        {
+            "user_id": user["user_id"],
+            "date": {"$gte": today_str()},
+            "completed": {"$ne": True},
+        }
+    )
     program_id = new_id("prog")
     doc = {
         "id": program_id,
@@ -2604,6 +2634,7 @@ async def program_create(
         "weeks_total": weeks,
         "frequency": frequency,
         "training_days": body.training_days if body.training_days else None,
+        "training_times": body.training_times if body.training_times else None,
         "split": split,
         "block_weeks": body.block_weeks or {"volume": 1, "puissance": 1, "force": 1},
         "cycle_pattern": [w["session_type"] for w in structure[:6]],
@@ -2998,6 +3029,125 @@ async def list_user_exercises(authorization: Optional[str] = Header(default=None
     return {"items": items}
 
 
+WEEKDAY_LABELS = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"]
+
+
+def _program_training_days(prog: Dict[str, Any]) -> List[int]:
+    custom_days = prog.get("training_days")
+    if custom_days:
+        return [int(x) % 7 for x in custom_days]
+    frequency = int(prog.get("frequency", 3) or 3)
+    if frequency >= 7:
+        return list(range(7))
+    if frequency >= 5:
+        return [0, 1, 2, 3, 4][:frequency]
+    if frequency == 4:
+        return [0, 1, 3, 4]
+    if frequency == 2:
+        return [0, 3]
+    return [0, 2, 4]
+
+
+def _program_slot_for_date(prog: Dict[str, Any], target: dt_date) -> Optional[Dict[str, Any]]:
+    started = prog.get("started_at")
+    if isinstance(started, str):
+        try:
+            started = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if not isinstance(started, datetime):
+        return None
+    started_date = started.date()
+    days_since_start = (target - started_date).days
+    weeks_total = int(prog.get("weeks_total", 0) or 0)
+    if days_since_start < 0 or days_since_start >= weeks_total * 7:
+        return None
+    training_days = _program_training_days(prog)
+    if target.weekday() not in training_days:
+        return None
+    day_index = training_days.index(target.weekday())
+    week_index = days_since_start // 7 + 1
+    weeks = prog.get("weeks") or []
+    target_w = next((w for w in weeks if int(w.get("week_index", -1)) == week_index), None)
+    if not target_w:
+        return None
+    target_d = next((d for d in (target_w.get("days") or []) if int(d.get("day_index", -1)) == day_index), None)
+    if not target_d:
+        return None
+    return {"week": target_w, "day": target_d, "week_index": week_index, "day_index": day_index}
+
+
+def _planned_program_workout_payload(prog: Dict[str, Any], target_date: str) -> Optional[Dict[str, Any]]:
+    try:
+        target = datetime.strptime(target_date, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    slot = _program_slot_for_date(prog, target)
+    if not slot:
+        return None
+    day = slot["day"]
+    week = slot["week"]
+    exercises = [e for e in (day.get("exercises") or []) if e.get("checked", True) is not False]
+    weekday = target.weekday()
+    training_time = (prog.get("training_times") or {}).get(str(weekday))
+    return {
+        "id": f"prog:{prog.get('id')}:{slot['week_index']}:{slot['day_index']}",
+        "date": target_date,
+        "title": f"{str(prog.get('split', 'training')).upper()} {WEEKDAY_LABELS[weekday]}",
+        "focus": day.get("focus") or "Séance du jour",
+        "duration_min": int(day.get("duration_min", 45) or 45),
+        "exercises": exercises,
+        "completed": False,
+        "session_type": week.get("session_type", "volume"),
+        "planned": True,
+        "training_time": training_time,
+    }
+
+
+def _fallback_program_workout_payload(prog: Dict[str, Any], target_date: str) -> Optional[Dict[str, Any]]:
+    """Return a concrete program day for today even if today is not in training_days."""
+    try:
+        target = datetime.strptime(target_date, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    weeks = prog.get("weeks") or []
+    if not weeks:
+        return None
+    started = prog.get("started_at")
+    if isinstance(started, str):
+        try:
+            started = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        except ValueError:
+            started = None
+    if isinstance(started, datetime):
+        days_since_start = max(0, (target - started.date()).days)
+        week_index = min(int(prog.get("weeks_total", len(weeks)) or len(weeks)), days_since_start // 7 + 1)
+    else:
+        week_index = int(prog.get("current_week", 1) or 1)
+    week = next((w for w in weeks if int(w.get("week_index", -1)) == week_index), weeks[0])
+    days = week.get("days") or []
+    if not days:
+        return None
+    day = days[0]
+    day_index = int(day.get("day_index", 0) or 0)
+    training_days = _program_training_days(prog)
+    weekday = training_days[day_index] if day_index < len(training_days) else target.weekday()
+    exercises = [e for e in (day.get("exercises") or []) if e.get("checked", True) is not False]
+    training_time = (prog.get("training_times") or {}).get(str(weekday))
+    return {
+        "id": f"prog:{prog.get('id')}:{int(week.get('week_index', week_index) or week_index)}:{day_index}",
+        "date": target_date,
+        "title": f"{str(prog.get('split', 'training')).upper()} {WEEKDAY_LABELS[weekday % 7]}",
+        "focus": day.get("focus") or "Séance du jour",
+        "duration_min": int(day.get("duration_min", 45) or 45),
+        "exercises": exercises,
+        "completed": False,
+        "session_type": week.get("session_type", "volume"),
+        "planned": True,
+        "training_time": training_time,
+    }
+
+
 @api.post("/workouts/generate")
 async def generate_workouts(
     session_type: str = "volume", authorization: Optional[str] = Header(default=None)
@@ -3126,42 +3276,22 @@ async def workouts_calendar(
         {"user_id": user["user_id"], "active": True}, {"_id": 0}, sort=[("created_at", -1)]
     )
     if prog and prog.get("started_at"):
-        started = prog["started_at"]
-        if isinstance(started, str):
-            started = datetime.fromisoformat(started.replace("Z", "+00:00"))
-        if isinstance(started, datetime):
-            started_date = started.date()
-            weeks_total = int(prog.get("weeks_total", 0))
-            pattern = prog.get("cycle_pattern") or [w.get("session_type", "volume") for w in prog.get("weeks", [])]
-            pattern = pattern or ["volume"]
-            custom_days = prog.get("training_days")
-            if custom_days:
-                training_days = set(int(x) % 7 for x in custom_days)
-            else:
-                frequency = prog.get("frequency", 3)
-                if frequency >= 7:
-                    training_days = set(range(7))
-                elif frequency >= 5:
-                    training_days = {0, 1, 2, 3, 4}
-                else:
-                    training_days = {0, 2, 4}
-            d = start
-            while d < end:
-                d_iso = d.isoformat()
-                if d_iso not in out:
-                    days_since_start = (d - started_date).days
-                    if 0 <= days_since_start < weeks_total * 7 and d.weekday() in training_days:
-                        week_index = days_since_start // 7
-                        st = pattern[week_index % len(pattern)]
-                        out[d_iso] = {
-                            "id": None,
-                            "session_type": st,
-                            "completed": False,
-                            "focus": "",
-                            "exercises_count": 0,
-                            "planned": True,
-                        }
-                d += timedelta(days=1)
+        d = start
+        while d < end:
+            d_iso = d.isoformat()
+            if d_iso not in out:
+                planned = _planned_program_workout_payload(prog, d_iso)
+                if planned:
+                    out[d_iso] = {
+                        "id": planned.get("id"),
+                        "session_type": planned.get("session_type", "volume"),
+                        "completed": False,
+                        "focus": planned.get("focus", ""),
+                        "exercises_count": len(planned.get("exercises") or []),
+                        "planned": True,
+                        "training_time": planned.get("training_time"),
+                    }
+            d += timedelta(days=1)
     return {
         "month": f"{year_i:04d}-{month_i:02d}",
         "days": out,
@@ -3241,12 +3371,17 @@ async def delete_workout(workout_id: str, authorization: Optional[str] = Header(
     """Delete one workout from history/calendar and remove its direct points/performance records."""
     user = await get_current_user(authorization)
     workout = await db.workouts.find_one({"id": workout_id, "user_id": user["user_id"]}, {"_id": 0})
-    if not workout:
-        raise HTTPException(404, "Workout not found")
-    await db.workouts.delete_one({"id": workout_id, "user_id": user["user_id"]})
+    deleted_workouts = 0
+    if workout:
+        res = await db.workouts.delete_one({"id": workout_id, "user_id": user["user_id"]})
+        deleted_workouts = int(res.deleted_count)
     await db.exercise_perf.delete_many({"user_id": user["user_id"], "workout_id": workout_id})
-    deleted_points = await cleanup_workout_points(user["user_id"], workout_id)
-    return {"ok": True, "deleted_points": deleted_points}
+    try:
+        deleted_points = await cleanup_workout_points(user["user_id"], workout_id)
+    except Exception as e:
+        log.warning(f"delete_workout points cleanup: {e}")
+        deleted_points = 0
+    return {"ok": True, "deleted_workouts": deleted_workouts, "deleted_points": deleted_points}
 
 
 @api.put("/workouts/{workout_id}")
@@ -3345,6 +3480,94 @@ async def perf_recent(
         if ex not in bests or p.get("est_1rm", 0) > bests[ex].get("est_1rm", 0):
             bests[ex] = p
     return {"items": items, "personal_bests": list(bests.values())}
+
+
+EXERCISE_CATEGORY_BY_NAME = {str(item.get("name")): str(item.get("category", "Autre")) for item in EXERCISE_LIBRARY}
+
+
+def exercise_muscle_group(exercise_name: str) -> str:
+    if exercise_name in EXERCISE_CATEGORY_BY_NAME:
+        return EXERCISE_CATEGORY_BY_NAME[exercise_name]
+    lower = unicodedata.normalize("NFKD", exercise_name or "").encode("ascii", "ignore").decode("ascii").lower()
+    if any(k in lower for k in ("developpe militaire", "elevation", "oiseau", "face pull", "epaule", "shoulder")):
+        return "Épaules"
+    if any(k in lower for k in ("curl", "triceps", "biceps", "kick-back", "skull")):
+        return "Bras"
+    if any(k in lower for k in ("developpe", "bench", "pompe", "pec", "ecarte", "dips")):
+        return "Pectoraux"
+    if any(k in lower for k in ("rowing", "tirage", "traction", "souleve", "deadlift", "superman", "shrug")):
+        return "Dos"
+    if any(k in lower for k in ("squat", "presse", "fente", "leg ", "mollet", "hip thrust", "ischio")):
+        return "Jambes"
+    if any(k in lower for k in ("planche", "crunch", "russian", "gainage", "abdo", "core", "leg raise")):
+        return "Core"
+    if any(k in lower for k in ("course", "cardio", "burpee", "mountain", "jumping", "rameur", "velo")):
+        return "Cardio"
+    return "Autre"
+
+
+@api.get("/perf/muscle-volume")
+async def perf_muscle_volume(
+    weeks: int = 8, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    weeks = max(2, min(int(weeks), 24))
+    today = now_utc().date()
+    current_week_start = today - timedelta(days=today.weekday())
+    start = current_week_start - timedelta(days=7 * (weeks - 1))
+    perfs = await db.exercise_perf.find(
+        {"user_id": user["user_id"], "date": {"$gte": start.isoformat()}}, {"_id": 0}
+    ).sort("date", 1).to_list(2000)
+
+    groups: Dict[str, Dict[str, Any]] = {}
+    week_labels = []
+    for offset in range(weeks):
+        monday = start + timedelta(days=7 * offset)
+        key = monday.isoformat()
+        week_labels.append(key)
+
+    for p in perfs:
+        try:
+            d = datetime.strptime(str(p.get("date")), "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            continue
+        monday = d - timedelta(days=d.weekday())
+        week_key = monday.isoformat()
+        muscle = exercise_muscle_group(str(p.get("exercise_name", "")))
+        weight = float(p.get("weight_kg", 0) or 0)
+        reps = int(p.get("reps", 0) or 0)
+        sets = int(p.get("sets", 0) or 0)
+        volume = max(0.0, weight * reps * sets)
+        group = groups.setdefault(
+            muscle,
+            {
+                "muscle": muscle,
+                "week_total": 0,
+                "total": 0,
+                "series": {key: 0 for key in week_labels},
+                "top_exercises": {},
+            },
+        )
+        group["total"] += volume
+        group["series"][week_key] = group["series"].get(week_key, 0) + volume
+        if week_key == current_week_start.isoformat():
+            group["week_total"] += volume
+        ex = str(p.get("exercise_name", ""))
+        group["top_exercises"][ex] = group["top_exercises"].get(ex, 0) + volume
+
+    items = []
+    for group in groups.values():
+        series = [{"week": key, "volume": int(round(group["series"].get(key, 0)))} for key in week_labels]
+        top = sorted(group["top_exercises"].items(), key=lambda item: item[1], reverse=True)[:3]
+        items.append({
+            "muscle": group["muscle"],
+            "week_total": int(round(group["week_total"])),
+            "total": int(round(group["total"])),
+            "series": series,
+            "top_exercises": [{"name": name, "volume": int(round(volume))} for name, volume in top],
+        })
+    items.sort(key=lambda item: item["week_total"], reverse=True)
+    return {"weeks": week_labels, "items": items}
 
 
 @api.get("/exercises/library")
@@ -3857,6 +4080,12 @@ async def workout_today(authorization: Optional[str] = Header(default=None)):
     w = await db.workouts.find_one(
         {"user_id": user["user_id"], "date": today_str()}, {"_id": 0}
     )
+    if not w:
+        prog = await db.programs.find_one(
+            {"user_id": user["user_id"], "active": True}, {"_id": 0}, sort=[("created_at", -1)]
+        )
+        if prog:
+            w = _planned_program_workout_payload(prog, today_str()) or _fallback_program_workout_payload(prog, today_str())
     return w or {}
 
 
@@ -3991,6 +4220,12 @@ async def dashboard_day(
     workout = await db.workouts.find_one(
         {"user_id": user["user_id"], "date": d}, {"_id": 0}
     )
+    if not workout:
+        prog = await db.programs.find_one(
+            {"user_id": user["user_id"], "active": True}, {"_id": 0}, sort=[("created_at", -1)]
+        )
+        if prog:
+            workout = _planned_program_workout_payload(prog, d) or _fallback_program_workout_payload(prog, d)
 
     consumed = sum(m.get("calories", 0) for m in meals)
     protein = sum(m.get("protein_g", 0) for m in meals)

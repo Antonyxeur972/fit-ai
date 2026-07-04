@@ -3,7 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Platform, Alert, ImageBackground,
 } from "react-native";
 import type { ImageSourcePropType } from "react-native";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import * as Haptics from "expo-haptics";
@@ -19,6 +19,7 @@ import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { colors, spacing, typography, radius } from "@/src/theme";
 import { PROGRAM_PRESETS, phaseForWeek, presetByGoal } from "@/src/lib/programPresets";
+import { readDefaultTrainingTime } from "@/src/lib/trainingPreferences";
 
 type Exercise = { name: string; sets: number; reps: string; rest_s: number; checked?: boolean; is_recommended?: boolean };
 type Workout = {
@@ -50,6 +51,7 @@ const SPLIT_LABELS: Record<string, string> = {
   ppl: "PPL",
   fullbody: "Full Body",
   split: "Split",
+  upper_lower: "Upper / Lower",
   home: "Home",
 };
 
@@ -73,8 +75,9 @@ type TrainingProgram = {
   goal_label: string;
   weeks_total: number;
   frequency: number;
-  split: "ppl" | "fullbody" | "split" | "home";
+  split: "ppl" | "fullbody" | "split" | "upper_lower" | "home";
   training_days?: number[] | null;
+  training_times?: Record<string, string> | null;
   block_weeks?: { volume?: number; puissance?: number; force?: number };
   cycle_pattern: string[];
   started_at: string;
@@ -91,6 +94,7 @@ type CalendarSyncWorkout = {
   duration_min: number;
   exercises: Exercise[];
   session_type?: string;
+  training_time?: string | null;
 };
 
 // Rest timer defaults per session_type
@@ -137,6 +141,20 @@ function formatSecondsLabel(seconds: number) {
   return `${String(Math.floor(safe / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`;
 }
 
+function normalizeTrainingTime(value?: string | null) {
+  const match = String(value || "").match(/^(\d{1,2})[:hH]?(\d{2})?$/);
+  if (!match) return "18:30";
+  const hour = Math.max(5, Math.min(23, parseInt(match[1] || "18", 10)));
+  const minute = Math.max(0, Math.min(59, parseInt(match[2] || "00", 10)));
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function splitTrainingTime(value?: string | null) {
+  const normalized = normalizeTrainingTime(value);
+  const [hour, minute] = normalized.split(":").map((part) => parseInt(part, 10));
+  return { hour, minute };
+}
+
 function defaultTrainingDays(frequency: number) {
   if (frequency >= 7) return [0, 1, 2, 3, 4, 5, 6];
   if (frequency >= 5) return [0, 1, 2, 3, 4];
@@ -151,8 +169,23 @@ function sessionLabelForIndex(dayIndex: number, trainingDays?: number[] | null) 
   return `J${dayIndex + 1}`;
 }
 
+function splitLabel(split?: string) {
+  if (split === "upper_lower") return "Upper / Lower";
+  return SPLIT_LABELS[split || ""] || (split || "Training").toUpperCase();
+}
+
 function toLocalIsoDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function weekdayFromIso(dateIso: string) {
+  const d = new Date(`${dateIso}T12:00:00`);
+  return (d.getDay() + 6) % 7;
+}
+
+function trainingTimeForDate(program: TrainingProgram | null, dateIso: string) {
+  const weekday = weekdayFromIso(dateIso);
+  return program?.training_times?.[String(weekday)] || null;
 }
 
 function addDays(date: Date, days: number) {
@@ -187,11 +220,12 @@ function plannedWorkoutsFromProgram(program: TrainingProgram | null): CalendarSy
     events.push({
       id: `program-${program.id}-${weekIndex}-${day.day_index}`,
       date: toLocalIsoDate(date),
-      title: `${program.split.toUpperCase()} ${sessionLabelForIndex(day.day_index, trainingDays)}`,
+      title: `${splitLabel(program.split)} ${sessionLabelForIndex(day.day_index, trainingDays)}`,
       focus: day.focus || program.goal_label || "Séance FIT AI",
       duration_min: 45,
       exercises: day.exercises.filter((exercise) => exercise.checked !== false),
       session_type: week.session_type,
+      training_time: program.training_times?.[String(weekday)] || null,
     });
   }
   return events;
@@ -228,9 +262,10 @@ function buildTrainingCalendar(workouts: CalendarSyncWorkout[]) {
     .slice()
     .sort((a, b) => a.date.localeCompare(b.date))
     .forEach((workout) => {
-      const start = icsDateTime(workout.date, 18, 0);
+      const { hour, minute } = splitTrainingTime(workout.training_time);
+      const start = icsDateTime(workout.date, hour, minute);
       const duration = Math.max(20, workout.duration_min || 45);
-      const endDate = new Date(`${workout.date}T18:00:00`);
+      const endDate = new Date(`${workout.date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`);
       endDate.setMinutes(endDate.getMinutes() + duration);
       const end = icsDateTime(toLocalIsoDate(endDate), endDate.getHours(), endDate.getMinutes());
       const exercises = workout.exercises
@@ -288,7 +323,8 @@ async function syncWorkoutsToNativeCalendar(workouts: CalendarSyncWorkout[]) {
   const calendarId = await getOrCreateFitAiCalendarId();
   let count = 0;
   for (const workout of workouts.slice(0, 120)) {
-    const startDate = new Date(`${workout.date}T18:00:00`);
+    const { hour, minute } = splitTrainingTime(workout.training_time);
+    const startDate = new Date(`${workout.date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00`);
     const endDate = new Date(startDate);
     endDate.setMinutes(endDate.getMinutes() + Math.max(20, workout.duration_min || 45));
     const exercises = workout.exercises
@@ -337,6 +373,7 @@ export function isRecommendedFor(exerciseName: string, sessionType?: string): bo
 }
 
 export default function Training() {
+  const router = useRouter();
   const { user } = useAuth();
   const today = new Date().toISOString().slice(0, 10);
   const [tab, setTab] = useState<TrainingTab>("today");
@@ -382,12 +419,15 @@ export default function Training() {
   const [expandedWeek, setExpandedWeek] = useState<number | null>(null);
   const [programSetupOpen, setProgramSetupOpen] = useState(false);
   const [setupWeeks, setSetupWeeks] = useState(8);
-  const [setupFreq, setSetupFreq] = useState<2 | 3 | 4>(3);
+  const [setupFreq, setSetupFreq] = useState<2 | 3 | 4 | 5 | 6>(3);
   const [setupDays, setSetupDays] = useState<number[]>([0, 2, 4]);
-  const [setupSplit, setSetupSplit] = useState<"ppl" | "fullbody" | "split">("ppl");
+  const [setupSplit, setSetupSplit] = useState<"ppl" | "fullbody" | "split" | "upper_lower" | "home">("ppl");
   const [setupGoal, setSetupGoal] = useState("Masse");
   const [setupBlocks, setSetupBlocks] = useState<{ volume: number; puissance: number; force: number }>({ volume: 1, puissance: 1, force: 1 });
   const [setupChangeMode, setSetupChangeMode] = useState<"stable" | "changed">("stable");
+  const [setupSameTime, setSetupSameTime] = useState(true);
+  const [setupDefaultTime, setSetupDefaultTime] = useState("18:30");
+  const [setupTrainingTimes, setSetupTrainingTimes] = useState<Record<string, string>>({});
   const [creatingProgram, setCreatingProgram] = useState(false);
 
   // Travel mode
@@ -437,6 +477,15 @@ export default function Training() {
   }, [today, expandedWeek]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  useEffect(() => {
+    readDefaultTrainingTime()
+      .then((time) => {
+        setSetupDefaultTime((current) => (current === "18:30" ? time : normalizeTrainingTime(current || time)));
+        setSetupTrainingTimes((current) => (Object.keys(current).length ? current : { "0": time, "2": time, "4": time }));
+      })
+      .catch(() => undefined);
+  }, []);
 
   const generate = async () => {
     setGenerating(true);
@@ -596,6 +645,7 @@ export default function Training() {
           duration_min: workout.duration_min,
           exercises: workout.exercises.filter((exercise) => exercise.checked !== false),
           session_type: workout.session_type,
+          training_time: trainingTimeForDate(program, workout.date),
         });
       });
       const events = Array.from(byDate.values()).filter((item) => item.exercises.length > 0);
@@ -819,14 +869,22 @@ export default function Training() {
   const createProgram = async (overrides?: { goal_label?: string; frequency?: number; training_days?: number[]; split?: string; weeks?: number }) => {
     setCreatingProgram(true);
     try {
-      const dayDefaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4] };
+      const dayDefaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5], 7: [0, 1, 2, 3, 4, 5, 6] };
       const freq = overrides?.frequency ?? setupFreq;
+      const selectedDays = overrides?.training_days ?? (setupDays.length === freq ? setupDays : dayDefaults[freq] ?? setupDays);
+      const trainingTimes = Object.fromEntries(
+        selectedDays.map((day) => [
+          String(day),
+          normalizeTrainingTime(setupSameTime ? setupDefaultTime : setupTrainingTimes[String(day)] || setupDefaultTime),
+        ])
+      );
       const created = await api<TrainingProgram>("/program/create", {
         method: "POST",
         body: {
           weeks: overrides?.weeks ?? setupWeeks,
           frequency: freq,
-          training_days: overrides?.training_days ?? dayDefaults[freq] ?? setupDays,
+          training_days: selectedDays,
+          training_times: trainingTimes,
           split: overrides?.split ?? setupSplit,
           goal_label: overrides?.goal_label ?? setupGoal,
           block_weeks: setupBlocks,
@@ -835,7 +893,11 @@ export default function Training() {
       setProgram(created);
       setExpandedWeek(1);
       setProgramSetupOpen(false);
-    } catch {} finally {
+      await load();
+      if (tab === "calendar") await loadCalendar(calMonth);
+    } catch (e: any) {
+      Alert.alert("Programme", e?.message || "Impossible d'appliquer ce programme pour le moment.");
+    } finally {
       setCreatingProgram(false);
     }
   };
@@ -845,16 +907,22 @@ export default function Training() {
     if (program) {
       setSetupGoal(program.goal_label || setupGoal);
       setSetupWeeks(program.weeks_total || setupWeeks);
-      const freq = Math.max(2, Math.min(4, program.frequency || setupFreq)) as 2 | 3 | 4;
+      const freq = Math.max(2, Math.min(6, program.frequency || setupFreq)) as 2 | 3 | 4 | 5 | 6;
       setSetupFreq(freq);
-      setSetupSplit((program.split || setupSplit) as "ppl" | "fullbody" | "split");
+      setSetupSplit((program.split || setupSplit) as "ppl" | "fullbody" | "split" | "upper_lower" | "home");
       setSetupBlocks({
-        volume: Math.max(1, Math.min(3, Number(program.block_weeks?.volume || 1))),
-        puissance: Math.max(1, Math.min(3, Number(program.block_weeks?.puissance || 1))),
-        force: Math.max(1, Math.min(3, Number(program.block_weeks?.force || 1))),
+        volume: Math.max(1, Math.min(4, Number(program.block_weeks?.volume || 1))),
+        puissance: Math.max(1, Math.min(4, Number(program.block_weeks?.puissance || 1))),
+        force: Math.max(1, Math.min(4, Number(program.block_weeks?.force || 1))),
       });
-      const defaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4] };
-      setSetupDays(defaults[freq] || setupDays);
+      const defaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5] };
+      const days = program.training_days?.length ? program.training_days : defaults[freq] || setupDays;
+      setSetupDays(days);
+      const times = program.training_times || {};
+      const firstTime = normalizeTrainingTime(times[String(days[0])] || setupDefaultTime);
+      setSetupDefaultTime(firstTime);
+      setSetupTrainingTimes(Object.fromEntries(days.map((day) => [String(day), normalizeTrainingTime(times[String(day)] || firstTime)])));
+      setSetupSameTime(days.every((day) => normalizeTrainingTime(times[String(day)] || firstTime) === firstTime));
     }
     setProgramSetupOpen(true);
   };
@@ -1060,7 +1128,7 @@ export default function Training() {
 
   const adjustRunnerDraftNumber = (
     exerciseName: string,
-    field: "sets" | "weight" | "rest",
+    field: "sets" | "reps" | "weight" | "rest",
     delta: number,
     minimum = 0
   ) => {
@@ -1242,6 +1310,9 @@ export default function Training() {
   const runnerExercise = runnerExercises[runnerIndex] || null;
   const runnerDraft = runnerExercise ? runnerDrafts[runnerExercise.name] : null;
   const runnerProgress = runnerExercises.length > 0 ? Math.round(((runnerIndex + 1) / runnerExercises.length) * 100) : 0;
+  const runnerRestSeconds = runnerDraft
+    ? (restRemaining > 0 ? restRemaining : parseInt(runnerDraft.rest || "0", 10) || runnerExercise?.rest_s || 60)
+    : restRemaining;
   const programProgress = program?.weeks_total
     ? Math.min(100, Math.round(((program.current_week + 1) / program.weeks_total) * 100))
     : 0;
@@ -1629,28 +1700,26 @@ export default function Training() {
       </ScrollView>
 
       {/* Rest Timer Overlay */}
-      {(restRunning || restRemaining > 0) && (
+      {(restRunning || restRemaining > 0) && !sessionRunnerOpen && (
         <View style={styles.timerOverlay} testID="rest-timer-overlay">
           <View style={styles.timerCard}>
-            <Text style={[typography.caption, { color: colors.textMuted }]}>Repos</Text>
-            <Text style={styles.timerBig}>
-              {Math.floor(restRemaining / 60)}:{String(restRemaining % 60).padStart(2, "0")}
-            </Text>
+            <Ionicons name="timer-outline" size={14} color={colors.primaryLight} />
+            <Text style={styles.timerBig}>{formatSecondsLabel(restRemaining)}</Text>
             <View style={styles.timerProgressTrack}>
               <View style={[styles.timerProgressFill, { width: `${restTotal > 0 ? Math.min(100, (1 - restRemaining / restTotal) * 100) : 0}%` }]} />
             </View>
-            <View style={{ flexDirection: "row", gap: 8, marginTop: spacing.sm }}>
+            <View style={styles.timerMiniActions}>
               <TouchableOpacity onPress={toggleRestTimer} style={styles.timerPlayBtn} testID="timer-play-toggle">
-                <Ionicons name={restRunning ? "pause" : "play"} size={18} color="#102108" />
+                <Ionicons name={restRunning ? "pause" : "play"} size={13} color="#102108" />
               </TouchableOpacity>
               <TouchableOpacity onPress={() => adjustRest(-15)} style={styles.timerBtn} testID="timer-minus">
-                <Text style={styles.timerBtnTxt}>-15s</Text>
+                <Text style={styles.timerBtnTxt}>-15</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => adjustRest(15)} style={styles.timerBtn} testID="timer-plus">
-                <Text style={styles.timerBtnTxt}>+15s</Text>
+                <Text style={styles.timerBtnTxt}>+15</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={stopRestTimer} style={[styles.timerBtn, { backgroundColor: colors.alert }]} testID="timer-stop">
-                <Text style={[styles.timerBtnTxt, { color: "#fff" }]}>Passer</Text>
+                <Ionicons name="close" size={12} color="#fff" />
               </TouchableOpacity>
             </View>
             {perfEx && (
@@ -1763,7 +1832,6 @@ export default function Training() {
 
                     <View style={styles.runnerParamGrid}>
                       <View style={styles.runnerParamCard}>
-                        <Ionicons name="repeat-outline" size={16} color={colors.primaryLight} />
                         <TextInput
                           value={runnerDraft.reps}
                           onChangeText={(text) => updateRunnerDraft(runnerExercise.name, { reps: text.replace(/[^0-9-]/g, "") })}
@@ -1773,14 +1841,17 @@ export default function Training() {
                           style={styles.runnerParamInput}
                         />
                         <Text style={styles.runnerParamLabel}>répétitions</Text>
-                        <TouchableOpacity style={styles.runnerModifyPill}>
-                          <Ionicons name="create-outline" size={11} color={colors.primaryLight} />
-                          <Text style={styles.runnerModifyText}>Modifier</Text>
-                        </TouchableOpacity>
+                        <View style={styles.runnerTinyStepper}>
+                          <TouchableOpacity onPress={() => adjustRunnerDraftNumber(runnerExercise.name, "reps", -1, 1)} style={styles.runnerTinyStepButton}>
+                            <Ionicons name="remove" size={11} color={colors.primaryLight} />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => adjustRunnerDraftNumber(runnerExercise.name, "reps", 1, 1)} style={styles.runnerTinyStepButton}>
+                            <Ionicons name="add" size={11} color={colors.primaryLight} />
+                          </TouchableOpacity>
+                        </View>
                       </View>
 
                       <View style={styles.runnerParamCard}>
-                        <Ionicons name="layers-outline" size={16} color={colors.primaryLight} />
                         <TextInput
                           value={runnerDraft.sets}
                           onChangeText={(text) => updateRunnerDraft(runnerExercise.name, { sets: text.replace(/[^0-9]/g, "") })}
@@ -1801,7 +1872,6 @@ export default function Training() {
                       </View>
 
                       <View style={styles.runnerParamCard}>
-                        <Ionicons name="barbell-outline" size={16} color={colors.primaryLight} />
                         <View style={styles.runnerWeightLine}>
 	                          <TextInput
 	                            value={runnerDraft.weight}
@@ -1835,21 +1905,17 @@ export default function Training() {
                           </TouchableOpacity>
                         </View>
                         <View style={styles.runnerRestCircle}>
-                          <TextInput
-                            value={formatSecondsLabel(parseInt(runnerDraft.rest || "0", 10) || 0)}
-                            editable={false}
-                            style={styles.runnerRestTime}
-                          />
+                          <Text style={styles.runnerRestTime}>{formatSecondsLabel(runnerRestSeconds)}</Text>
 	                          <View style={styles.runnerRestControls}>
 	                            <TouchableOpacity onPress={() => adjustRunnerDraftNumber(runnerExercise.name, "rest", -15, 0)} style={styles.runnerRestButton}>
 	                              <Ionicons name="remove" size={12} color={colors.primaryLight} />
 	                            </TouchableOpacity>
 	                            <TouchableOpacity
 	                              onPress={() => startOrToggleRestTimer(parseInt(runnerDraft.rest || "0", 10) || runnerExercise.rest_s || 60)}
-	                              style={styles.runnerRestPlayButton}
+	                              style={[styles.runnerRestPlayButton, restRemaining > 0 && styles.runnerRestPlayButtonActive]}
 	                              testID="runner-rest-play"
 	                            >
-	                              <Ionicons name={restRunning ? "pause" : "play"} size={13} color="#102108" />
+	                              <Text style={styles.runnerRestPlayText}>{restRemaining > 0 ? formatSecondsLabel(restRemaining) : "Start"}</Text>
 	                            </TouchableOpacity>
 	                            <TouchableOpacity onPress={() => adjustRunnerDraftNumber(runnerExercise.name, "rest", 15, 0)} style={styles.runnerRestButton}>
 	                              <Ionicons name="add" size={12} color={colors.primaryLight} />
@@ -1928,7 +1994,15 @@ export default function Training() {
                 </View>
               </>
             ) : null}
-            <Button title="Voir mes progrès" onPress={() => setSessionResult(null)} icon={<Ionicons name="arrow-forward" size={16} color="#102108" />} testID="session-result-close" />
+            <Button
+              title="Voir mes trophées"
+              onPress={() => {
+                setSessionResult(null);
+                router.push("/(tabs)/challenges");
+              }}
+              icon={<Ionicons name="trophy-outline" size={16} color="#102108" />}
+              testID="session-result-close"
+            />
           </View>
         </View>
       </Modal>
@@ -2048,9 +2122,9 @@ export default function Training() {
                     onPress={() => {
                       setSetupGoal(preset.goalLabel);
                       setSetupWeeks(preset.defaultWeeks);
-                      setSetupFreq(preset.defaultFrequency);
-                      setSetupSplit(preset.defaultSplit);
-                      const defaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4] };
+                      setSetupFreq(preset.defaultFrequency as 2 | 3 | 4 | 5 | 6);
+                      setSetupSplit(preset.defaultSplit as "ppl" | "fullbody" | "split" | "upper_lower" | "home");
+                      const defaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5] };
                       setSetupDays(defaults[preset.defaultFrequency]);
                     }}
                     style={[styles.setupOption, setupGoal === preset.goalLabel && styles.setupOptionOn]}
@@ -2064,12 +2138,12 @@ export default function Training() {
 
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Fréquence (jours / semaine)</Text>
               <View style={styles.setupOptionRow}>
-                {([2, 3, 4] as const).map((f) => (
+                {([2, 3, 4, 5, 6] as const).map((f) => (
                   <TouchableOpacity
                     key={f}
                     onPress={() => {
                       setSetupFreq(f);
-                      const defaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4] };
+                      const defaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5] };
                       setSetupDays(defaults[f]);
                     }}
                     style={[styles.setupOption, setupFreq === f && styles.setupOptionOn]}
@@ -2077,7 +2151,7 @@ export default function Training() {
                   >
                       <Text style={[styles.setupOptionLabel, setupFreq === f && styles.setupOptionLabelOn]}>{f}j</Text>
                       <Text style={styles.setupOptionSub}>
-                        {f === 2 ? "Minimal" : f === 3 ? "Optimal" : "Ambitieux"}
+                        {f === 2 ? "Minimal" : f === 3 ? "Optimal" : f === 4 ? "Structuré" : "Expert"}
                       </Text>
                     </TouchableOpacity>
                   ))}
@@ -2106,11 +2180,60 @@ export default function Training() {
                 })}
               </View>
 
+              <Text style={[typography.caption, { marginTop: spacing.md }]}>Heure d&apos;entraînement</Text>
+              <View style={styles.setupOptionRow}>
+                <TouchableOpacity
+                  onPress={() => setSetupSameTime(true)}
+                  style={[styles.setupOption, setupSameTime && styles.setupOptionOn]}
+                  testID="setup-time-same"
+                >
+                  <Text style={[styles.setupOptionLabel, setupSameTime && styles.setupOptionLabelOn]}>Même heure</Text>
+                  <Text style={styles.setupOptionSub}>Tous les jours choisis</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => setSetupSameTime(false)}
+                  style={[styles.setupOption, !setupSameTime && styles.setupOptionOn]}
+                  testID="setup-time-by-day"
+                >
+                  <Text style={[styles.setupOptionLabel, !setupSameTime && styles.setupOptionLabelOn]}>Par jour</Text>
+                  <Text style={styles.setupOptionSub}>Horaires différents</Text>
+                </TouchableOpacity>
+              </View>
+              {setupSameTime ? (
+                <TextInput
+                  value={setupDefaultTime}
+                  onChangeText={setSetupDefaultTime}
+                  onBlur={() => setSetupDefaultTime(normalizeTrainingTime(setupDefaultTime))}
+                  placeholder="18:30"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.setupTimeInput}
+                  testID="setup-time-default"
+                />
+              ) : (
+                <View style={styles.setupTimeGrid}>
+                  {setupDays.map((day) => (
+                    <View key={day} style={styles.setupTimeCell}>
+                      <Text style={styles.setupTimeLabel}>{WEEKDAY_SHORT[day]}</Text>
+                      <TextInput
+                        value={setupTrainingTimes[String(day)] || setupDefaultTime}
+                        onChangeText={(text) => setSetupTrainingTimes((prev) => ({ ...prev, [String(day)]: text }))}
+                        onBlur={() => setSetupTrainingTimes((prev) => ({ ...prev, [String(day)]: normalizeTrainingTime(prev[String(day)] || setupDefaultTime) }))}
+                        placeholder="18:30"
+                        placeholderTextColor={colors.textMuted}
+                        style={styles.setupTimeMiniInput}
+                        testID={`setup-time-${day}`}
+                      />
+                    </View>
+                  ))}
+                </View>
+              )}
+
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Organisation des séances</Text>
               <View style={styles.setupOptionRow}>
                 {([
                   { v: "ppl" as const, label: "PPL", sub: "Push / Pull / Legs" },
                   { v: "fullbody" as const, label: "Full body", sub: "Tout le corps" },
+                  { v: "upper_lower" as const, label: "Upper / Lower", sub: "Haut puis bas" },
                   { v: "split" as const, label: "Split", sub: "1 groupe / séance" },
                   { v: "home" as const, label: "À la maison", sub: "Poids du corps" },
                 ]).map((o) => (
@@ -2147,7 +2270,7 @@ export default function Training() {
                     <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: SESSION_COLOR[block]?.fg || colors.primary }} />
                     <Text style={[typography.small, { fontWeight: "700", textTransform: "capitalize" }]}>{block}</Text>
                   </View>
-                  {[1, 2, 3].map((n) => (
+                  {[1, 2, 3, 4].map((n) => (
                     <TouchableOpacity
                       key={n}
                       onPress={() => setSetupBlocks({ ...setupBlocks, [block]: n })}
@@ -2562,14 +2685,15 @@ const styles = StyleSheet.create({
   historyActionText: { color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
   historyDeleteButton: { borderColor: "rgba(255,94,94,0.35)", backgroundColor: "rgba(255,94,94,0.08)" },
   // Timer overlay
-  timerOverlay: { position: "absolute", left: 0, right: 0, bottom: spacing.lg, alignItems: "center", padding: spacing.md, zIndex: 100, elevation: 10 },
-  timerCard: { backgroundColor: "rgba(6,20,10,0.97)", padding: spacing.md, borderRadius: radius.lg, alignItems: "center", borderWidth: 2, borderColor: colors.primaryLight, width: "92%", maxWidth: 360, gap: 4 },
-  timerBig: { fontSize: 40, fontWeight: "800", color: colors.primaryLight, letterSpacing: -1 },
-  timerProgressTrack: { height: 6, backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 3, width: "100%", overflow: "hidden" },
+  timerOverlay: { position: "absolute", right: spacing.md, bottom: spacing.xl, alignItems: "flex-end", padding: spacing.xs, zIndex: 100, elevation: 10 },
+  timerCard: { backgroundColor: "rgba(6,20,10,0.97)", padding: spacing.sm, borderRadius: radius.full, alignItems: "center", borderWidth: 1, borderColor: colors.primaryLight, width: 172, gap: 4 },
+  timerBig: { fontSize: 22, lineHeight: 25, fontWeight: "900", color: colors.primaryLight },
+  timerProgressTrack: { height: 4, backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 3, width: "100%", overflow: "hidden" },
   timerProgressFill: { height: "100%", backgroundColor: colors.primaryLight, borderRadius: 3 },
-  timerPlayBtn: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: "rgba(255,255,255,0.34)" },
-  timerBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.15)", borderWidth: 1, borderColor: colors.primaryLight },
-  timerBtnTxt: { fontSize: 13, fontWeight: "700", color: colors.primaryLight },
+  timerMiniActions: { flexDirection: "row", gap: 5, marginTop: 2, alignItems: "center", justifyContent: "center" },
+  timerPlayBtn: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: "rgba(255,255,255,0.34)" },
+  timerBtn: { minWidth: 30, height: 28, paddingHorizontal: 6, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(74,222,128,0.15)", borderWidth: 1, borderColor: colors.primaryLight },
+  timerBtnTxt: { fontSize: 10.5, fontWeight: "800", color: colors.primaryLight },
   timerSaveCfg: { flexDirection: "row", gap: 4, alignItems: "center", paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.full, backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER, marginTop: 4 },
   runnerHero: { minHeight: 270, justifyContent: "space-between", padding: spacing.lg },
   runnerHeroImage: { opacity: 0.92 },
@@ -2627,7 +2751,7 @@ const styles = StyleSheet.create({
   runnerAdvicePill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 7, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.08)" },
   runnerAdviceText: { color: colors.primaryLight, fontSize: 10.5, fontWeight: "900" },
   runnerParamGrid: { flexDirection: "row", gap: spacing.sm },
-  runnerParamCard: { flex: 1, minHeight: 124, alignItems: "center", justifyContent: "space-between", padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.11)", backgroundColor: "rgba(255,255,255,0.055)" },
+  runnerParamCard: { flex: 1, minHeight: 112, alignItems: "center", justifyContent: "space-between", padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.11)", backgroundColor: "rgba(255,255,255,0.055)" },
   runnerParamInput: { minWidth: 0, color: colors.textMain, fontSize: 26, lineHeight: 30, fontWeight: "900", paddingVertical: 0, textAlign: "center" },
   runnerParamLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "900" },
   runnerParamUnit: { color: colors.textMuted, fontSize: 11, fontWeight: "900", marginBottom: 5, width: 20, textAlign: "left" },
@@ -2652,7 +2776,9 @@ const styles = StyleSheet.create({
   runnerRestTime: { color: colors.textMain, fontSize: 25, lineHeight: 30, fontWeight: "900", textAlign: "center", padding: 0 },
   runnerRestControls: { flexDirection: "row", gap: 8, marginTop: 4 },
   runnerRestButton: { width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: GLASS_BORDER },
-  runnerRestPlayButton: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: "rgba(255,255,255,0.28)" },
+  runnerRestPlayButton: { minWidth: 46, height: 26, paddingHorizontal: 7, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: "rgba(255,255,255,0.28)" },
+  runnerRestPlayButtonActive: { minWidth: 58 },
+  runnerRestPlayText: { color: "#102108", fontSize: 10, fontWeight: "900" },
   runnerRestHint: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700", textAlign: "center" },
   runnerPrCheckCard: { flex: 1.08, gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.055)" },
   runnerPrCheckCardOn: { borderColor: colors.primaryLight, backgroundColor: "rgba(182,255,63,0.10)" },
@@ -2784,6 +2910,11 @@ const styles = StyleSheet.create({
   setupOptionLabel: { fontSize: 14, fontWeight: "700", color: "rgba(255,255,255,0.6)" },
   setupOptionLabelOn: { color: colors.primaryLight },
   setupOptionSub: { fontSize: 10, color: "rgba(255,255,255,0.38)", marginTop: 2 },
+  setupTimeInput: { minHeight: 46, marginTop: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.07)", color: colors.textMain, fontSize: 18, fontWeight: "900", textAlign: "center", paddingHorizontal: spacing.md },
+  setupTimeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: spacing.sm },
+  setupTimeCell: { width: "30.5%", minHeight: 64, gap: 4, padding: 7, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.055)" },
+  setupTimeLabel: { color: colors.primaryLight, fontSize: 11, fontWeight: "900", textAlign: "center" },
+  setupTimeMiniInput: { minHeight: 34, borderRadius: radius.sm, backgroundColor: "rgba(0,0,0,0.18)", color: colors.textMain, fontSize: 13, fontWeight: "900", textAlign: "center", paddingHorizontal: 4, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
   xpRing: { width: 68, height: 68, borderRadius: 34, borderWidth: 5, borderColor: colors.primaryLight, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(2,18,12,0.54)" },
   xpValue: { color: "#FFFFFF", fontSize: 19, fontWeight: "900", lineHeight: 22 },
   xpLabel: { color: colors.primaryLight, fontSize: 10, fontWeight: "900", marginTop: -1 },
