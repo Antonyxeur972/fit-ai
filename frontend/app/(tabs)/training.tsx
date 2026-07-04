@@ -12,7 +12,7 @@ import * as Sharing from "expo-sharing";
 import * as Calendar from "expo-calendar";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
-import { Card, Button, SectionTitle, Stat } from "@/src/components/UI";
+import { Card, Button, SectionTitle } from "@/src/components/UI";
 import { ShareCardModal } from "@/src/components/ShareCardModal";
 import { ProgramCarousel } from "@/src/components/ProgramCarousel";
 import { ScreenBackground } from "@/src/components/ScreenBackground";
@@ -37,7 +37,7 @@ type SessionResult = { prs: number; volume: number; duration: number; calories: 
 
 const SESSION_KEYS = ["volume", "puissance", "force"] as const;
 type SessionKey = typeof SESSION_KEYS[number];
-type TrainingTab = "today" | "calendar" | "history";
+type TrainingTab = "today" | "recommendation" | "calendar" | "history";
 
 // Color code per session_type (block periodization legend)
 const SESSION_COLOR: Record<string, { bg: string; fg: string; border: string }> = {
@@ -115,6 +115,7 @@ type TrainingProgram = {
   weeks_total: number;
   frequency: number;
   split: "ppl" | "fullbody" | "split" | "upper_lower" | "home";
+  is_travel?: boolean;
   training_days?: number[] | null;
   training_times?: Record<string, string> | null;
   block_weeks?: { volume?: number; puissance?: number; force?: number };
@@ -1222,8 +1223,6 @@ export default function Training() {
       [exercise.name]: { ...draft, done: true },
     };
     setRunnerDrafts(nextDrafts);
-    const restSeconds = parseInt(draft?.rest || String(exercise.rest_s || 60), 10) || 60;
-    startRestTimer(restSeconds);
     const allDone = exercises.every((ex) => nextDrafts[ex.name]?.done);
     if (allDone) {
       await finishGuidedSession(nextDrafts);
@@ -1252,6 +1251,13 @@ export default function Training() {
     try {
       if (!runnerWorkout.id.startsWith("draft:") && !runnerWorkout.id.startsWith("prog:")) {
         await api(`/workouts/${runnerWorkout.id}/complete`, { method: "POST" });
+        setWeek((prev) => {
+          const exists = prev.some((item) => item.id === runnerWorkout.id);
+          if (exists) {
+            return prev.map((item) => item.id === runnerWorkout.id ? { ...item, completed: true } : item);
+          }
+          return [{ ...runnerWorkout, completed: true }, ...prev];
+        });
       }
     } catch (e) {
       console.warn("runner complete", e);
@@ -1266,9 +1272,7 @@ export default function Training() {
       xp: 100 + prs * 20,
     });
     setSessionRunnerOpen(false);
-    if (!runnerWorkout.id.startsWith("draft:") && !runnerWorkout.id.startsWith("prog:")) {
-      await load();
-    }
+    if (!runnerWorkout.id.startsWith("draft:")) await load();
   };
 
   const openPerf = async (w: Workout, ex: Exercise) => {
@@ -1399,6 +1403,10 @@ export default function Training() {
           <TouchableOpacity onPress={() => setTab("today")} style={[styles.tabChip, tab === "today" && styles.tabChipActive]} testID="training-tab-today">
             <Ionicons name="leaf-outline" size={13} color={tab === "today" ? "#102108" : colors.textMuted} />
             <Text style={[styles.tabText, tab === "today" && styles.tabTextActive]}>Aujourd&apos;hui</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setTab("recommendation")} style={[styles.tabChip, tab === "recommendation" && styles.tabChipActive]} testID="training-tab-recommendation">
+            <Ionicons name="sparkles-outline" size={13} color={tab === "recommendation" ? "#102108" : colors.textMuted} />
+            <Text style={[styles.tabText, tab === "recommendation" && styles.tabTextActive]}>Recommandation IA</Text>
           </TouchableOpacity>
           <TouchableOpacity onPress={() => setTab("calendar")} style={[styles.tabChip, tab === "calendar" && styles.tabChipActive]} testID="training-tab-calendar">
             <Ionicons name="calendar-outline" size={13} color={tab === "calendar" ? "#102108" : colors.textMuted} />
@@ -1547,25 +1555,11 @@ export default function Training() {
           </Card>
         )}
 
-        {/* My Program (weeks) */}
-        {program && !simpleMode && (
-          <ProgramActionsFooter
-            program={program}
-            onCreate={openProgramSetup}
-            onTravel={() => setTravelOpen(true)}
-            onEndTravel={endTravelMode}
-            travelBusy={travelBusy}
-          />
-        )}
-
         {program && (
           <View testID="my-program-section" style={styles.programSection}>
             <View style={styles.programSectionHeader}>
               <Text style={styles.programSectionTitle}>Mon programme</Text>
-              <TouchableOpacity onPress={openProgramSetup} style={styles.refaireButton} testID="program-modify">
-                <Text style={styles.refaireText}>Modifier</Text>
-                <Ionicons name="create-outline" size={13} color={colors.primaryLight} />
-              </TouchableOpacity>
+              <Text style={styles.programSectionHint}>{program.frequency} séance{program.frequency > 1 ? "s" : ""} / semaine</Text>
             </View>
             <ProgramWeekSelector
               weeksTotal={program.weeks_total}
@@ -1583,6 +1577,35 @@ export default function Training() {
                 trainingDays={program.training_days}
                 onEditDay={(dayIndex) => openProgramDayEditor(program, activeProgramWeek.week_index, dayIndex)}
               />
+            )}
+            {!simpleMode && (
+              <View style={styles.programBottomButtonRow} testID="program-bottom-modify-row">
+                <TouchableOpacity onPress={openProgramSetup} style={[styles.actionBtn, styles.programBottomButton]} testID="program-modify-bottom">
+                  <Ionicons name="create-outline" size={14} color={colors.primaryLight} />
+                  <Text style={[typography.small, { color: colors.primaryLight, fontWeight: "800" }]}>Modifier</Text>
+                </TouchableOpacity>
+                {program.is_travel ? (
+                  <TouchableOpacity
+                    onPress={endTravelMode}
+                    disabled={travelBusy}
+                    style={[styles.actionBtn, styles.programBottomButton, travelBusy && { opacity: 0.5 }]}
+                    testID="summary-end-travel"
+                  >
+                    <Ionicons name="arrow-undo" size={14} color={colors.primaryLight} />
+                    <Text style={[typography.small, { color: colors.primaryLight, fontWeight: "800" }]}>Reprendre</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    onPress={() => setTravelOpen(true)}
+                    disabled={travelBusy}
+                    style={[styles.actionBtn, styles.programBottomButton, travelBusy && { opacity: 0.5 }]}
+                    testID="summary-travel"
+                  >
+                    <Ionicons name="airplane-outline" size={14} color={colors.primaryLight} />
+                    <Text style={[typography.small, { color: colors.primaryLight, fontWeight: "800" }]}>Déplacement</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             )}
           </View>
         )}
@@ -1602,24 +1625,80 @@ export default function Training() {
           </View>
         )}
 
-        {!simpleMode && (
-        <Card testID="activity-card">
-          <SectionTitle title="Activité du jour" action={
-            <TouchableOpacity onPress={() => setShowActivity(true)} testID="activity-edit-button">
-              <Text style={[typography.small, { color: colors.primary, fontWeight: "600" }]}>
-                {activity?.steps || activity?.cardio_minutes ? "Modifier" : "Saisir"}
-              </Text>
-            </TouchableOpacity>
-          } />
-          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm }}>
-            <Stat label="Pas" value={(activity?.steps || 0).toLocaleString("fr-FR")} testID="training-steps" />
-            <Stat label="Cardio" value={activity?.cardio_minutes || 0} unit="min" align="center" testID="training-cardio-min" />
-            <Stat label="Type" value={activity?.cardio_type || "—"} align="center" />
-          </View>
-        </Card>
+        <View style={{ height: spacing.xxl }} />
+          </>
         )}
 
-        <View style={{ height: spacing.xxl }} />
+        {tab === "recommendation" && !simpleMode && (
+          <>
+            <Card testID="ai-recommendation-tab" style={{ gap: spacing.md }}>
+              <SectionTitle title="Recommandation IA" />
+              <Text style={styles.structureSetupSub}>
+                Choisis ton objectif et ton nombre de séances. FIT AI te propose ensuite la structure la plus logique.
+              </Text>
+
+              <Text style={[typography.caption, { marginTop: spacing.xs }]}>Objectif</Text>
+              <View style={styles.setupOptionRow}>
+                {PROGRAM_PRESETS.map((preset) => (
+                  <TouchableOpacity
+                    key={preset.id}
+                    onPress={() => {
+                      setSetupGoal(preset.goalLabel);
+                      setSetupWeeks(preset.defaultWeeks);
+                      setSetupFreq(preset.defaultFrequency as 2 | 3 | 4 | 5 | 6);
+                      setSetupSplit(recommendedSplitForFrequency(preset.defaultFrequency));
+                      const defaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5] };
+                      setSetupDays(defaults[preset.defaultFrequency] || [0, 2, 4]);
+                      setSetupShowRecommendation(true);
+                    }}
+                    style={[styles.setupOption, setupGoal === preset.goalLabel && styles.setupOptionOn]}
+                    testID={`recommendation-goal-${preset.id}`}
+                  >
+                    <Text style={[styles.setupOptionLabel, setupGoal === preset.goalLabel && styles.setupOptionLabelOn]}>{preset.goalLabel}</Text>
+                    <Text style={styles.setupOptionSub}>{preset.defaultWeeks} sem.</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={[typography.caption, { marginTop: spacing.xs }]}>Séances par semaine</Text>
+              <View style={styles.setupOptionRow}>
+                {([2, 3, 4, 5, 6] as const).map((f) => (
+                  <TouchableOpacity
+                    key={f}
+                    onPress={() => {
+                      setSetupFreq(f);
+                      setSetupSplit(recommendedSplitForFrequency(f));
+                      const defaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5] };
+                      setSetupDays(defaults[f]);
+                      setSetupShowRecommendation(true);
+                    }}
+                    style={[styles.setupOption, setupFreq === f && styles.setupOptionOn]}
+                    testID={`recommendation-freq-${f}`}
+                  >
+                    <Text style={[styles.setupOptionLabel, setupFreq === f && styles.setupOptionLabelOn]}>{f}j</Text>
+                    <Text style={styles.setupOptionSub}>{f <= 3 ? "Full body" : f === 4 ? "Upper / Lower" : "PPL"}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <StructureRecommendationPanel
+                setupSplit={setupSplit}
+                setupFreq={setupFreq}
+                setupGoal={setupGoal}
+                setupShowRecommendation={setupShowRecommendation}
+                setSetupSplit={setSetupSplit}
+                setSetupShowRecommendation={setSetupShowRecommendation}
+              />
+
+              <Button
+                title={creatingProgram ? "Application..." : program ? "Appliquer cette structure" : "Créer avec cette structure"}
+                onPress={() => createProgram()}
+                loading={creatingProgram}
+                icon={<Ionicons name="checkmark-circle" size={16} color="#102108" />}
+                testID="recommendation-apply-structure"
+              />
+            </Card>
+            <View style={{ height: spacing.xxl }} />
           </>
         )}
 
@@ -2276,75 +2355,24 @@ export default function Training() {
                 </View>
               )}
 
-              <View style={styles.structureSetupPanel} testID="program-structure-picker">
-                <View style={styles.structureSetupHeader}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.structureSetupTitle}>Choisis la bonne structure</Text>
-                    <Text style={styles.structureSetupSub}>Le plus important : répartir les muscles sur la semaine sans exploser le volume.</Text>
-                  </View>
-                  <View style={styles.sciencePill}>
-                    <Ionicons name="shield-checkmark-outline" size={12} color={colors.primaryLight} />
-                    <Text style={styles.sciencePillText}>fondé science</Text>
-                  </View>
+              <TouchableOpacity
+                activeOpacity={0.84}
+                onPress={() => {
+                  setProgramSetupOpen(false);
+                  setTab("recommendation");
+                }}
+                style={styles.structureSetupShortcut}
+                testID="program-open-ai-recommendation"
+              >
+                <View style={styles.structureChoiceIcon}>
+                  <Ionicons name="sparkles-outline" size={22} color={colors.primaryLight} />
                 </View>
-                <View style={styles.structureCardStack}>
-                  {STRUCTURE_OPTIONS.map((option) => (
-                    <TouchableOpacity
-                      key={option.v}
-                      activeOpacity={0.86}
-                      onPress={() => {
-                        setSetupSplit(option.v);
-                        setSetupShowRecommendation(false);
-                      }}
-                      style={[styles.structureChoiceCard, setupSplit === option.v && styles.structureChoiceCardOn]}
-                      testID={`setup-split-${option.v}`}
-                    >
-                      <View style={[styles.structureChoiceIcon, setupSplit === option.v && styles.structureChoiceIconOn]}>
-                        <Ionicons name={option.icon} size={24} color={setupSplit === option.v ? "#102108" : colors.primaryLight} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <View style={styles.structureChoiceTop}>
-                          <Text style={styles.structureChoiceTitle}>{option.label}</Text>
-                          <Text style={styles.structureChoiceIdeal}>{option.ideal}</Text>
-                        </View>
-                        {option.points.map((point) => (
-                          <View key={point} style={styles.structurePointRow}>
-                            <Ionicons name="checkmark-circle-outline" size={13} color={colors.primaryLight} />
-                            <Text style={styles.structurePointText}>{point}</Text>
-                          </View>
-                        ))}
-                      </View>
-                      <Ionicons name={setupSplit === option.v ? "star" : "chevron-forward"} size={18} color={setupSplit === option.v ? colors.primaryLight : colors.textMuted} />
-                    </TouchableOpacity>
-                  ))}
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.structureChoiceTitle}>Recommandation IA</Text>
+                  <Text style={styles.structurePointText}>Choisir la bonne structure se fait maintenant dans son onglet dédié.</Text>
                 </View>
-                <View style={styles.structureRulesBox}>
-                  <RuleLine icon="bar-chart-outline" text="Le volume hebdo compte le plus." />
-                  <RuleLine icon="repeat-outline" text="La fréquence aide à mieux répartir le travail." />
-                  <RuleLine icon="hourglass-outline" text="Le meilleur plan est celui que tu tiens." />
-                </View>
-                <TouchableOpacity
-                  activeOpacity={0.86}
-                  onPress={() => setSetupShowRecommendation((value) => !value)}
-                  style={styles.recommendationButton}
-                  testID="program-show-recommendation"
-                >
-                  <Ionicons name="sparkles-outline" size={17} color="#102108" />
-                  <Text style={styles.recommendationButtonText}>{setupShowRecommendation ? "Masquer la recommandation" : "Voir ma recommandation IA"}</Text>
-                </TouchableOpacity>
-                {setupShowRecommendation ? (
-                  <View style={styles.recommendationSetupCard} testID="program-ai-recommendation">
-                    <Text style={styles.recommendationKicker}>Recommandation FIT AI</Text>
-                    <Text style={styles.recommendationTitle}>{splitRecommendationTitle(setupSplit, setupFreq)}</Text>
-                    <Text style={styles.recommendationText}>{splitRecommendationReason(setupSplit, setupFreq)}</Text>
-                    <View style={styles.recommendationMetaRow}>
-                      <MiniSetupSignal icon="flame-outline" label="Objectif" value={setupGoal} />
-                      <MiniSetupSignal icon="calendar-outline" label="Fréquence" value={`${setupFreq} j / sem`} />
-                      <MiniSetupSignal icon="time-outline" label="Temps" value="45 min" />
-                    </View>
-                  </View>
-                ) : null}
-              </View>
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
 
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Durée du programme</Text>
               <View style={styles.setupOptionRow}>
@@ -2687,6 +2715,100 @@ function TypeChip({ type, compact }: { type: SessionKey; compact?: boolean }) {
   );
 }
 
+function recommendedSplitForFrequency(frequency: number): TrainingProgram["split"] {
+  if (frequency <= 3) return "fullbody";
+  if (frequency === 4) return "upper_lower";
+  return "ppl";
+}
+
+function StructureRecommendationPanel({
+  setupSplit,
+  setupFreq,
+  setupGoal,
+  setupShowRecommendation,
+  setSetupSplit,
+  setSetupShowRecommendation,
+}: {
+  setupSplit: TrainingProgram["split"];
+  setupFreq: number;
+  setupGoal: string;
+  setupShowRecommendation: boolean;
+  setSetupSplit: (split: TrainingProgram["split"]) => void;
+  setSetupShowRecommendation: (value: boolean | ((value: boolean) => boolean)) => void;
+}) {
+  return (
+    <View style={styles.structureSetupPanel} testID="program-structure-picker">
+      <View style={styles.structureSetupHeader}>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.structureSetupTitle}>Choisis la bonne structure</Text>
+          <Text style={styles.structureSetupSub}>Le plus important : répartir les muscles sur la semaine sans exploser le volume.</Text>
+        </View>
+        <View style={styles.sciencePill}>
+          <Ionicons name="shield-checkmark-outline" size={12} color={colors.primaryLight} />
+          <Text style={styles.sciencePillText}>fondé science</Text>
+        </View>
+      </View>
+      <View style={styles.structureCardStack}>
+        {STRUCTURE_OPTIONS.map((option) => (
+          <TouchableOpacity
+            key={option.v}
+            activeOpacity={0.86}
+            onPress={() => {
+              setSetupSplit(option.v);
+              setSetupShowRecommendation(false);
+            }}
+            style={[styles.structureChoiceCard, setupSplit === option.v && styles.structureChoiceCardOn]}
+            testID={`setup-split-${option.v}`}
+          >
+            <View style={[styles.structureChoiceIcon, setupSplit === option.v && styles.structureChoiceIconOn]}>
+              <Ionicons name={option.icon} size={24} color={setupSplit === option.v ? "#102108" : colors.primaryLight} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={styles.structureChoiceTop}>
+                <Text style={styles.structureChoiceTitle}>{option.label}</Text>
+                <Text style={styles.structureChoiceIdeal}>{option.ideal}</Text>
+              </View>
+              {option.points.map((point) => (
+                <View key={point} style={styles.structurePointRow}>
+                  <Ionicons name="checkmark-circle-outline" size={13} color={colors.primaryLight} />
+                  <Text style={styles.structurePointText}>{point}</Text>
+                </View>
+              ))}
+            </View>
+            <Ionicons name={setupSplit === option.v ? "star" : "chevron-forward"} size={18} color={setupSplit === option.v ? colors.primaryLight : colors.textMuted} />
+          </TouchableOpacity>
+        ))}
+      </View>
+      <View style={styles.structureRulesBox}>
+        <RuleLine icon="bar-chart-outline" text="Le volume hebdo compte le plus." />
+        <RuleLine icon="repeat-outline" text="La fréquence aide à mieux répartir le travail." />
+        <RuleLine icon="hourglass-outline" text="Le meilleur plan est celui que tu tiens." />
+      </View>
+      <TouchableOpacity
+        activeOpacity={0.86}
+        onPress={() => setSetupShowRecommendation((value) => !value)}
+        style={styles.recommendationButton}
+        testID="program-show-recommendation"
+      >
+        <Ionicons name="sparkles-outline" size={17} color="#102108" />
+        <Text style={styles.recommendationButtonText}>{setupShowRecommendation ? "Masquer la recommandation" : "Voir ma recommandation IA"}</Text>
+      </TouchableOpacity>
+      {setupShowRecommendation ? (
+        <View style={styles.recommendationSetupCard} testID="program-ai-recommendation">
+          <Text style={styles.recommendationKicker}>Recommandation FIT AI</Text>
+          <Text style={styles.recommendationTitle}>{splitRecommendationTitle(setupSplit, setupFreq)}</Text>
+          <Text style={styles.recommendationText}>{splitRecommendationReason(setupSplit, setupFreq)}</Text>
+          <View style={styles.recommendationMetaRow}>
+            <MiniSetupSignal icon="flame-outline" label="Objectif" value={setupGoal} />
+            <MiniSetupSignal icon="calendar-outline" label="Fréquence" value={`${setupFreq} j / sem`} />
+            <MiniSetupSignal icon="time-outline" label="Temps" value="45 min" />
+          </View>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function splitRecommendationTitle(split: TrainingProgram["split"], frequency: number): string {
   if (split === "fullbody") return `Full body ${Math.min(frequency, 3)}x / semaine`;
   if (split === "upper_lower") return "Upper / Lower 4x / semaine";
@@ -2803,8 +2925,8 @@ const styles = StyleSheet.create({
   rmValue: { fontSize: 24, fontWeight: "800", color: colors.primaryLight, marginTop: 2 },
   perfRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" },
   // Tabs
-  tabRow: { flexDirection: "row", gap: 8, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
-  tabChip: { flex: 1, minHeight: 38, paddingVertical: 9, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5, borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)" },
+  tabRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
+  tabChip: { flexGrow: 1, flexBasis: "46%", minHeight: 38, paddingVertical: 9, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5, borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)" },
   tabChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   tabText: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.55)" },
   tabTextActive: { color: "#102108" },
@@ -3045,6 +3167,7 @@ const styles = StyleSheet.create({
   setupOptionLabelOn: { color: colors.primaryLight },
   setupOptionSub: { fontSize: 10, color: "rgba(255,255,255,0.38)", marginTop: 2 },
   structureSetupPanel: { marginTop: spacing.md, gap: spacing.md, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1, borderColor: "rgba(182,255,63,0.20)", backgroundColor: "rgba(255,255,255,0.045)" },
+  structureSetupShortcut: { marginTop: spacing.md, minHeight: 74, flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1, borderColor: "rgba(182,255,63,0.20)", backgroundColor: "rgba(182,255,63,0.07)" },
   structureSetupHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: spacing.sm },
   structureSetupTitle: { color: colors.textMain, fontSize: 20, lineHeight: 24, fontWeight: "900" },
   structureSetupSub: { color: colors.textMuted, fontSize: 12, lineHeight: 17, fontWeight: "700", marginTop: 4 },
@@ -3458,50 +3581,6 @@ function ProgramWeekSelector({
         );
       })}
     </ScrollView>
-  );
-}
-
-function ProgramActionsFooter({
-  program, onCreate, onTravel, onEndTravel, travelBusy,
-}: {
-  program: TrainingProgram;
-  onCreate: () => void;
-  onTravel?: () => void;
-  onEndTravel?: () => void;
-  travelBusy?: boolean;
-}) {
-  const isTravel = (program as any).is_travel === true;
-  return (
-    <Card testID="program-bottom-actions" style={styles.programBottomActions}>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.programBottomTitle}>Ajuster ton parcours</Text>
-        <Text style={styles.programBottomText}>Objectif, rythme ou déplacement temporaire.</Text>
-      </View>
-      <View style={styles.programBottomButtonRow}>
-        {isTravel ? (
-          <TouchableOpacity
-            onPress={onEndTravel}
-            disabled={travelBusy}
-            style={[styles.actionBtn, styles.programBottomButton, { borderColor: "#A85B0F" }, travelBusy && { opacity: 0.5 }]}
-            testID="summary-end-travel"
-          >
-            <Ionicons name="arrow-undo" size={14} color="#A85B0F" />
-            <Text style={[typography.small, { color: "#A85B0F", fontWeight: "700" }]}>Reprendre</Text>
-          </TouchableOpacity>
-        ) : (
-          <>
-            <TouchableOpacity onPress={onCreate} style={[styles.actionBtn, styles.programBottomButton]} testID="summary-new-goals">
-              <Ionicons name="refresh" size={14} color={colors.primary} />
-              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Nouveaux objectifs</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={onTravel} style={[styles.actionBtn, styles.programBottomButton]} testID="summary-travel">
-              <Ionicons name="airplane-outline" size={14} color={colors.primary} />
-              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Déplacement</Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
-    </Card>
   );
 }
 

@@ -450,9 +450,9 @@ function DailyChallengeCard({
 }
 
 const styles = StyleSheet.create({
-  header: { minHeight: 300, paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.xl, justifyContent: "space-between" },
+  header: { minHeight: 190, paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: spacing.md, justifyContent: "space-between" },
   heroEyebrow: { fontSize: 22, fontWeight: "900", color: colors.textMain },
-  title: { fontSize: 31, lineHeight: 36, fontWeight: "900", color: colors.textMain, marginTop: spacing.sm, maxWidth: 270 },
+  title: { fontSize: 25, lineHeight: 29, fontWeight: "900", color: colors.textMain, marginTop: spacing.xs, maxWidth: 270 },
   heroSubtitle: { color: "rgba(255,255,255,0.78)", fontSize: 13, fontWeight: "700", marginTop: spacing.sm },
   xpBadge: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.full, backgroundColor: colors.primaryLight },
   xpBadgeText: { color: "#1C2308", fontSize: 14, fontWeight: "900" },

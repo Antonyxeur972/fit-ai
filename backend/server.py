@@ -1250,7 +1250,21 @@ def normalize_challenge_type(raw: str) -> str:
     normalized = unicodedata.normalize("NFKD", raw or "")
     normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
     key = re.sub(r"[^a-z0-9]+", "", normalized.lower())
-    return CHALLENGE_ALIASES.get(key, key)
+    if key in CHALLENGE_ALIASES:
+        return CHALLENGE_ALIASES[key]
+    if "gain" in key or "plank" in key or "planche" in key:
+        return "plank"
+    if "10000" in key or "10k" in key or "pas" in key or "step" in key or "marche" in key:
+        return "steps10k"
+    if "run" in key or "course" in key or "km" in key:
+        return "running"
+    if "abdo" in key or "crunch" in key:
+        return "abs"
+    if "pompe" in key or "push" in key:
+        return "pushups"
+    if "squat" in key:
+        return "squats"
+    return key
 
 
 def _challenge_volume_for(day_index: int, level: int) -> int:
@@ -2744,10 +2758,22 @@ async def challenge_start(
     if ch_type not in CHALLENGE_BLUEPRINTS:
         raise HTTPException(400, "Type invalide")
     # Stop any active challenge of the same type
+    previous = await db.challenges.find(
+        {"user_id": user["user_id"], "type": ch_type, "active": True},
+        {"_id": 0, "id": 1},
+    ).to_list(20)
+    previous_ids = [item["id"] for item in previous if item.get("id")]
     await db.challenges.update_many(
         {"user_id": user["user_id"], "type": ch_type, "active": True},
         {"$set": {"active": False, "abandoned_at": now_utc()}},
     )
+    if previous_ids:
+        await db.workouts.delete_many({
+            "user_id": user["user_id"],
+            "challenge_id": {"$in": previous_ids},
+            "source": {"$in": ["challenge", "challenge_plan"]},
+            "completed": {"$ne": True},
+        })
     prof = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
     level = _challenge_level_from_profile(prof)
     days_plan = _build_challenge_days(ch_type, level)
@@ -2768,6 +2794,37 @@ async def challenge_start(
         "completed_count": 0,
     }
     await db.challenges.insert_one(doc)
+    start_day = doc["started_at"].date()
+    planned_workouts = []
+    for day in days_plan:
+        if day.get("is_rest"):
+            continue
+        day_index = int(day.get("day_index", 0))
+        planned_date = (start_day + timedelta(days=day_index)).isoformat()
+        planned_workouts.append({
+            "id": new_id("wk"),
+            "user_id": user["user_id"],
+            "date": planned_date,
+            "title": bp["name"],
+            "focus": f"Challenge J{day_index + 1}: {day.get('label', bp['exercise'])}",
+            "duration_min": 10 if ch_type != "running" else 20,
+            "exercises": [{
+                "name": day.get("label", bp["exercise"]),
+                "sets": 1,
+                "reps": str(day.get("target_reps", 0)),
+                "rest_s": 60,
+                "checked": True,
+            }],
+            "completed": False,
+            "session_type": "volume",
+            "created_at": doc["started_at"],
+            "challenge_id": doc["id"],
+            "challenge_day_index": day_index,
+            "source": "challenge_plan",
+        })
+    if planned_workouts:
+        await db.workouts.delete_many({"user_id": user["user_id"], "challenge_id": doc["id"], "source": {"$in": ["challenge", "challenge_plan"]}})
+        await db.workouts.insert_many(planned_workouts)
     return strip_id(doc)
 
 
@@ -2842,7 +2899,7 @@ async def challenge_check_day(
             "date": now.date().isoformat(),
             "title": ch["name"],
             "focus": f"Challenge J{body.day_index + 1}: {day.get('label', '')}",
-            "duration_min": 10,
+            "duration_min": 10 if ch.get("type") != "running" else 20,
             "exercises": [{
                 "name": day.get("label", ch["exercise"]),
                 "sets": 1,
@@ -2851,12 +2908,33 @@ async def challenge_check_day(
                 "checked": True,
             }],
             "completed": True,
+            "completed_at": now,
             "session_type": "volume",
             "created_at": now,
             "challenge_id": challenge_id,
-            "source": "challenge",
+            "challenge_day_index": body.day_index,
+            "source": "challenge_plan",
         }
-        await db.workouts.insert_one(wk_doc)
+        existing = await db.workouts.find_one({
+            "user_id": user["user_id"],
+            "challenge_id": challenge_id,
+            "challenge_day_index": body.day_index,
+        })
+        if existing:
+            await db.workouts.update_one(
+                {"id": existing["id"], "user_id": user["user_id"]},
+                {"$set": {
+                    "completed": True,
+                    "completed_at": now,
+                    "date": now.date().isoformat(),
+                    "source": "challenge_plan",
+                    "focus": wk_doc["focus"],
+                    "exercises": wk_doc["exercises"],
+                    "duration_min": wk_doc["duration_min"],
+                }},
+            )
+        else:
+            await db.workouts.insert_one(wk_doc)
     # ---- POINTS: challenge day ----
     if not day.get("is_rest"):
         await award_points(

@@ -354,7 +354,6 @@ export default function Dashboard() {
         </View>
 
         <LevelProgressCard level={level} xpInLevel={xpInLevel} totalXp={totalXp} />
-        <PointsHealthCard points={points} />
 
         <CalorieRemainingCard
           consumed={data.consumed_calories}
@@ -602,54 +601,6 @@ function LevelProgressCard({ level, xpInLevel, totalXp }: { level: number; xpInL
         </View>
         <Text style={styles.levelHint}>Chaque 300 XP débloque un nouveau niveau · total {totalXp.toLocaleString("fr-FR")} XP</Text>
       </View>
-    </Card>
-  );
-}
-
-function PointsHealthCard({ points }: { points: PointsSummary | null }) {
-  if (!points) return null;
-  const gainedToday = points.points_gained_today ?? Math.max(0, points.points_today || 0);
-  const lostToday = points.points_lost_today ?? 0;
-  const weekGain = points.points_gained_week ?? 0;
-  const next = points.next_level_points ?? Math.max(0, XP_PER_LEVEL - (points.points_in_level || 0));
-  return (
-    <Card testID="dashboard-points-card" style={styles.pointsHealthCard}>
-      <View style={styles.pointsHealthTop}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.pointsHealthLabel}>Points aujourd&apos;hui</Text>
-          <Text style={styles.pointsHealthValue}>+{gainedToday} / -{lostToday}</Text>
-        </View>
-        <View style={styles.pointsTotalPill}>
-          <Ionicons name="star" size={14} color={colors.primaryLight} />
-          <Text style={styles.pointsTotalText}>{points.points_total.toLocaleString("fr-FR")} pts</Text>
-        </View>
-      </View>
-      <View style={styles.pointsMiniGrid}>
-        <View style={styles.pointsMini}>
-          <Text style={styles.pointsMiniValue}>+{weekGain}</Text>
-          <Text style={styles.pointsMiniLabel}>semaine</Text>
-        </View>
-        <View style={styles.pointsMini}>
-          <Text style={styles.pointsMiniValue}>{next}</Text>
-          <Text style={styles.pointsMiniLabel}>prochain niveau</Text>
-        </View>
-        <View style={styles.pointsMini}>
-          <Text style={styles.pointsMiniValue}>{points.weekly_activity?.workouts || 0}</Text>
-          <Text style={styles.pointsMiniLabel}>séances</Text>
-        </View>
-      </View>
-      {points.health_state ? (
-        <View style={styles.healthStateBox}>
-          <Ionicons name="heart-circle-outline" size={18} color={colors.primaryLight} />
-          <View style={{ flex: 1 }}>
-            <Text style={styles.healthStateTitle}>{points.health_state.title}</Text>
-            <Text style={styles.healthStateText}>{points.health_state.summary}</Text>
-            {points.health_state.benefits?.[0] ? (
-              <Text style={styles.healthBenefitText}>{points.health_state.benefits[0]}</Text>
-            ) : null}
-          </View>
-        </View>
-      ) : null}
     </Card>
   );
 }
