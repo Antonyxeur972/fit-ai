@@ -11,7 +11,8 @@ import { api } from "@/src/api";
 import { Card, SectionTitle, Stat, Button } from "@/src/components/UI";
 import { Silhouette, SILHOUETTE_LABELS } from "@/src/components/Silhouette";
 import { SilhouettePicker } from "@/src/components/SilhouettePicker";
-import { Mascot, MascotAnimal, MASCOT_LABELS } from "@/src/components/Mascot";
+import { MascotAnimal, MASCOT_LABELS } from "@/src/components/Mascot";
+import { MascotPortrait } from "@/src/components/MascotPortrait";
 import { MascotPicker } from "@/src/components/MascotPicker";
 import { StrengthSymbol } from "@/src/components/StrengthSymbol";
 import { scheduleReminders, Reminder, ReminderKind } from "@/src/lib/notifications";
@@ -289,7 +290,7 @@ export default function ProfileTab() {
           } />
           <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.sm }}>
             {user?.mascot?.animal ? (
-              <Mascot animal={user.mascot.animal} evolution={evolution} size={88} color={colors.primary} strokeWidth={2} />
+              <MascotPortrait animal={user.mascot.animal as MascotAnimal} size={88} active />
             ) : (
               <View style={[styles.mascotPlaceholder]}>
                 <Ionicons name="paw-outline" size={32} color={colors.primary} />

@@ -10,7 +10,7 @@ import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { api } from "@/src/api";
-import { Card, Button, SectionTitle } from "@/src/components/UI";
+import { Card, Button, SectionTitle, MacroBar } from "@/src/components/UI";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type Meal = {
@@ -51,6 +51,7 @@ type Favorite = {
 
 type ComplianceSnap = { date: string; target: number; consumed: number; compliance_pct: number; meals_count: number };
 type HistoryDay = { date: string; compliance: ComplianceSnap; meals: Meal[]; purged?: boolean };
+type Profile = { protein_g?: number; carbs_g?: number; fat_g?: number; daily_calories?: number };
 
 const MEAL_TYPE_LABEL: Record<string, string> = {
   breakfast: "Petit-déj",
@@ -125,6 +126,7 @@ export default function Meals() {
   const [tab, setTab] = useState<Tab>("today");
   const [todayMeals, setTodayMeals] = useState<Meal[]>([]);
   const [history, setHistory] = useState<HistoryDay[]>([]);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -174,12 +176,14 @@ export default function Meals() {
 
   const load = useCallback(async () => {
     try {
-      const [list, hist] = await Promise.all([
+      const [list, hist, prof] = await Promise.all([
         api<Meal[]>(`/meals?date=${today}`),
         api<{ days: HistoryDay[] }>(`/meals?history=true&include_archived=true`),
+        api<Profile>("/profile").catch(() => null),
       ]);
       setTodayMeals(list);
       setHistory(hist.days.filter((d) => d.date !== today));
+      setProfile(prof);
     } catch (e) {
       console.warn("load meals", e);
     }
@@ -608,6 +612,9 @@ export default function Meals() {
   }, [foods, debouncedSearch, manualCategory]);
 
   const total = todayMeals.reduce((s, m) => s + m.calories, 0);
+  const proteinToday = todayMeals.reduce((s, m) => s + (m.protein_g || 0), 0);
+  const carbsToday = todayMeals.reduce((s, m) => s + (m.carbs_g || 0), 0);
+  const fatToday = todayMeals.reduce((s, m) => s + (m.fat_g || 0), 0);
 
   // Group today by meal_type
   const todayGrouped = useMemo(() => {
@@ -729,6 +736,31 @@ export default function Meals() {
                 <Text style={styles.secondaryActionText}>Jour passé</Text>
               </TouchableOpacity>
             </View>
+
+            <Card testID="meals-macros-card">
+              <SectionTitle title="Macros aujourd'hui" />
+              <MacroBar
+                label="Protéines"
+                current={proteinToday}
+                target={profile?.protein_g || 0}
+                color={colors.primary}
+                testID="meals-macro-protein"
+              />
+              <MacroBar
+                label="Glucides"
+                current={carbsToday}
+                target={profile?.carbs_g || 0}
+                color={colors.primaryLight}
+                testID="meals-macro-carbs"
+              />
+              <MacroBar
+                label="Lipides"
+                current={fatToday}
+                target={profile?.fat_g || 0}
+                color="#86C99A"
+                testID="meals-macro-fat"
+              />
+            </Card>
 
             {error && (
               <View style={styles.errorBox} testID="meals-error">

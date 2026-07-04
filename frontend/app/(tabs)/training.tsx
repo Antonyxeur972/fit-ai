@@ -7,6 +7,8 @@ import { useFocusEffect } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import * as Haptics from "expo-haptics";
+import * as FileSystem from "expo-file-system/legacy";
+import * as Sharing from "expo-sharing";
 import { api } from "@/src/api";
 import { useAuth } from "@/src/auth";
 import { Card, Button, SectionTitle, Stat } from "@/src/components/UI";
@@ -15,7 +17,7 @@ import { ProgramCarousel } from "@/src/components/ProgramCarousel";
 import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { colors, spacing, typography, radius } from "@/src/theme";
-import { PROGRAM_PRESETS, SCIENCE_NOTES, phaseForWeek, presetByGoal, weeklyAiAdvice } from "@/src/lib/programPresets";
+import { PROGRAM_PRESETS, phaseForWeek, presetByGoal } from "@/src/lib/programPresets";
 
 type Exercise = { name: string; sets: number; reps: string; rest_s: number; checked?: boolean; is_recommended?: boolean };
 type Workout = {
@@ -27,6 +29,8 @@ type LibExercise = { id: string; name: string; category: string; equipment: stri
 type SessionTypeDef = { label: string; reps: string; sets: number; rest_s: number; desc: string };
 type SessionTypes = Record<string, SessionTypeDef>;
 type Perf = { id: string; exercise_name: string; weight_kg: number; reps: number; sets: number; est_1rm: number; created_at: string };
+type SessionDraft = { sets: string; reps: string; weight: string; rest: string; pr: boolean; done: boolean };
+type SessionResult = { prs: number; volume: number; duration: number; calories: number; xp: number };
 
 const SESSION_KEYS = ["volume", "puissance", "force"] as const;
 type SessionKey = typeof SESSION_KEYS[number];
@@ -68,12 +72,24 @@ type TrainingProgram = {
   goal_label: string;
   weeks_total: number;
   frequency: number;
-  split: "ppl" | "fullbody" | "split";
+  split: "ppl" | "fullbody" | "split" | "home";
+  training_days?: number[] | null;
+  block_weeks?: { volume?: number; puissance?: number; force?: number };
   cycle_pattern: string[];
   started_at: string;
   active: boolean;
   current_week: number;
   weeks: ProgramWeek[];
+};
+
+type CalendarSyncWorkout = {
+  id: string;
+  date: string;
+  title: string;
+  focus: string;
+  duration_min: number;
+  exercises: Exercise[];
+  session_type?: string;
 };
 
 // Rest timer defaults per session_type
@@ -85,11 +101,19 @@ const REST_DEFAULTS: Record<string, number> = {
 };
 
 const EXERCISE_VISUALS: ImageSourcePropType[] = [
-  require("../../assets/images/fitai-bg-training.png"),
   require("../../assets/images/fitai-hero-activities-hd.png"),
   require("../../assets/images/fitai-hero-program-hd.png"),
   require("../../assets/images/fitai-hero-dashboard-hd.png"),
   require("../../assets/images/fitai-hero-progress-hd.png"),
+  require("../../assets/images/fitai-hydration-card-hd.png"),
+];
+
+const DEFAULT_TODAY_EXERCISES: Exercise[] = [
+  { name: "Squat", sets: 4, reps: "8-10 reps", rest_s: 90, checked: true, is_recommended: true },
+  { name: "Développé couché", sets: 4, reps: "8-10 reps", rest_s: 90, checked: true, is_recommended: true },
+  { name: "Rowing barre", sets: 4, reps: "8-10 reps", rest_s: 90, checked: true },
+  { name: "Fentes marchées", sets: 3, reps: "10-12 reps", rest_s: 60, checked: true },
+  { name: "Gainage planche", sets: 3, reps: "45-60 s", rest_s: 45, checked: true },
 ];
 
 function exerciseVisualFor(name: string, index: number) {
@@ -103,6 +127,119 @@ function exerciseVisualFor(name: string, index: number) {
 
 function exercisePointsFor(ex: Exercise, index: number, reco: boolean) {
   return 8 + Math.min(10, ex.sets * 2) + (reco ? 8 : 0) + (index < 3 ? 2 : 0);
+}
+
+function formatSecondsLabel(seconds: number) {
+  const safe = Math.max(0, Math.round(seconds || 0));
+  return `${String(Math.floor(safe / 60)).padStart(2, "0")}:${String(safe % 60).padStart(2, "0")}`;
+}
+
+function defaultTrainingDays(frequency: number) {
+  if (frequency >= 7) return [0, 1, 2, 3, 4, 5, 6];
+  if (frequency >= 5) return [0, 1, 2, 3, 4];
+  if (frequency >= 4) return [0, 1, 3, 4];
+  if (frequency <= 2) return [0, 3];
+  return [0, 2, 4];
+}
+
+function toLocalIsoDate(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function addDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function parseProgramDate(value?: string) {
+  const parsed = value ? new Date(value) : new Date();
+  if (Number.isNaN(parsed.getTime())) return new Date();
+  parsed.setHours(0, 0, 0, 0);
+  return parsed;
+}
+
+function plannedWorkoutsFromProgram(program: TrainingProgram | null): CalendarSyncWorkout[] {
+  if (!program) return [];
+  const start = parseProgramDate(program.started_at);
+  const trainingDays = (program.training_days?.length ? program.training_days : defaultTrainingDays(program.frequency))
+    .map((day) => Number(day) % 7)
+    .sort((a, b) => a - b);
+  const events: CalendarSyncWorkout[] = [];
+  for (let offset = 0; offset < program.weeks_total * 7; offset += 1) {
+    const date = addDays(start, offset);
+    const weekday = (date.getDay() + 6) % 7;
+    const daySlot = trainingDays.indexOf(weekday);
+    if (daySlot < 0) continue;
+    const weekIndex = Math.floor(offset / 7) + 1;
+    const week = program.weeks.find((item) => item.week_index === weekIndex);
+    const day = week?.days[daySlot] || week?.days[0];
+    if (!week || !day) continue;
+    events.push({
+      id: `program-${program.id}-${weekIndex}-${day.day_index}`,
+      date: toLocalIsoDate(date),
+      title: `${program.split.toUpperCase()} J${day.day_index + 1}`,
+      focus: day.focus || program.goal_label || "Séance FIT AI",
+      duration_min: 45,
+      exercises: day.exercises.filter((exercise) => exercise.checked !== false),
+      session_type: week.session_type,
+    });
+  }
+  return events;
+}
+
+function icsEscape(value: string) {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/\n/g, "\\n")
+    .replace(/,/g, "\\,")
+    .replace(/;/g, "\\;");
+}
+
+function icsDateTime(dateIso: string, hour = 18, minute = 0) {
+  const [year, month, day] = dateIso.split("-");
+  return `${year}${month}${day}T${String(hour).padStart(2, "0")}${String(minute).padStart(2, "0")}00`;
+}
+
+function icsUtcNow() {
+  return new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+}
+
+function buildTrainingCalendar(workouts: CalendarSyncWorkout[]) {
+  const stamp = icsUtcNow();
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//FIT AI//Planning Entrainement//FR",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    "X-WR-CALNAME:FIT AI - Planning",
+  ];
+  workouts
+    .slice()
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .forEach((workout) => {
+      const start = icsDateTime(workout.date, 18, 0);
+      const duration = Math.max(20, workout.duration_min || 45);
+      const endDate = new Date(`${workout.date}T18:00:00`);
+      endDate.setMinutes(endDate.getMinutes() + duration);
+      const end = icsDateTime(toLocalIsoDate(endDate), endDate.getHours(), endDate.getMinutes());
+      const exercises = workout.exercises
+        .map((exercise) => `${exercise.name} - ${exercise.sets} x ${exercise.reps}`)
+        .join("\n");
+      lines.push(
+        "BEGIN:VEVENT",
+        `UID:${icsEscape(workout.id)}@fit-ai`,
+        `DTSTAMP:${stamp}`,
+        `DTSTART:${start}`,
+        `DTEND:${end}`,
+        `SUMMARY:${icsEscape(`FIT AI - ${workout.focus || workout.title}`)}`,
+        `DESCRIPTION:${icsEscape(`${workout.title}\n${workout.session_type || "Séance"} · ${duration} min\n${exercises}`)}`,
+        "END:VEVENT"
+      );
+    });
+  lines.push("END:VCALENDAR");
+  return `${lines.join("\r\n")}\r\n`;
 }
 
 // Phase 5 — C4: red-highlight AI-recommended exercises per session type.
@@ -161,6 +298,7 @@ export default function Training() {
   const [calDays, setCalDays] = useState<Record<string, CalendarDay>>({});
   const [calLoading, setCalLoading] = useState(false);
   const [deletingAllWorkouts, setDeletingAllWorkouts] = useState(false);
+  const [syncingAgenda, setSyncingAgenda] = useState(false);
   const [historyItems, setHistoryItems] = useState<Workout[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState<string | null>(null);
@@ -181,6 +319,7 @@ export default function Training() {
   const [setupSplit, setSetupSplit] = useState<"ppl" | "fullbody" | "split">("ppl");
   const [setupGoal, setSetupGoal] = useState("Masse");
   const [setupBlocks, setSetupBlocks] = useState<{ volume: number; puissance: number; force: number }>({ volume: 1, puissance: 1, force: 1 });
+  const [setupChangeMode, setSetupChangeMode] = useState<"stable" | "changed">("stable");
   const [creatingProgram, setCreatingProgram] = useState(false);
 
   // Travel mode
@@ -196,6 +335,14 @@ export default function Training() {
   const [aiExModalOpen, setAiExModalOpen] = useState(false);
   const [aiExInput, setAiExInput] = useState("");
   const [aiExLoading, setAiExLoading] = useState(false);
+
+  // Guided session flow
+  const [sessionRunnerOpen, setSessionRunnerOpen] = useState(false);
+  const [startingToday, setStartingToday] = useState(false);
+  const [runnerWorkout, setRunnerWorkout] = useState<Workout | null>(null);
+  const [runnerIndex, setRunnerIndex] = useState(0);
+  const [runnerDrafts, setRunnerDrafts] = useState<Record<string, SessionDraft>>({});
+  const [sessionResult, setSessionResult] = useState<SessionResult | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -233,10 +380,11 @@ export default function Training() {
     }
   };
 
-  const completeWorkout = async (id: string) => {
+  const completeWorkout = async (id: string, options: { showShare?: boolean } = {}) => {
+    const showShare = options.showShare ?? true;
     await api(`/workouts/${id}/complete`, { method: "POST" });
     // Build share card data
-    try {
+    if (showShare) try {
       const w = week.find((x) => x.id === id);
       const sType = (w?.session_type || "").toString();
       const sLabel = sType ? ` · ${sType.charAt(0).toUpperCase() + sType.slice(1)}` : "";
@@ -264,6 +412,20 @@ export default function Training() {
     }
     await load();
     if (tab === "calendar") loadCalendar(calMonth);
+  };
+
+  const uncompleteWorkout = async (id: string) => {
+    await api(`/workouts/${id}/uncomplete`, { method: "POST" });
+    await load();
+    if (tab === "calendar") loadCalendar(calMonth);
+  };
+
+  const toggleWorkoutComplete = async (workout: Workout) => {
+    if (workout.completed) {
+      await uncompleteWorkout(workout.id);
+      return;
+    }
+    await completeWorkout(workout.id, { showShare: false });
   };
 
   // ---- Calendar / History ----
@@ -323,6 +485,72 @@ export default function Training() {
       ]
     );
   }, [calMonth, loadCalendar]);
+
+  const syncPlanningToPhoneAgenda = useCallback(async () => {
+    setSyncingAgenda(true);
+    try {
+      const planned = plannedWorkoutsFromProgram(program);
+      const byDate = new Map<string, CalendarSyncWorkout>();
+      planned.forEach((item) => byDate.set(item.date, item));
+      week.forEach((workout) => {
+        if (!workout.date) return;
+        byDate.set(workout.date, {
+          id: workout.id,
+          date: workout.date,
+          title: workout.title,
+          focus: workout.focus,
+          duration_min: workout.duration_min,
+          exercises: workout.exercises.filter((exercise) => exercise.checked !== false),
+          session_type: workout.session_type,
+        });
+      });
+      const events = Array.from(byDate.values()).filter((item) => item.exercises.length > 0);
+      if (events.length === 0) {
+        Alert.alert("Agenda", "Aucune séance à synchroniser pour le moment.");
+        return;
+      }
+
+      const ics = buildTrainingCalendar(events);
+      const filename = `fit-ai-planning-${toLocalIsoDate(new Date())}.ics`;
+
+      if (Platform.OS === "web" && typeof window !== "undefined" && typeof document !== "undefined") {
+        const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+        Alert.alert("Agenda prêt", "Le fichier calendrier a été téléchargé.");
+        return;
+      }
+
+      const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+      if (!baseDir) {
+        Alert.alert("Agenda indisponible", "Impossible de créer le fichier calendrier sur ce téléphone.");
+        return;
+      }
+      const uri = `${baseDir}${filename}`;
+      await FileSystem.writeAsStringAsync(uri, ics, { encoding: FileSystem.EncodingType.UTF8 });
+      const available = await Sharing.isAvailableAsync();
+      if (!available) {
+        Alert.alert("Agenda prêt", "Le partage natif n'est pas disponible sur ce téléphone.");
+        return;
+      }
+      await Sharing.shareAsync(uri, {
+        dialogTitle: "Ajouter mes séances FIT AI à l'agenda",
+        mimeType: "text/calendar",
+        UTI: "com.apple.ical.ics",
+      });
+    } catch (e) {
+      console.warn("sync agenda", e);
+      Alert.alert("Synchronisation impossible", "Impossible de préparer l'agenda pour le moment.");
+    } finally {
+      setSyncingAgenda(false);
+    }
+  }, [program, week]);
 
   // ---- Rest Timer ----
   const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -387,10 +615,54 @@ export default function Training() {
     setRestTotal(0);
   }, []);
 
+  const pauseRestTimer = useCallback(() => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+    setRestRunning(false);
+  }, []);
+
+  const resumeRestTimer = useCallback(() => {
+    if (restRemaining <= 0 || timerIntervalRef.current) return;
+    finishedRef.current = false;
+    setRestRunning(true);
+    timerIntervalRef.current = setInterval(() => {
+      setRestRemaining((prev) => {
+        if (prev <= 1) {
+          if (!finishedRef.current) {
+            finishedRef.current = true;
+            beep();
+          }
+          if (timerIntervalRef.current) {
+            clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = null;
+          }
+          setRestRunning(false);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  }, [beep, restRemaining]);
+
+  const toggleRestTimer = useCallback(() => {
+    if (restRunning) pauseRestTimer();
+    else resumeRestTimer();
+  }, [pauseRestTimer, restRunning, resumeRestTimer]);
+
   const adjustRest = useCallback((delta: number) => {
     setRestRemaining((prev) => Math.max(0, prev + delta));
     setRestTotal((prev) => Math.max(prev + delta, prev));
   }, []);
+
+  const startOrToggleRestTimer = useCallback((seconds: number) => {
+    if (restRemaining > 0) {
+      toggleRestTimer();
+      return;
+    }
+    startRestTimer(seconds);
+  }, [restRemaining, startRestTimer, toggleRestTimer]);
 
   useEffect(() => {
     return () => {
@@ -464,6 +736,25 @@ export default function Training() {
     } catch {} finally {
       setCreatingProgram(false);
     }
+  };
+
+  const openProgramSetup = () => {
+    setSetupChangeMode("stable");
+    if (program) {
+      setSetupGoal(program.goal_label || setupGoal);
+      setSetupWeeks(program.weeks_total || setupWeeks);
+      const freq = Math.max(2, Math.min(4, program.frequency || setupFreq)) as 2 | 3 | 4;
+      setSetupFreq(freq);
+      setSetupSplit((program.split || setupSplit) as "ppl" | "fullbody" | "split");
+      setSetupBlocks({
+        volume: Math.max(1, Math.min(3, Number(program.block_weeks?.volume || 1))),
+        puissance: Math.max(1, Math.min(3, Number(program.block_weeks?.puissance || 1))),
+        force: Math.max(1, Math.min(3, Number(program.block_weeks?.force || 1))),
+      });
+      const defaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4] };
+      setSetupDays(defaults[freq] || setupDays);
+    }
+    setProgramSetupOpen(true);
   };
 
   const startTravelMode = async () => {
@@ -574,6 +865,197 @@ export default function Training() {
     await load();
   };
 
+  const moveExerciseInEditor = (from: number, to: number) => {
+    if (!editWorkout || to < 0 || to >= editWorkout.exercises.length) return;
+    const next = editWorkout.exercises.slice();
+    const [item] = next.splice(from, 1);
+    next.splice(to, 0, item);
+    setEditWorkout({ ...editWorkout, exercises: next });
+  };
+
+  const startGuidedSession = (workout: Workout) => {
+    const exercises = workout.exercises.filter((e) => e.checked !== false);
+    const drafts: Record<string, SessionDraft> = {};
+    exercises.forEach((ex) => {
+      drafts[ex.name] = {
+        sets: String(ex.sets || 3),
+        reps: String(ex.reps || "10"),
+        weight: "",
+        rest: String(getRestForExercise(ex.name, workout.session_type) || ex.rest_s || 60),
+        pr: false,
+        done: false,
+      };
+    });
+    setRunnerWorkout({ ...workout, exercises });
+    setRunnerDrafts(drafts);
+    setRunnerIndex(0);
+    setSessionResult(null);
+    setSessionRunnerOpen(true);
+  };
+
+  const startTodayWorkout = async (workout: Workout) => {
+    if (startingToday) return;
+    if (!workout.id.startsWith("prog:")) {
+      startGuidedSession(workout);
+      return;
+    }
+    setStartingToday(true);
+    try {
+      const [, programId, weekIndex, dayIndex] = workout.id.split(":");
+      const materialized = await api<Workout>("/program/day-workout", {
+        method: "POST",
+        body: {
+          program_id: programId,
+          week_index: parseInt(weekIndex || "1", 10),
+          day_index: parseInt(dayIndex || "0", 10),
+          date: today,
+        },
+      });
+      await load();
+      startGuidedSession(materialized);
+    } catch (e) {
+      console.warn("program day workout fallback", e);
+      startGuidedSession(workout);
+    } finally {
+      setStartingToday(false);
+    }
+  };
+
+  const toggleTodayWorkoutCheck = async (workout: Workout) => {
+    if (workout.id.startsWith("draft:")) {
+      setProgramSetupOpen(true);
+      return;
+    }
+    if (!workout.id.startsWith("prog:")) {
+      await toggleWorkoutComplete(workout);
+      return;
+    }
+    setStartingToday(true);
+    try {
+      const [, programId, weekIndex, dayIndex] = workout.id.split(":");
+      const materialized = await api<Workout>("/program/day-workout", {
+        method: "POST",
+        body: {
+          program_id: programId,
+          week_index: parseInt(weekIndex || "1", 10),
+          day_index: parseInt(dayIndex || "0", 10),
+          date: today,
+        },
+      });
+      await completeWorkout(materialized.id, { showShare: false });
+    } finally {
+      setStartingToday(false);
+    }
+  };
+
+  const updateRunnerDraft = (exerciseName: string, patch: Partial<SessionDraft>) => {
+    setRunnerDrafts((prev) => ({
+      ...prev,
+      [exerciseName]: { ...prev[exerciseName], ...patch },
+    }));
+  };
+
+  const adjustRunnerDraftNumber = (
+    exerciseName: string,
+    field: "sets" | "weight" | "rest",
+    delta: number,
+    minimum = 0
+  ) => {
+    const current = runnerDrafts[exerciseName]?.[field] || "0";
+    const numeric = field === "weight" ? parseFloat(current || "0") : parseInt(current || "0", 10);
+    const next = Math.max(minimum, (Number.isFinite(numeric) ? numeric : 0) + delta);
+    updateRunnerDraft(exerciseName, {
+      [field]: field === "weight" ? String(Math.round(next * 10) / 10) : String(Math.round(next)),
+    });
+  };
+
+  const validateRunnerExercise = async () => {
+    if (!runnerWorkout) return;
+    const exercises = runnerWorkout.exercises.filter((e) => e.checked !== false);
+    const exercise = exercises[runnerIndex];
+    if (!exercise) return;
+    const draft = runnerDrafts[exercise.name] || {
+      sets: String(exercise.sets || 3),
+      reps: String(exercise.reps || "10"),
+      weight: "",
+      rest: String(exercise.rest_s || getRestForExercise(exercise.name, runnerWorkout.session_type) || 60),
+      pr: false,
+      done: false,
+    };
+    const weight = parseFloat(draft?.weight || "0");
+    const reps = parseInt((draft?.reps || "").toString().match(/\d+/)?.[0] || "0", 10);
+    const sets = parseInt(draft?.sets || "1", 10) || 1;
+    if (weight > 0 && reps > 0 && !runnerWorkout.id.startsWith("prog:") && !runnerWorkout.id.startsWith("draft:")) {
+      try {
+        await api(`/workouts/${runnerWorkout.id}/perf`, {
+          method: "POST",
+          body: {
+            workout_id: runnerWorkout.id,
+            exercise_name: exercise.name,
+            weight_kg: weight,
+            reps,
+            sets,
+            notes: draft?.pr ? "PR" : undefined,
+          },
+        });
+      } catch (e) {
+        console.warn("runner perf", e);
+      }
+    }
+    const nextDrafts = {
+      ...runnerDrafts,
+      [exercise.name]: { ...draft, done: true },
+    };
+    setRunnerDrafts(nextDrafts);
+    const restSeconds = parseInt(draft?.rest || String(exercise.rest_s || 60), 10) || 60;
+    startRestTimer(restSeconds);
+    const allDone = exercises.every((ex) => nextDrafts[ex.name]?.done);
+    if (allDone) {
+      await finishGuidedSession(nextDrafts);
+      return;
+    }
+    const nextIndex = exercises.findIndex((ex, index) => index !== runnerIndex && !nextDrafts[ex.name]?.done);
+    if (nextIndex >= 0) setRunnerIndex(nextIndex);
+  };
+
+  const finishGuidedSession = async (drafts: Record<string, SessionDraft> = runnerDrafts) => {
+    if (!runnerWorkout) return;
+    const exercises = runnerWorkout.exercises.filter((e) => e.checked !== false);
+    let volume = 0;
+    let restSeconds = 0;
+    let prs = 0;
+    exercises.forEach((ex) => {
+      const draft = drafts[ex.name];
+      const sets = parseInt(draft?.sets || String(ex.sets || 1), 10) || 1;
+      const reps = parseInt((draft?.reps || ex.reps || "0").toString().match(/\d+/)?.[0] || "0", 10) || 0;
+      const weight = parseFloat(draft?.weight || "0") || 0;
+      const rest = parseInt(draft?.rest || String(ex.rest_s || 60), 10) || 60;
+      volume += sets * reps * weight;
+      restSeconds += Math.max(0, sets - 1) * rest;
+      if (draft?.pr) prs += 1;
+    });
+    try {
+      if (!runnerWorkout.id.startsWith("draft:") && !runnerWorkout.id.startsWith("prog:")) {
+        await api(`/workouts/${runnerWorkout.id}/complete`, { method: "POST" });
+      }
+    } catch (e) {
+      console.warn("runner complete", e);
+    }
+    const duration = Math.max(runnerWorkout.duration_min || 0, Math.round((runnerWorkout.duration_min || 35) + restSeconds / 60));
+    const calories = Math.round(duration * 5.4 + volume / 85);
+    setSessionResult({
+      prs,
+      volume: Math.round(volume),
+      duration,
+      calories,
+      xp: 100 + prs * 20,
+    });
+    setSessionRunnerOpen(false);
+    if (!runnerWorkout.id.startsWith("draft:") && !runnerWorkout.id.startsWith("prog:")) {
+      await load();
+    }
+  };
+
   const openPerf = async (w: Workout, ex: Exercise) => {
     setPerfEx({ workout: w, exercise: ex });
     setPerfWeight("");
@@ -627,15 +1109,42 @@ export default function Training() {
   };
 
   const todayWorkout = week.find((w) => w.date === today);
-  const todayExercises = todayWorkout?.exercises.filter((e) => e.checked !== false) || [];
+  const selectedProgramWeek = expandedWeek || program?.current_week || 1;
+  const activeProgramWeek = program?.weeks.find((w) => w.week_index === selectedProgramWeek);
+  const selectedDay = activeProgramWeek?.days.find((d) => {
+    const fromWorkout = todayWorkout?.focus || todayWorkout?.title;
+    return fromWorkout ? d.focus.toLowerCase().includes(fromWorkout.toLowerCase().split(" ")[0]) : false;
+  }) || activeProgramWeek?.days[0];
+  const plannedTodayWorkout: Workout | null = todayWorkout || (program && activeProgramWeek && selectedDay ? {
+    id: `prog:${program.id}:${activeProgramWeek.week_index}:${selectedDay.day_index}`,
+    date: today,
+    title: `${program.split.toUpperCase()} J${selectedDay.day_index + 1}`,
+    focus: selectedDay.focus,
+    duration_min: 45,
+    exercises: selectedDay.exercises.map((exercise) => ({ ...exercise, checked: exercise.checked !== false })),
+    completed: false,
+    session_type: activeProgramWeek.session_type,
+  } : {
+    id: "draft:fullbody-j1",
+    date: today,
+    title: "FULLBODY J1",
+    focus: "Force + Hypertrophie",
+    duration_min: 45,
+    exercises: DEFAULT_TODAY_EXERCISES,
+    completed: false,
+    session_type: "volume",
+  });
+  const todayExercises = plannedTodayWorkout?.exercises.filter((e) => e.checked !== false) || [];
+  const runnerExercises = runnerWorkout?.exercises.filter((e) => e.checked !== false) || [];
+  const runnerExercise = runnerExercises[runnerIndex] || null;
+  const runnerDraft = runnerExercise ? runnerDrafts[runnerExercise.name] : null;
+  const runnerProgress = runnerExercises.length > 0 ? Math.round(((runnerIndex + 1) / runnerExercises.length) * 100) : 0;
   const programProgress = program?.weeks_total
     ? Math.min(100, Math.round(((program.current_week + 1) / program.weeks_total) * 100))
     : 0;
-  const completedSessions = week.filter((item) => item.completed).length;
-  const streakDays = Math.max(1, completedSessions + (todayWorkout?.completed ? 1 : 0));
-  const weeklyChallengeProgress = Math.min(100, Math.round((completedSessions / Math.max(1, program?.frequency || 3)) * 100));
-  const chestReady = todayWorkout?.completed || weeklyChallengeProgress >= 100;
-
+  const todayPlanLabel = program
+    ? `${(program.split || "fullbody").toUpperCase()} J${(selectedDay?.day_index ?? 0) + 1}`
+    : plannedTodayWorkout?.title || "FULLBODY J1";
   // Library grouped by category, used in editor
   const libByCategory = useMemo(() => {
     const out: Record<string, LibExercise[]> = {};
@@ -648,173 +1157,145 @@ export default function Training() {
 
   return (
     <ScreenBackground bg="training">
-      <View style={styles.header}>
-        <Text style={styles.heroEyebrow}>Programme</Text>
-        <View style={styles.heroTitleRow}>
+      <ImageBackground
+        source={require("../../assets/images/fitai-hero-program-hd.png")}
+        style={styles.trainingHero}
+        imageStyle={styles.trainingHeroImage}
+        resizeMode="cover"
+      >
+        <View style={styles.trainingHeroShade} />
+        <View style={styles.header}>
           <View style={{ flex: 1 }}>
             <Text style={styles.heroCaption}>Ton parcours</Text>
             <Text style={styles.title}>Transforme-toi</Text>
             <MotivationalScript style={styles.heroScript}>libère ton esprit.</MotivationalScript>
-            <Text style={styles.heroProgram} numberOfLines={2}>
-              {program?.name || "Un programme pensé pour ton rythme"}
-            </Text>
           </View>
           <View style={styles.heroProgress}>
             <Text style={styles.heroProgressValue}>{programProgress}%</Text>
             <Text style={styles.heroProgressLabel}>terminé</Text>
           </View>
         </View>
-      </View>
 
-      {/* Tabs */}
-      <View style={styles.tabRow}>
-        <TouchableOpacity onPress={() => setTab("today")} style={[styles.tabChip, tab === "today" && styles.tabChipActive]} testID="training-tab-today">
-          <Text style={[styles.tabText, tab === "today" && styles.tabTextActive]}>Aujourd&apos;hui</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => setTab("calendar")} style={[styles.tabChip, tab === "calendar" && styles.tabChipActive]} testID="training-tab-calendar">
-          <Text style={[styles.tabText, tab === "calendar" && styles.tabTextActive]}>Calendrier</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => setTab("history")} style={[styles.tabChip, tab === "history" && styles.tabChipActive]} testID="training-tab-history">
-          <Text style={[styles.tabText, tab === "history" && styles.tabTextActive]}>Historique</Text>
-        </TouchableOpacity>
-      </View>
+        <View style={styles.tabRow}>
+          <TouchableOpacity onPress={() => setTab("today")} style={[styles.tabChip, tab === "today" && styles.tabChipActive]} testID="training-tab-today">
+            <Ionicons name="leaf-outline" size={13} color={tab === "today" ? "#102108" : colors.textMuted} />
+            <Text style={[styles.tabText, tab === "today" && styles.tabTextActive]}>Aujourd&apos;hui</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setTab("calendar")} style={[styles.tabChip, tab === "calendar" && styles.tabChipActive]} testID="training-tab-calendar">
+            <Ionicons name="calendar-outline" size={13} color={tab === "calendar" ? "#102108" : colors.textMuted} />
+            <Text style={[styles.tabText, tab === "calendar" && styles.tabTextActive]}>Calendrier</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setTab("history")} style={[styles.tabChip, tab === "history" && styles.tabChipActive]} testID="training-tab-history">
+            <Ionicons name="time-outline" size={13} color={tab === "history" ? "#102108" : colors.textMuted} />
+            <Text style={[styles.tabText, tab === "history" && styles.tabTextActive]}>Historique</Text>
+          </TouchableOpacity>
+        </View>
+      </ImageBackground>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {tab === "today" && (
           <>
-        {/* Program summary card */}
-        <ProgramSummaryCard
-          program={program}
-          onCreate={() => setProgramSetupOpen(true)}
-          onTravel={() => setTravelOpen(true)}
-          onEndTravel={endTravelMode}
-          travelBusy={travelBusy}
-        />
-
-        <TrainingPulseCard program={program} />
-
-        <RewardsRail
-          streakDays={streakDays}
-          weeklyChallengeProgress={weeklyChallengeProgress}
-          chestReady={chestReady}
-        />
-
-        {/* Activity card */}
-        <Card testID="activity-card">
-          <SectionTitle title="Activité du jour" action={
-            <TouchableOpacity onPress={() => setShowActivity(true)} testID="activity-edit-button">
-              <Text style={[typography.small, { color: colors.primary, fontWeight: "600" }]}>
-                {activity?.steps || activity?.cardio_minutes ? "Modifier" : "Saisir"}
-              </Text>
-            </TouchableOpacity>
-          } />
-          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm }}>
-            <Stat label="Pas" value={(activity?.steps || 0).toLocaleString("fr-FR")} testID="training-steps" />
-            <Stat label="Cardio" value={activity?.cardio_minutes || 0} unit="min" align="center" testID="training-cardio-min" />
-            <Stat label="Type" value={activity?.cardio_type || "—"} align="center" />
-          </View>
-        </Card>
-
-        {/* Today's workout */}
-        {todayWorkout ? (
-          <Card testID="today-workout-card">
-            <ImageBackground
-              source={exerciseVisualFor(todayWorkout.focus || todayWorkout.title, 0)}
-              style={styles.todayVisualWrap}
-              imageStyle={styles.todayVisualImage}
-              resizeMode="cover"
-            >
-              <View style={styles.todayVisualShade} />
-              <View style={styles.todayVisualContent}>
-                <View style={styles.todayHeroTop}>
-                  <View style={styles.todayHeroIcon}>
-                    <Ionicons name="timer-outline" size={18} color={colors.primaryLight} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.todayVisualEyebrow}>SÉANCE DU JOUR</Text>
-                    <Text style={styles.todayVisualTitle}>{todayWorkout.focus}</Text>
-                  </View>
-                  <View style={styles.sessionXpBadge}>
-                    <Ionicons name="star" size={12} color={colors.primaryLight} />
-                    <Text style={styles.sessionXpText}>+80 XP</Text>
-                  </View>
-                </View>
-                <View style={styles.sessionGuideGrid}>
-                  <SessionGuideStat icon="repeat-outline" title="Swap" text="Remplace en un geste" />
-                  <SessionGuideStat icon="stopwatch-outline" title="Repos" text="Timer adapté" />
-                  <SessionGuideStat icon="sparkles-outline" title="IA" text="Feedback après série" />
-                </View>
-                <View style={styles.sessionProgressPanel}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.sessionProgressLabel}>Progression de la séance</Text>
-                    <View style={styles.sessionProgressTrack}>
-                      <View style={[styles.sessionProgressFill, { width: todayWorkout.completed ? "100%" : "28%" }]} />
-                    </View>
-                  </View>
-                  <View style={styles.timerBubble}>
-                  <Text style={styles.timerBubbleValue}>00:45</Text>
-                    <Text style={styles.timerBubbleLabel}>repos</Text>
-                  </View>
-                </View>
-                <SessionPerformanceGraph
-                  completed={todayWorkout.completed}
-                  total={todayExercises.length}
-                  earnedPoints={todayExercises.reduce((sum, ex) => sum + (earnedExercisePoints[ex.name] || 0), 0)}
-                />
-              </View>
-            </ImageBackground>
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm }}>
-              <Text style={typography.caption}>Séance du jour</Text>
-              <View style={{ flexDirection: "row", gap: 8 }}>
-                <TypeChip type={(todayWorkout.session_type as SessionKey) || "volume"} compact />
-                <TouchableOpacity onPress={() => openEditor(todayWorkout)} style={styles.editBtn} testID="edit-today-workout">
-                  <Ionicons name="create-outline" size={14} color={colors.primary} />
-                  <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Éditer</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-            <View style={{ flexDirection: "row", alignItems: "center", marginBottom: spacing.md }}>
-              <View style={styles.focusBadge}>
-                <Ionicons name="barbell" size={20} color={colors.primary} />
-              </View>
+        {plannedTodayWorkout && (
+          <Card testID="today-workout-card" style={styles.todayWorkoutCard}>
+            <View style={styles.todayCardHeader}>
               <View style={{ flex: 1 }}>
-                <Text style={[typography.h3]}>{todayWorkout.focus}</Text>
-                <Text style={typography.small}>{todayWorkout.duration_min} min · {todayExercises.length} exercices</Text>
+                <Text style={styles.todayCardEyebrow}>Ma séance du jour</Text>
+                <Text style={styles.todayCardStatus}>
+                  {plannedTodayWorkout.completed ? "Terminée · touche la coche verte pour annuler" : "Programme prévu pour aujourd'hui"}
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => toggleTodayWorkoutCheck(plannedTodayWorkout)}
+                activeOpacity={0.84}
+                disabled={startingToday}
+                style={[styles.todayCheckButton, plannedTodayWorkout.completed && styles.todayCheckButtonDone, startingToday && { opacity: 0.55 }]}
+                testID="today-workout-toggle"
+              >
+                <Ionicons name={plannedTodayWorkout.completed ? "checkmark" : "ellipse-outline"} size={18} color={plannedTodayWorkout.completed ? "#102108" : colors.primaryLight} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.todayMainRow}>
+              <ImageBackground
+                source={exerciseVisualFor(plannedTodayWorkout.focus || plannedTodayWorkout.title, 0)}
+                style={styles.todayThumb}
+                imageStyle={styles.todayThumbImage}
+                resizeMode="cover"
+              >
+                <View style={styles.todayThumbShade} />
+              </ImageBackground>
+              <View style={{ flex: 1 }}>
+                <View style={styles.todayMetaRow}>
+                  <Ionicons name="barbell" size={14} color={colors.primaryLight} />
+                  <Text style={styles.todayMetaText}>Aujourd&apos;hui</Text>
+                  <Text style={styles.todayDot}>•</Text>
+                  <Text style={styles.todayMetaText}>{plannedTodayWorkout.duration_min} min</Text>
+                  <Text style={styles.todayDot}>•</Text>
+                  <Text style={styles.todayMetaText}>{todayExercises.length} exercices</Text>
+                </View>
+                <Text style={styles.todayCardTitle}>{todayPlanLabel}</Text>
+                <Text style={styles.todayCardSub} numberOfLines={2}>
+                  {plannedTodayWorkout.focus || todayExercises.slice(0, 3).map((ex) => ex.name).join(", ")}
+                </Text>
+                <View style={styles.todaySmallPill}>
+                  <Ionicons name={plannedTodayWorkout.completed ? "checkmark-circle" : "radio-button-off"} size={12} color={colors.primaryLight} />
+                  <Text style={styles.todaySmallPillText}>{plannedTodayWorkout.completed ? "Validée aujourd'hui" : "À faire aujourd'hui"}</Text>
+                </View>
               </View>
             </View>
-            {todayExercises.map((ex, i) => {
-              const reco = isRecommendedFor(ex.name, todayWorkout?.session_type);
-              const points = exercisePointsFor(ex, i, reco);
-              const earned = earnedExercisePoints[ex.name] || (todayWorkout.completed ? points : 0);
-              return (
-                <ExerciseSessionCard
-                  key={`${ex.name}-${i}`}
-                  exercise={ex}
-                  index={i}
-                  recommended={reco}
-                  points={points}
-                  earnedPoints={earned}
-                  visual={exerciseVisualFor(ex.name, i)}
-                  onPress={() => openPerf(todayWorkout, ex)}
-                  testID={`exercise-${i}`}
-                />
-              );
-            })}
-            <Button
-              title={todayWorkout.completed ? "Séance terminée ✓" : "Marquer comme terminée"}
-              variant={todayWorkout.completed ? "secondary" : "primary"}
-              onPress={() => !todayWorkout.completed && completeWorkout(todayWorkout.id)}
-              disabled={todayWorkout.completed}
-              testID="complete-workout-button"
-              style={{ marginTop: spacing.md }}
-            />
-            {todayWorkout.completed && (
+
+            <View style={styles.todayActionRow}>
+              <TouchableOpacity
+                onPress={() => startTodayWorkout(plannedTodayWorkout)}
+                activeOpacity={0.86}
+                disabled={startingToday}
+                style={[styles.startTodayButton, startingToday && { opacity: 0.7 }]}
+                testID="complete-workout-button"
+              >
+                <Ionicons name="play-circle" size={18} color="#102108" />
+                <Text style={styles.startTodayText}>{startingToday ? "Préparation..." : "Commencer ma séance du jour"}</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => plannedTodayWorkout.id.startsWith("draft:") ? setProgramSetupOpen(true) : openEditor(plannedTodayWorkout)}
+                style={styles.todayEditIconButton}
+                testID="edit-today-workout"
+              >
+                <Ionicons name="create-outline" size={18} color={colors.primaryLight} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.plannedExerciseList}>
+              <View style={styles.plannedExerciseHeader}>
+                <Text style={styles.plannedExerciseTitle}>Exercices prévus</Text>
+                <Text style={styles.plannedExerciseCount}>{todayExercises.length} au programme</Text>
+              </View>
+              {todayExercises.map((exercise, index) => (
+                <View key={`${exercise.name}-${index}`} style={styles.plannedExerciseRow} testID={`planned-exercise-${index}`}>
+                  <ImageBackground
+                    source={exerciseVisualFor(exercise.name, index)}
+                    style={styles.plannedExerciseThumb}
+                    imageStyle={styles.plannedExerciseThumbImage}
+                    resizeMode="cover"
+                  >
+                    <View style={styles.plannedExerciseShade} />
+                    <Text style={styles.plannedExerciseIndex}>{index + 1}</Text>
+                  </ImageBackground>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.plannedExerciseName} numberOfLines={1}>{exercise.name}</Text>
+                    <Text style={styles.plannedExerciseMeta}>{exercise.sets} séries · {exercise.reps} · repos {exercise.rest_s || 60}s</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={15} color={colors.textMuted} />
+                </View>
+              ))}
+            </View>
+
+            {plannedTodayWorkout.completed && (
               <Button
                 title="Partager ma performance"
                 variant="primary"
                 onPress={async () => {
                   try {
-                    const sType = (todayWorkout.session_type || "").toString();
+                    const sType = (plannedTodayWorkout.session_type || "").toString();
                     const sLabel = sType ? ` · ${sType.charAt(0).toUpperCase() + sType.slice(1)}` : "";
                     let evolution: 1 | 2 | 3 = 1;
                     let strength_value = 0.4;
@@ -828,7 +1309,7 @@ export default function Training() {
                     const splitLabel = SPLIT_LABELS[program?.split || ""] || "Training";
                     setShareData({
                       focus: `${splitLabel}${sLabel}`,
-                      duration_min: todayWorkout.duration_min,
+                      duration_min: plannedTodayWorkout.duration_min,
                       evolution,
                       strength_value,
                       points_today,
@@ -844,40 +1325,76 @@ export default function Training() {
               />
             )}
           </Card>
-        ) : !program ? (
-          <ProgramCarousel
-            onSelectProgram={(goalLabel, freq, split, weeks) =>
-              createProgram({ goal_label: goalLabel, frequency: freq, split, weeks: weeks || presetByGoal(goalLabel).defaultWeeks })
-            }
-            loading={creatingProgram}
-          />
-        ) : null}
+        )}
 
         {/* My Program (weeks) */}
         {program && (
-          <View testID="my-program-section">
-            <SectionTitle title="Mon programme" action={
-              <TouchableOpacity onPress={() => setProgramSetupOpen(true)} testID="reset-program">
-                <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Refaire</Text>
+          <ProgramActionsFooter
+            program={program}
+            onCreate={openProgramSetup}
+            onTravel={() => setTravelOpen(true)}
+            onEndTravel={endTravelMode}
+            travelBusy={travelBusy}
+          />
+        )}
+
+        {program && (
+          <View testID="my-program-section" style={styles.programSection}>
+            <View style={styles.programSectionHeader}>
+              <Text style={styles.programSectionTitle}>Mon programme</Text>
+              <TouchableOpacity onPress={openProgramSetup} style={styles.refaireButton} testID="program-modify">
+                <Text style={styles.refaireText}>Modifier</Text>
+                <Ionicons name="create-outline" size={13} color={colors.primaryLight} />
               </TouchableOpacity>
-            } />
-            <View style={{ gap: spacing.sm }}>
-              {(program.weeks || []).map((w) => (
-                <ProgramWeekCard
-                  key={w.week_index}
-                  week={w}
-                  totalWeeks={program.weeks_total}
-                  currentWeek={program.current_week}
-                  isExpanded={expandedWeek === w.week_index}
-                  isCurrent={program.current_week === w.week_index}
-                  onToggle={() => setExpandedWeek(expandedWeek === w.week_index ? null : w.week_index)}
-                  onEditDay={(dayIndex) => openProgramDayEditor(program, w.week_index, dayIndex)}
-                />
-              ))}
             </View>
-            <SciencePanel />
+            <ProgramWeekSelector
+              weeksTotal={program.weeks_total}
+              currentWeek={program.current_week}
+              selectedWeek={selectedProgramWeek}
+              onSelect={setExpandedWeek}
+            />
+            {activeProgramWeek && (
+              <ProgramJourneyCard
+                week={activeProgramWeek}
+                totalWeeks={program.weeks_total}
+                currentWeek={program.current_week}
+                isCurrent={program.current_week === activeProgramWeek.week_index}
+                selectedDay={selectedDay}
+                onEditDay={(dayIndex) => openProgramDayEditor(program, activeProgramWeek.week_index, dayIndex)}
+              />
+            )}
           </View>
         )}
+
+        {!program && (
+          <View style={styles.programSection} testID="program-picker-lower">
+            <View style={styles.programSectionHeader}>
+              <Text style={styles.programSectionTitle}>Choisir mon programme</Text>
+              <Text style={styles.programSectionHint}>Le plan se calera sur ta séance du jour.</Text>
+            </View>
+            <ProgramCarousel
+              onSelectProgram={(goalLabel, freq, split, weeks) =>
+                createProgram({ goal_label: goalLabel, frequency: freq, split, weeks: weeks || presetByGoal(goalLabel).defaultWeeks })
+              }
+              loading={creatingProgram}
+            />
+          </View>
+        )}
+
+        <Card testID="activity-card">
+          <SectionTitle title="Activité du jour" action={
+            <TouchableOpacity onPress={() => setShowActivity(true)} testID="activity-edit-button">
+              <Text style={[typography.small, { color: colors.primary, fontWeight: "600" }]}>
+                {activity?.steps || activity?.cardio_minutes ? "Modifier" : "Saisir"}
+              </Text>
+            </TouchableOpacity>
+          } />
+          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm }}>
+            <Stat label="Pas" value={(activity?.steps || 0).toLocaleString("fr-FR")} testID="training-steps" />
+            <Stat label="Cardio" value={activity?.cardio_minutes || 0} unit="min" align="center" testID="training-cardio-min" />
+            <Stat label="Type" value={activity?.cardio_type || "—"} align="center" />
+          </View>
+        </Card>
 
         <View style={{ height: spacing.xxl }} />
           </>
@@ -893,6 +1410,26 @@ export default function Training() {
               loading={calLoading}
               onPrev={() => setCalMonth(addMonths(calMonth, -1))}
               onNext={() => setCalMonth(addMonths(calMonth, 1))}
+            />
+
+            <Button
+              title="Synchroniser l'agenda du téléphone"
+              variant="primary"
+              loading={syncingAgenda}
+              onPress={syncPlanningToPhoneAgenda}
+              icon={<Ionicons name="calendar-outline" size={15} color="#102108" />}
+              style={{ marginTop: spacing.sm }}
+              testID="calendar-sync-phone"
+            />
+
+            <Button
+              title="Mettre à jour le calendrier"
+              variant="secondary"
+              loading={calLoading}
+              onPress={() => loadCalendar(calMonth)}
+              icon={<Ionicons name="sync-outline" size={15} color={colors.primaryLight} />}
+              style={{ marginTop: spacing.sm }}
+              testID="calendar-refresh"
             />
 
             <Button
@@ -946,6 +1483,14 @@ export default function Training() {
                             • {e.name} — {e.sets} × {e.reps}
                           </Text>
                         ))}
+                        <TouchableOpacity
+                          onPress={() => uncompleteWorkout(w.id)}
+                          style={styles.historyUncompleteButton}
+                          testID={`history-uncomplete-${w.id}`}
+                        >
+                          <Ionicons name="arrow-undo-outline" size={14} color={colors.primaryLight} />
+                          <Text style={styles.historyUncompleteText}>Annuler cette séance effectuée</Text>
+                        </TouchableOpacity>
                       </View>
                     )}
                   </Card>
@@ -969,6 +1514,9 @@ export default function Training() {
               <View style={[styles.timerProgressFill, { width: `${restTotal > 0 ? Math.min(100, (1 - restRemaining / restTotal) * 100) : 0}%` }]} />
             </View>
             <View style={{ flexDirection: "row", gap: 8, marginTop: spacing.sm }}>
+              <TouchableOpacity onPress={toggleRestTimer} style={styles.timerPlayBtn} testID="timer-play-toggle">
+                <Ionicons name={restRunning ? "pause" : "play"} size={18} color="#102108" />
+              </TouchableOpacity>
               <TouchableOpacity onPress={() => adjustRest(-15)} style={styles.timerBtn} testID="timer-minus">
                 <Text style={styles.timerBtnTxt}>-15s</Text>
               </TouchableOpacity>
@@ -997,6 +1545,267 @@ export default function Training() {
           </View>
         </View>
       )}
+
+      <Modal visible={sessionRunnerOpen && !!runnerWorkout && !!runnerExercise} transparent animationType="slide" onRequestClose={() => setSessionRunnerOpen(false)}>
+        <View style={styles.modalBg}>
+          <KeyboardAwareScrollView contentContainerStyle={[styles.modalCard, { padding: 0, overflow: "hidden" }]} keyboardShouldPersistTaps="handled" bottomOffset={20}>
+            {runnerExercise && runnerDraft ? (
+              <>
+                <ImageBackground
+                  source={exerciseVisualFor(runnerExercise.name, runnerIndex)}
+                  style={styles.runnerHero}
+                  imageStyle={styles.runnerHeroImage}
+                  resizeMode="cover"
+                >
+                  <View style={styles.runnerHeroShade} />
+                  <View style={styles.runnerHeroTop}>
+                    <TouchableOpacity onPress={() => setSessionRunnerOpen(false)} style={styles.runnerIconButton} testID="runner-close">
+                      <Ionicons name="chevron-back" size={20} color={colors.textMain} />
+                    </TouchableOpacity>
+                    <View style={{ flex: 1, alignItems: "center" }}>
+                      <Text style={styles.runnerExerciseName}>{runnerExercise.name}</Text>
+                      <Text style={styles.runnerExerciseCount}>Exercice {runnerIndex + 1}/{runnerExercises.length}</Text>
+                    </View>
+                    <TouchableOpacity onPress={() => updateRunnerDraft(runnerExercise.name, { pr: !runnerDraft.pr })} style={[styles.runnerPrPill, runnerDraft.pr && styles.runnerPrPillOn]} testID="runner-pr">
+                      <Ionicons name="sparkles" size={12} color={runnerDraft.pr ? "#102108" : colors.primaryLight} />
+                      <Text style={[styles.runnerPrText, runnerDraft.pr && { color: "#102108" }]}>PR</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <View style={styles.runnerProgressBlock}>
+                    <View style={styles.runnerProgressTop}>
+                      <Text style={styles.runnerProgressLabel}>Progression de la séance</Text>
+                      <Text style={styles.runnerProgressPct}>{runnerProgress}%</Text>
+                    </View>
+                    <View style={styles.runnerProgressTrack}>
+                      <View style={[styles.runnerProgressFill, { width: `${runnerProgress}%` }]} />
+                    </View>
+                  </View>
+                </ImageBackground>
+
+                <View style={styles.runnerBody}>
+                  <View style={styles.runnerStepperWrap}>
+                    <TouchableOpacity
+                      onPress={() => setRunnerIndex(Math.max(0, runnerIndex - 1))}
+                      disabled={runnerIndex === 0}
+                      style={[styles.runnerStepArrow, runnerIndex === 0 && { opacity: 0.35 }]}
+                      testID="runner-prev-exercise"
+                    >
+                      <Ionicons name="chevron-back" size={18} color={colors.textMain} />
+                    </TouchableOpacity>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.runnerExerciseRail}>
+                      {runnerExercises.map((exercise, index) => {
+                        const isActive = index === runnerIndex;
+                        const isDone = !!runnerDrafts[exercise.name]?.done;
+                        return (
+                          <TouchableOpacity
+                            key={`${exercise.name}-${index}`}
+                            onPress={() => setRunnerIndex(index)}
+                            activeOpacity={0.84}
+                            style={[styles.runnerExerciseChip, isActive && styles.runnerExerciseChipActive, isDone && styles.runnerExerciseChipDone]}
+                            testID={`runner-exercise-${index}`}
+                          >
+                            <View style={[styles.runnerExerciseChipIndex, isDone && styles.runnerExerciseChipIndexDone]}>
+                              <Text style={[styles.runnerExerciseChipIndexText, isDone && { color: "#102108" }]}>{index + 1}</Text>
+                            </View>
+                            <Text style={[styles.runnerExerciseChipText, isActive && styles.runnerExerciseChipTextActive]} numberOfLines={1}>{exercise.name}</Text>
+                            {isDone ? <Ionicons name="checkmark-circle" size={14} color={colors.primaryLight} /> : null}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                    <TouchableOpacity
+                      onPress={() => setRunnerIndex(Math.min(runnerExercises.length - 1, runnerIndex + 1))}
+                      disabled={runnerIndex >= runnerExercises.length - 1}
+                      style={[styles.runnerStepArrow, runnerIndex >= runnerExercises.length - 1 && { opacity: 0.35 }]}
+                      testID="runner-next-exercise"
+                    >
+                      <Ionicons name="chevron-forward" size={18} color={colors.textMain} />
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.runnerSeriesCard}>
+                    <View style={styles.runnerPanelHeader}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.runnerSeriesTitle}>Paramètres de l&apos;exercice</Text>
+                        <Text style={styles.runnerSeriesSub}>Séries terminées : {runnerDraft.done ? runnerDraft.sets || "0" : "0"} / {runnerDraft.sets || runnerExercise.sets || 0}</Text>
+                      </View>
+                      <TouchableOpacity style={styles.runnerAdvicePill} activeOpacity={0.84}>
+                        <Ionicons name="bulb-outline" size={13} color={colors.primaryLight} />
+                        <Text style={styles.runnerAdviceText}>Conseils</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.runnerParamGrid}>
+                      <View style={styles.runnerParamCard}>
+                        <Ionicons name="repeat-outline" size={16} color={colors.primaryLight} />
+                        <TextInput
+                          value={runnerDraft.reps}
+                          onChangeText={(text) => updateRunnerDraft(runnerExercise.name, { reps: text.replace(/[^0-9-]/g, "") })}
+                          keyboardType="numeric"
+                          placeholder="8-10"
+                          placeholderTextColor={colors.textMuted}
+                          style={styles.runnerParamInput}
+                        />
+                        <Text style={styles.runnerParamLabel}>répétitions</Text>
+                        <TouchableOpacity style={styles.runnerModifyPill}>
+                          <Ionicons name="create-outline" size={11} color={colors.primaryLight} />
+                          <Text style={styles.runnerModifyText}>Modifier</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      <View style={styles.runnerParamCard}>
+                        <Ionicons name="layers-outline" size={16} color={colors.primaryLight} />
+                        <TextInput
+                          value={runnerDraft.sets}
+                          onChangeText={(text) => updateRunnerDraft(runnerExercise.name, { sets: text.replace(/[^0-9]/g, "") })}
+                          keyboardType="numeric"
+                          placeholder="4"
+                          placeholderTextColor={colors.textMuted}
+                          style={styles.runnerParamInput}
+                        />
+                        <Text style={styles.runnerParamLabel}>séries</Text>
+                        <View style={styles.runnerTinyStepper}>
+                          <TouchableOpacity onPress={() => adjustRunnerDraftNumber(runnerExercise.name, "sets", -1, 1)} style={styles.runnerTinyStepButton}>
+                            <Ionicons name="remove" size={11} color={colors.primaryLight} />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => adjustRunnerDraftNumber(runnerExercise.name, "sets", 1, 1)} style={styles.runnerTinyStepButton}>
+                            <Ionicons name="add" size={11} color={colors.primaryLight} />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+
+                      <View style={styles.runnerParamCard}>
+                        <Ionicons name="barbell-outline" size={16} color={colors.primaryLight} />
+                        <View style={styles.runnerWeightLine}>
+	                          <TextInput
+	                            value={runnerDraft.weight}
+	                            onChangeText={(text) => updateRunnerDraft(runnerExercise.name, { weight: text.replace(/[^0-9.]/g, "") })}
+	                            keyboardType="numeric"
+	                            placeholder="0"
+	                            placeholderTextColor={colors.textMuted}
+	                            style={styles.runnerWeightInput}
+	                          />
+                          <Text style={styles.runnerParamUnit}>kg</Text>
+                        </View>
+                        <Text style={styles.runnerParamLabel}>charge</Text>
+                        <View style={styles.runnerTinyStepper}>
+                          <TouchableOpacity onPress={() => adjustRunnerDraftNumber(runnerExercise.name, "weight", -2.5, 0)} style={styles.runnerTinyStepButton}>
+                            <Ionicons name="remove" size={11} color={colors.primaryLight} />
+                          </TouchableOpacity>
+                          <TouchableOpacity onPress={() => adjustRunnerDraftNumber(runnerExercise.name, "weight", 2.5, 0)} style={styles.runnerTinyStepButton}>
+                            <Ionicons name="add" size={11} color={colors.primaryLight} />
+                          </TouchableOpacity>
+                        </View>
+                      </View>
+                    </View>
+
+                    <View style={styles.runnerRestPrRow}>
+                      <View style={styles.runnerRestPanel}>
+                        <View style={styles.runnerRestHeader}>
+                          <Ionicons name="timer-outline" size={14} color={colors.primaryLight} />
+                          <Text style={styles.runnerRestTitle}>Repos proposé</Text>
+                          <TouchableOpacity onPress={() => updateRunnerDraft(runnerExercise.name, { rest: String(runnerExercise.rest_s || getRestForExercise(runnerExercise.name, runnerWorkout?.session_type)) })}>
+                            <Text style={styles.runnerRestModify}>Modifier</Text>
+                          </TouchableOpacity>
+                        </View>
+                        <View style={styles.runnerRestCircle}>
+                          <TextInput
+                            value={formatSecondsLabel(parseInt(runnerDraft.rest || "0", 10) || 0)}
+                            editable={false}
+                            style={styles.runnerRestTime}
+                          />
+	                          <View style={styles.runnerRestControls}>
+	                            <TouchableOpacity onPress={() => adjustRunnerDraftNumber(runnerExercise.name, "rest", -15, 0)} style={styles.runnerRestButton}>
+	                              <Ionicons name="remove" size={12} color={colors.primaryLight} />
+	                            </TouchableOpacity>
+	                            <TouchableOpacity
+	                              onPress={() => startOrToggleRestTimer(parseInt(runnerDraft.rest || "0", 10) || runnerExercise.rest_s || 60)}
+	                              style={styles.runnerRestPlayButton}
+	                              testID="runner-rest-play"
+	                            >
+	                              <Ionicons name={restRunning ? "pause" : "play"} size={13} color="#102108" />
+	                            </TouchableOpacity>
+	                            <TouchableOpacity onPress={() => adjustRunnerDraftNumber(runnerExercise.name, "rest", 15, 0)} style={styles.runnerRestButton}>
+	                              <Ionicons name="add" size={12} color={colors.primaryLight} />
+	                            </TouchableOpacity>
+                          </View>
+                        </View>
+                        <Text style={styles.runnerRestHint}>Repos recommandé : {runnerExercise.rest_s || getRestForExercise(runnerExercise.name, runnerWorkout?.session_type)} sec</Text>
+                      </View>
+
+                      <TouchableOpacity
+                        onPress={() => updateRunnerDraft(runnerExercise.name, { pr: !runnerDraft.pr })}
+                        activeOpacity={0.84}
+                        style={[styles.runnerPrCheckCard, runnerDraft.pr && styles.runnerPrCheckCardOn]}
+                        testID="runner-pr-checkbox"
+                      >
+                        <View style={styles.runnerPrIconLine}>
+                          <Ionicons name="trophy-outline" size={15} color={colors.primaryLight} />
+                          <Text style={styles.runnerPrCheckTitle}>C&apos;est un PR</Text>
+                          <View style={[styles.runnerPrCheckbox, runnerDraft.pr && styles.runnerPrCheckboxOn]}>
+                            {runnerDraft.pr ? <Ionicons name="checkmark" size={14} color="#102108" /> : null}
+                          </View>
+                        </View>
+                        <Text style={styles.runnerPrCheckText}>Coche cette case si tu bats ton record perso sur cet exercice.</Text>
+                        <View style={styles.runnerAiAdviceBox}>
+                          <Ionicons name="sparkles-outline" size={12} color={colors.amber} />
+                          <Text style={styles.runnerAiAdviceText}>Charge la fois 1 · Charge PR proche de ton meilleur vol.</Text>
+                        </View>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.runnerBottomAction}>
+                      <Button
+                        title={runnerDraft.done ? "Exercice validé" : "Terminer / valider l'exercice"}
+                        onPress={validateRunnerExercise}
+                        disabled={runnerDraft.done}
+                        icon={<Ionicons name="checkmark-circle" size={16} color="#102108" />}
+                        testID="runner-validate"
+                        style={{ flex: 1, marginTop: 0 }}
+                      />
+                      <TouchableOpacity
+                        onPress={() => setRunnerIndex(Math.min(runnerExercises.length - 1, runnerIndex + 1))}
+                        disabled={runnerIndex >= runnerExercises.length - 1}
+                        style={[styles.runnerNextTextButton, runnerIndex >= runnerExercises.length - 1 && { opacity: 0.4 }]}
+                        testID="runner-next-link"
+                      >
+                        <Text style={styles.runnerNextText}>Exercice suivant</Text>
+                        <Ionicons name="chevron-forward" size={13} color={colors.primaryLight} />
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                </View>
+              </>
+            ) : null}
+          </KeyboardAwareScrollView>
+        </View>
+      </Modal>
+      <Modal visible={!!sessionResult} transparent animationType="fade" onRequestClose={() => setSessionResult(null)}>
+        <View style={styles.modalBg}>
+          <View style={styles.sessionDoneCard} testID="session-result-modal">
+            <View style={styles.doneCheck}>
+              <Ionicons name="checkmark" size={42} color={colors.primaryLight} />
+            </View>
+            <Text style={styles.doneTitle}>Séance terminée !</Text>
+            <Text style={styles.doneSubtitle}>Incroyable, tu l&apos;as fait.</Text>
+            {sessionResult ? (
+              <>
+                <View style={styles.doneMetricGrid}>
+                  <DoneMetric icon="barbell-outline" label="Volume total" value={`${sessionResult.volume.toLocaleString("fr-FR")} kg`} />
+                  <DoneMetric icon="timer-outline" label="Temps total" value={`${sessionResult.duration} min`} />
+                  <DoneMetric icon="flame-outline" label="Calories" value={`${sessionResult.calories} kcal`} />
+                  <DoneMetric icon="sparkles-outline" label="PR battus" value={`${sessionResult.prs}`} />
+                </View>
+                <View style={styles.doneXpBox}>
+                  <Ionicons name="star" size={20} color={colors.primaryLight} />
+                  <Text style={styles.doneXpText}>+{sessionResult.xp} XP</Text>
+                </View>
+              </>
+            ) : null}
+            <Button title="Voir mes progrès" onPress={() => setSessionResult(null)} icon={<Ionicons name="arrow-forward" size={16} color="#102108" />} testID="session-result-close" />
+          </View>
+        </View>
+      </Modal>
 
       {/* Activity modal */}
       <Modal visible={showActivity} transparent animationType="slide" onRequestClose={() => setShowActivity(false)}>
@@ -1071,13 +1880,40 @@ export default function Training() {
           <View style={styles.modalCard} testID="program-setup-modal">
             <View style={styles.modalHandle} />
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <Text style={styles.modalTitle}>Crée ton programme</Text>
+              <Text style={styles.modalTitle}>{program ? "Nouveaux objectifs" : "Crée ton programme"}</Text>
               <TouchableOpacity onPress={() => setProgramSetupOpen(false)} testID="program-setup-close">
                 <Ionicons name="close" size={22} color={colors.textSecondary} />
               </TouchableOpacity>
             </View>
 
             <ScrollView style={{ maxHeight: 540 }} keyboardShouldPersistTaps="handled">
+              {program ? (
+                <View style={styles.goalUpdateIntro} testID="program-goal-update-intro">
+                  <Text style={styles.goalUpdateTitle}>On ajuste seulement ce qui compte.</Text>
+                  <Text style={styles.goalUpdateText}>
+                    Si ton alimentation, ton activité et ton poids n&apos;ont pas changé, FIT AI garde tes bases et adapte surtout la structure. S&apos;il y a eu des changements, on repose les questions clés et on relance un programme cohérent.
+                  </Text>
+                  <View style={styles.setupOptionRow}>
+                    <TouchableOpacity
+                      onPress={() => setSetupChangeMode("stable")}
+                      style={[styles.setupOption, setupChangeMode === "stable" && styles.setupOptionOn]}
+                      testID="program-update-stable"
+                    >
+                      <Text style={[styles.setupOptionLabel, setupChangeMode === "stable" && styles.setupOptionLabelOn]}>Rien n&apos;a changé</Text>
+                      <Text style={styles.setupOptionSub}>Même poids, rythme, alimentation</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => setSetupChangeMode("changed")}
+                      style={[styles.setupOption, setupChangeMode === "changed" && styles.setupOptionOn]}
+                      testID="program-update-changed"
+                    >
+                      <Text style={[styles.setupOptionLabel, setupChangeMode === "changed" && styles.setupOptionLabelOn]}>Il y a du changement</Text>
+                      <Text style={styles.setupOptionSub}>Objectif, poids ou activité</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : null}
+
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Objectif</Text>
               <View style={styles.setupOptionRow}>
                 {PROGRAM_PRESETS.map((preset) => (
@@ -1166,7 +2002,7 @@ export default function Training() {
 
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Durée du programme</Text>
               <View style={styles.setupOptionRow}>
-                {[6, 8, 10, 12].map((w) => (
+                {[6, 8, 10, 12, 16, 24].map((w) => (
                   <TouchableOpacity
                     key={w}
                     onPress={() => setSetupWeeks(w)}
@@ -1202,10 +2038,10 @@ export default function Training() {
             </ScrollView>
 
             <Button
-              title={creatingProgram ? "Création..." : `Créer mon programme (${setupWeeks} sem.)`}
+              title={creatingProgram ? "Application..." : program ? "Appliquer et lancer le nouveau programme" : `Créer mon programme (${setupWeeks} sem.)`}
               onPress={() => createProgram()}
               loading={creatingProgram}
-              icon={<Ionicons name="rocket" size={16} color="#fff" />}
+              icon={<Ionicons name={program ? "checkmark-circle" : "rocket"} size={16} color="#fff" />}
               style={{ marginTop: spacing.lg }}
               testID="program-setup-create"
             />
@@ -1300,6 +2136,41 @@ export default function Training() {
                   Mon exercice n&apos;est pas listé · Ajouter via IA
                 </Text>
               </TouchableOpacity>
+              {editWorkout && editWorkout.exercises.length > 0 ? (
+                <View style={styles.orderBox} testID="editor-order-box">
+                  <Text style={styles.orderTitle}>Ordre des exercices</Text>
+                  <Text style={styles.orderHint}>Utilise la poignée pour repérer les exercices, puis monte ou descends l&apos;ordre.</Text>
+                  {editWorkout.exercises.map((ex, index) => {
+                    const isOn = ex.checked !== false;
+                    return (
+                      <View key={`${ex.name}-${index}`} style={[styles.orderRow, !isOn && { opacity: 0.46 }]}>
+                        <Ionicons name="reorder-three-outline" size={20} color={colors.textMuted} />
+                        <Text style={styles.orderIndex}>{index + 1}</Text>
+                        <Text style={styles.orderName} numberOfLines={1}>{ex.name}</Text>
+                        <TouchableOpacity
+                          onPress={() => moveExerciseInEditor(index, index - 1)}
+                          disabled={index === 0}
+                          style={[styles.orderButton, index === 0 && { opacity: 0.35 }]}
+                          testID={`editor-order-up-${index}`}
+                        >
+                          <Ionicons name="chevron-up" size={15} color={colors.primaryLight} />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => moveExerciseInEditor(index, index + 1)}
+                          disabled={index === editWorkout.exercises.length - 1}
+                          style={[styles.orderButton, index === editWorkout.exercises.length - 1 && { opacity: 0.35 }]}
+                          testID={`editor-order-down-${index}`}
+                        >
+                          <Ionicons name="chevron-down" size={15} color={colors.primaryLight} />
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => toggleExerciseInEditor(ex.name)} style={styles.orderButton} testID={`editor-order-toggle-${index}`}>
+                          <Ionicons name={isOn ? "close" : "add"} size={15} color={isOn ? colors.alert : colors.primaryLight} />
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : null}
               {Object.entries(libByCategory).map(([cat, list]) => (
                 <View key={cat} style={{ marginBottom: spacing.md }}>
                   <Text style={[typography.caption, { marginBottom: 8 }]}>{cat}</Text>
@@ -1498,17 +2369,20 @@ const GLASS_BORDER = "rgba(74,222,128,0.18)";
 const SHEET = "rgba(6,16,10,0.97)";
 
 const styles = StyleSheet.create({
-  header: { minHeight: 300, padding: spacing.lg, paddingBottom: spacing.xl, justifyContent: "space-between" },
+  trainingHero: { minHeight: 242, justifyContent: "flex-end", paddingTop: spacing.lg },
+  trainingHeroImage: { opacity: 0.96 },
+  trainingHeroShade: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(1,11,8,0.40)" },
+  header: { minHeight: 150, paddingHorizontal: spacing.lg, paddingBottom: spacing.md, flexDirection: "row", alignItems: "flex-end", gap: spacing.md },
   heroEyebrow: { ...typography.caption, color: "rgba(255,255,255,0.9)", fontWeight: "700" },
   heroTitleRow: { flexDirection: "row", alignItems: "flex-end", gap: spacing.md },
   heroCaption: { ...typography.body, color: "rgba(255,255,255,0.82)", marginBottom: 2 },
   title: { fontSize: 34, lineHeight: 38, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0 },
   heroProgram: { ...typography.small, color: "rgba(255,255,255,0.78)", marginTop: spacing.sm, maxWidth: 210 },
   heroScript: { fontSize: 29, lineHeight: 33, marginTop: 2 },
-  heroProgress: { width: 82, height: 82, borderRadius: 41, borderWidth: 7, borderColor: colors.primaryLight, backgroundColor: "rgba(2,18,12,0.58)", alignItems: "center", justifyContent: "center" },
-  heroProgressValue: { fontSize: 22, fontWeight: "900", color: "#FFFFFF" },
+  heroProgress: { width: 78, height: 78, borderRadius: 39, borderWidth: 7, borderColor: colors.primaryLight, backgroundColor: "rgba(2,18,12,0.58)", alignItems: "center", justifyContent: "center", marginBottom: 4 },
+  heroProgressValue: { fontSize: 20, fontWeight: "900", color: "#FFFFFF" },
   heroProgressLabel: { fontSize: 9, color: "rgba(255,255,255,0.72)", marginTop: -2 },
-  content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: 130 },
+  content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: 130, marginTop: -6 },
   focusBadge: { width: 44, height: 44, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.18)", alignItems: "center", justifyContent: "center", marginRight: spacing.md },
   exerciseRow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" },
   recoBadge: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 6, paddingVertical: 2, backgroundColor: "rgba(161,42,34,0.25)", borderRadius: radius.full, borderWidth: 1, borderColor: "#E58880" },
@@ -1535,26 +2409,144 @@ const styles = StyleSheet.create({
   exCheckOn: { backgroundColor: "rgba(74,222,128,0.18)", borderColor: colors.primaryLight },
   checkbox: { width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: GLASS_BORDER, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)" },
   checkboxOn: { backgroundColor: colors.primary, borderColor: colors.primary },
+  orderBox: { gap: 7, marginBottom: spacing.md, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.07)" },
+  orderTitle: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
+  orderHint: { color: colors.textMuted, fontSize: 10.5, lineHeight: 14, fontWeight: "700" },
+  orderRow: { minHeight: 42, flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: spacing.sm, borderRadius: radius.sm, backgroundColor: "rgba(255,255,255,0.055)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
+  orderIndex: { width: 22, color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
+  orderName: { flex: 1, color: colors.textMain, fontSize: 12.5, fontWeight: "800" },
+  orderButton: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: GLASS_BORDER },
   rmBox: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: "rgba(74,222,128,0.15)", padding: spacing.md, borderRadius: radius.md, marginTop: spacing.md, borderWidth: 1, borderColor: GLASS_BORDER },
   rmValue: { fontSize: 24, fontWeight: "800", color: colors.primaryLight, marginTop: 2 },
   perfRow: { flexDirection: "row", alignItems: "center", paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" },
   // Tabs
-  tabRow: { flexDirection: "row", gap: 6, paddingHorizontal: spacing.lg, paddingBottom: spacing.sm },
-  tabChip: { flex: 1, minHeight: 38, paddingVertical: 9, alignItems: "center", borderRadius: radius.sm, backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER },
+  tabRow: { flexDirection: "row", gap: 8, paddingHorizontal: spacing.lg, paddingBottom: spacing.md },
+  tabChip: { flex: 1, minHeight: 38, paddingVertical: 9, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 5, borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.10)", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)" },
   tabChipActive: { backgroundColor: colors.primary, borderColor: colors.primary },
   tabText: { fontSize: 12, fontWeight: "700", color: "rgba(255,255,255,0.55)" },
   tabTextActive: { color: "#102108" },
   // History
   histDot: { width: 8, height: 8, borderRadius: 4 },
+  historyUncompleteButton: { minHeight: 38, marginTop: spacing.sm, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.25)", backgroundColor: "rgba(182,255,63,0.08)", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
+  historyUncompleteText: { color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
   // Timer overlay
   timerOverlay: { position: "absolute", left: 0, right: 0, bottom: spacing.lg, alignItems: "center", padding: spacing.md, zIndex: 100, elevation: 10 },
   timerCard: { backgroundColor: "rgba(6,20,10,0.97)", padding: spacing.md, borderRadius: radius.lg, alignItems: "center", borderWidth: 2, borderColor: colors.primaryLight, width: "92%", maxWidth: 360, gap: 4 },
   timerBig: { fontSize: 40, fontWeight: "800", color: colors.primaryLight, letterSpacing: -1 },
   timerProgressTrack: { height: 6, backgroundColor: "rgba(255,255,255,0.12)", borderRadius: 3, width: "100%", overflow: "hidden" },
   timerProgressFill: { height: "100%", backgroundColor: colors.primaryLight, borderRadius: 3 },
+  timerPlayBtn: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: "rgba(255,255,255,0.34)" },
   timerBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.15)", borderWidth: 1, borderColor: colors.primaryLight },
   timerBtnTxt: { fontSize: 13, fontWeight: "700", color: colors.primaryLight },
   timerSaveCfg: { flexDirection: "row", gap: 4, alignItems: "center", paddingHorizontal: 8, paddingVertical: 4, borderRadius: radius.full, backgroundColor: GLASS, borderWidth: 1, borderColor: GLASS_BORDER, marginTop: 4 },
+  runnerHero: { minHeight: 270, justifyContent: "space-between", padding: spacing.lg },
+  runnerHeroImage: { opacity: 0.92 },
+  runnerHeroShade: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(1,10,6,0.52)" },
+  runnerHeroTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  runnerIconButton: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.28)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
+  runnerExerciseName: { color: colors.textMain, fontSize: 19, fontWeight: "900", textAlign: "center" },
+  runnerExerciseCount: { color: colors.textSecondary, fontSize: 11, fontWeight: "800", marginTop: 2 },
+  runnerPrPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 7, borderRadius: radius.full, borderWidth: 1, borderColor: colors.borderBright, backgroundColor: "rgba(182,255,63,0.10)" },
+  runnerPrPillOn: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
+  runnerPrText: { color: colors.primaryLight, fontSize: 11, fontWeight: "900" },
+  runnerProgressBlock: { padding: spacing.md, borderRadius: radius.md, backgroundColor: "rgba(2,18,12,0.66)", borderWidth: 1, borderColor: "rgba(255,255,255,0.14)" },
+  runnerProgressTop: { flexDirection: "row", justifyContent: "space-between", marginBottom: 8 },
+  runnerProgressLabel: { color: colors.textSecondary, fontSize: 11.5, fontWeight: "800" },
+  runnerProgressPct: { color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
+  runnerProgressTrack: { height: 8, borderRadius: 4, overflow: "hidden", backgroundColor: "rgba(255,255,255,0.13)" },
+  runnerProgressFill: { height: "100%", borderRadius: 4, backgroundColor: colors.primaryLight },
+  runnerBody: { padding: spacing.lg, gap: spacing.md },
+  runnerStepperWrap: { flexDirection: "row", alignItems: "center", gap: 8 },
+  runnerStepArrow: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: GLASS_BORDER },
+  runnerExerciseRailBlock: { gap: 8 },
+  runnerRailTitle: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
+  runnerExerciseRail: { gap: 8, paddingRight: spacing.sm },
+  runnerExerciseChip: {
+    minWidth: 132,
+    maxWidth: 178,
+    minHeight: 48,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    paddingHorizontal: 10,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: GLASS_BORDER,
+    backgroundColor: "rgba(255,255,255,0.055)",
+  },
+  runnerExerciseChipActive: { backgroundColor: "rgba(182,255,63,0.12)", borderColor: "rgba(182,255,63,0.28)" },
+  runnerExerciseChipDone: { backgroundColor: "rgba(74,222,128,0.11)" },
+  runnerExerciseChipIndex: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(255,255,255,0.08)",
+  },
+  runnerExerciseChipIndexDone: { backgroundColor: colors.primaryLight },
+  runnerExerciseChipIndexText: { color: colors.textSecondary, fontSize: 11, fontWeight: "900" },
+  runnerExerciseChipText: { flex: 1, color: colors.textSecondary, fontSize: 11.5, fontWeight: "800" },
+  runnerExerciseChipTextActive: { color: colors.textMain },
+  runnerSeriesCard: { gap: spacing.md, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: GLASS },
+  runnerPanelHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  runnerSeriesTitle: { color: colors.textMain, fontSize: 15, fontWeight: "900" },
+  runnerSeriesSub: { color: colors.textMuted, fontSize: 11, fontWeight: "800", marginTop: 3 },
+  runnerAdvicePill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 7, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.08)" },
+  runnerAdviceText: { color: colors.primaryLight, fontSize: 10.5, fontWeight: "900" },
+  runnerParamGrid: { flexDirection: "row", gap: spacing.sm },
+  runnerParamCard: { flex: 1, minHeight: 124, alignItems: "center", justifyContent: "space-between", padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.11)", backgroundColor: "rgba(255,255,255,0.055)" },
+  runnerParamInput: { minWidth: 0, color: colors.textMain, fontSize: 26, lineHeight: 30, fontWeight: "900", paddingVertical: 0, textAlign: "center" },
+  runnerParamLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "900" },
+  runnerParamUnit: { color: colors.textMuted, fontSize: 11, fontWeight: "900", marginBottom: 4 },
+  runnerWeightLine: { width: "100%", flexDirection: "row", alignItems: "flex-end", justifyContent: "center", gap: 3 },
+  runnerWeightInput: { width: 66, color: colors.textMain, fontSize: 25, lineHeight: 30, fontWeight: "900", paddingVertical: 0, textAlign: "center" },
+  runnerTinyStepper: { flexDirection: "row", gap: 6 },
+  runnerTinyStepButton: { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.06)" },
+  runnerModifyPill: { flexDirection: "row", alignItems: "center", gap: 3, paddingHorizontal: 7, paddingVertical: 4, borderRadius: radius.full, backgroundColor: "rgba(182,255,63,0.08)" },
+  runnerModifyText: { color: colors.primaryLight, fontSize: 9.5, fontWeight: "900" },
+  runnerFields: { flexDirection: "row", gap: spacing.sm },
+  runnerField: { flex: 1 },
+  runnerFieldLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "900", textTransform: "uppercase", marginBottom: 5 },
+  runnerInputWrap: { minHeight: 58, flexDirection: "row", alignItems: "center", borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.07)", paddingHorizontal: spacing.sm },
+  runnerInput: { flex: 1, color: colors.textMain, fontSize: 25, fontWeight: "900", paddingVertical: 8, minWidth: 0 },
+  runnerSuffix: { color: colors.textMuted, fontSize: 12, fontWeight: "900" },
+  runnerRestPrRow: { flexDirection: "row", gap: spacing.sm, alignItems: "stretch" },
+  runnerRestPanel: { flex: 1, gap: spacing.sm, alignItems: "center", padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.045)" },
+  runnerRestHeader: { width: "100%", flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 5 },
+  runnerRestTitle: { flex: 1, color: colors.textMain, fontSize: 11.5, fontWeight: "900" },
+  runnerRestModify: { color: colors.primaryLight, fontSize: 10, fontWeight: "900" },
+  runnerRestCircle: { width: 112, height: 112, borderRadius: 56, borderWidth: 4, borderColor: colors.primaryLight, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(2,18,12,0.62)" },
+  runnerRestTime: { color: colors.textMain, fontSize: 25, lineHeight: 30, fontWeight: "900", textAlign: "center", padding: 0 },
+  runnerRestControls: { flexDirection: "row", gap: 8, marginTop: 4 },
+  runnerRestButton: { width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: GLASS_BORDER },
+  runnerRestPlayButton: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: "rgba(255,255,255,0.28)" },
+  runnerRestHint: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700", textAlign: "center" },
+  runnerPrCheckCard: { flex: 1.08, gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.055)" },
+  runnerPrCheckCardOn: { borderColor: colors.primaryLight, backgroundColor: "rgba(182,255,63,0.10)" },
+  runnerPrIconLine: { flexDirection: "row", alignItems: "center", gap: 6 },
+  runnerPrCheckbox: { width: 24, height: 24, borderRadius: 7, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.borderBright, backgroundColor: "rgba(0,0,0,0.18)" },
+  runnerPrCheckboxOn: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
+  runnerPrCheckTitle: { flex: 1, color: colors.textMain, fontSize: 12.5, fontWeight: "900" },
+  runnerPrCheckText: { color: colors.textMuted, fontSize: 11, lineHeight: 15, fontWeight: "700" },
+  runnerAiAdviceBox: { flexDirection: "row", gap: 5, padding: 7, borderRadius: radius.sm, backgroundColor: "rgba(255,179,63,0.10)", borderWidth: 1, borderColor: "rgba(255,179,63,0.18)" },
+  runnerAiAdviceText: { flex: 1, color: colors.textSecondary, fontSize: 10.5, lineHeight: 14, fontWeight: "700" },
+  runnerBottomAction: { gap: spacing.sm },
+  runnerNextTextButton: { alignSelf: "center", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, paddingVertical: 4 },
+  runnerNextText: { color: colors.primaryLight, fontSize: 11.5, fontWeight: "900" },
+  runnerNavRow: { flexDirection: "row", gap: spacing.sm },
+  runnerNavButton: { flex: 1, minHeight: 42, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, borderRadius: radius.full, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.06)" },
+  runnerNavText: { color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
+  sessionDoneCard: { marginHorizontal: spacing.lg, padding: spacing.lg, borderRadius: radius.lg, borderWidth: 1, borderColor: colors.borderBright, backgroundColor: "rgba(5,18,12,0.98)", alignItems: "center", gap: spacing.md },
+  doneCheck: { width: 86, height: 86, borderRadius: 43, alignItems: "center", justifyContent: "center", borderWidth: 5, borderColor: colors.primaryLight, backgroundColor: "rgba(182,255,63,0.08)" },
+  doneTitle: { color: colors.textMain, fontSize: 25, fontWeight: "900", textAlign: "center" },
+  doneSubtitle: { color: colors.textSecondary, fontSize: 13, fontWeight: "700", marginTop: -spacing.sm },
+  doneMetricGrid: { width: "100%", flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  doneMetric: { width: "47.5%", minHeight: 82, alignItems: "center", justifyContent: "center", borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.055)", padding: spacing.sm },
+  doneMetricValue: { color: colors.textMain, fontSize: 14, fontWeight: "900", marginTop: 4 },
+  doneMetricLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "800", marginTop: 2, textAlign: "center" },
+  doneXpBox: { width: "100%", minHeight: 58, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.primaryLight, backgroundColor: "rgba(182,255,63,0.09)" },
+  doneXpText: { color: colors.primaryLight, fontSize: 21, fontWeight: "900" },
   // Calendar
   calWrap: { backgroundColor: GLASS, borderRadius: radius.lg, padding: spacing.md, borderWidth: 1, borderColor: GLASS_BORDER },
   calHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.sm },
@@ -1569,6 +2561,28 @@ const styles = StyleSheet.create({
   legendItem: { flexDirection: "row", alignItems: "center", gap: 4 },
   legendDot: { width: 10, height: 10, borderRadius: 5 },
   // Program
+  weekChecklistTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
+  weekChecklistEyebrow: { color: colors.primaryLight, fontSize: 11, fontWeight: "900", textTransform: "uppercase" },
+  weekChecklistTitle: { color: colors.textMain, fontSize: 19, fontWeight: "900", marginTop: 2 },
+  weekChecklistText: { color: colors.textSecondary, fontSize: 12, fontWeight: "700", marginTop: 2 },
+  weekChecklistCircle: { width: 86, height: 86, borderRadius: 43, borderWidth: 8, borderColor: colors.primaryLight, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(2,18,12,0.58)" },
+  weekChecklistCircleValue: { color: colors.textMain, fontSize: 20, fontWeight: "900" },
+  weekChecklistCircleLabel: { color: colors.textMuted, fontSize: 9.5, fontWeight: "800", marginTop: -1 },
+  weekWorkoutDots: { flexDirection: "row", gap: spacing.sm, flexWrap: "wrap" },
+  weekWorkoutDotWrap: { width: "30.8%", minHeight: 82, alignItems: "center", justifyContent: "center", gap: 5, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.055)", padding: spacing.sm },
+  weekWorkoutDot: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.borderBright, backgroundColor: "rgba(0,0,0,0.18)" },
+  weekWorkoutDotDone: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
+  weekWorkoutDotLabel: { color: colors.textSecondary, fontSize: 10, fontWeight: "800", textAlign: "center", width: "100%" },
+  weekObjectiveBox: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(182,255,63,0.24)", backgroundColor: "rgba(182,255,63,0.08)" },
+  weekObjectiveLabel: { color: colors.primaryLight, fontSize: 10.5, fontWeight: "900", textTransform: "uppercase" },
+  weekObjectiveText: { color: colors.textMain, fontSize: 15, fontWeight: "900", marginTop: 2 },
+  programWeekScroller: { gap: 8, paddingVertical: spacing.sm, paddingRight: spacing.lg },
+  programWeekDot: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.16)", backgroundColor: "rgba(255,255,255,0.05)" },
+  programWeekDotDone: { backgroundColor: "rgba(182,255,63,0.12)", borderColor: "rgba(182,255,63,0.24)" },
+  programWeekDotCurrent: { borderColor: colors.primaryLight },
+  programWeekDotSelected: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
+  programWeekDotText: { color: colors.textMuted, fontSize: 12, fontWeight: "900" },
+  programWeekDotTextOn: { color: "#102108" },
   progressBar: { height: 4, backgroundColor: "rgba(255,255,255,0.1)", borderRadius: 2, overflow: "hidden", marginTop: spacing.sm },
   progressFill: { height: "100%", backgroundColor: colors.primary, borderRadius: 2 },
   timelineRow: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginTop: spacing.md },
@@ -1623,7 +2637,15 @@ const styles = StyleSheet.create({
   programDayRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.06)", borderWidth: 1, borderColor: GLASS_BORDER },
   programDayNum: { width: 32, height: 32, alignItems: "center", justifyContent: "center", borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.18)" },
   actionBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 8, borderRadius: radius.full, borderWidth: 1, borderColor: colors.primaryLight, backgroundColor: "rgba(74,222,128,0.15)" },
+  programBottomActions: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  programBottomTitle: { color: colors.textMain, fontSize: 14, fontWeight: "900" },
+  programBottomText: { color: colors.textMuted, fontSize: 11.5, fontWeight: "700", marginTop: 3 },
+  programBottomButtonRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, justifyContent: "flex-end", maxWidth: 210 },
+  programBottomButton: { minHeight: 36 },
   // Setup modal
+  goalUpdateIntro: { marginTop: spacing.md, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.08)" },
+  goalUpdateTitle: { color: colors.textMain, fontSize: 15, fontWeight: "900" },
+  goalUpdateText: { color: colors.textSecondary, fontSize: 12, fontWeight: "700", lineHeight: 18, marginTop: 5 },
   setupOptionRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
   setupOption: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: GLASS_BORDER, flex: 1, minWidth: 90, alignItems: "center" },
   setupOptionOn: { backgroundColor: "rgba(74,222,128,0.18)", borderColor: colors.primaryLight },
@@ -1689,13 +2711,113 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(4,14,9,0.72)",
   },
   challengeRingValue: { color: colors.textMain, fontSize: 14, fontWeight: "900" },
+  todayWorkoutCard: { gap: spacing.md, padding: spacing.md, borderColor: "rgba(255,255,255,0.13)", backgroundColor: "rgba(6,21,14,0.62)" },
+  todayCardHeader: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+  todayCardEyebrow: { color: colors.textMain, fontSize: 17, fontWeight: "900" },
+  todayCardStatus: { color: colors.textMuted, fontSize: 12, fontWeight: "700", marginTop: 2 },
+  todayCheckButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: colors.borderBright,
+    backgroundColor: "rgba(182,255,63,0.08)",
+  },
+  todayCheckButtonDone: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
+  todayMainRow: { flexDirection: "row", gap: spacing.md, alignItems: "center" },
+  todayThumb: { width: 106, height: 96, borderRadius: radius.md, overflow: "hidden", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
+  todayThumbImage: { borderRadius: radius.md, opacity: 0.92 },
+  todayThumbShade: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(2,14,8,0.20)" },
+  todayMetaRow: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 5 },
+  todayMetaText: { color: colors.textMuted, fontSize: 11.5, fontWeight: "800" },
+  todayDot: { color: colors.textMuted, fontSize: 12, fontWeight: "900" },
+  todayCardTitle: { color: colors.textMain, fontSize: 18, lineHeight: 22, fontWeight: "900" },
+  todayCardSub: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, fontWeight: "700", marginTop: 4 },
+  todaySmallPill: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5, marginTop: 9, paddingHorizontal: 9, paddingVertical: 5, borderRadius: radius.full, backgroundColor: "rgba(182,255,63,0.10)", borderWidth: 1, borderColor: "rgba(182,255,63,0.22)" },
+  todaySmallPillText: { color: colors.primaryLight, fontSize: 10.5, fontWeight: "900" },
+  profileCompanionRow: { flexDirection: "row", gap: spacing.sm },
+  companionTile: { flex: 1, minHeight: 76, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.055)", padding: spacing.sm },
+  companionVisual: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", overflow: "hidden", backgroundColor: "rgba(182,255,63,0.09)", borderWidth: 1, borderColor: "rgba(182,255,63,0.20)" },
+  companionLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "900", textTransform: "uppercase" },
+  companionValue: { color: colors.textMain, fontSize: 12.5, fontWeight: "900", marginTop: 2 },
+  todayExerciseRail: { gap: spacing.sm, paddingRight: spacing.lg },
+  todayExerciseMiniCard: { width: 122, minHeight: 132, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.055)", padding: 8 },
+  todayExerciseMiniImage: { height: 58, borderRadius: radius.sm, overflow: "hidden", justifyContent: "flex-end", padding: 6, marginBottom: 8 },
+  todayExerciseMiniImageInner: { borderRadius: radius.sm },
+  todayExerciseMiniShade: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(2,12,8,0.28)" },
+  todayExerciseMiniIndex: { color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
+  todayExerciseMiniName: { color: colors.textMain, fontSize: 12, fontWeight: "900" },
+  todayExerciseMiniMeta: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700", marginTop: 3 },
+  todayActionRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  startTodayButton: { flex: 1, minHeight: 44, borderRadius: radius.full, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 7, shadowColor: colors.primaryLight, shadowOpacity: 0.28, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 4 },
+  startTodayText: { color: "#102108", fontSize: 13, fontWeight: "900" },
+  todayEditIconButton: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.06)" },
+  plannedExerciseList: { gap: 7, paddingTop: spacing.xs },
+  plannedExerciseHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
+  plannedExerciseTitle: { color: colors.textMain, fontSize: 14, fontWeight: "900" },
+  plannedExerciseCount: { color: colors.textMuted, fontSize: 11, fontWeight: "800" },
+  plannedExerciseRow: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: 7, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.055)" },
+  plannedExerciseThumb: { width: 48, height: 44, borderRadius: radius.sm, overflow: "hidden", justifyContent: "flex-end", padding: 5 },
+  plannedExerciseThumbImage: { borderRadius: radius.sm },
+  plannedExerciseShade: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(1,12,8,0.24)" },
+  plannedExerciseIndex: { color: colors.primaryLight, fontSize: 11, fontWeight: "900" },
+  plannedExerciseName: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
+  plannedExerciseMeta: { color: colors.textMuted, fontSize: 11, fontWeight: "700", marginTop: 3 },
+  mobilityCard: { minHeight: 62, flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", backgroundColor: "rgba(6,21,14,0.48)" },
+  mobilityIcon: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(182,255,63,0.10)", borderWidth: 1, borderColor: "rgba(182,255,63,0.22)" },
+  mobilityTitle: { color: colors.textMain, fontSize: 13.5, fontWeight: "900" },
+  mobilityText: { color: colors.textMuted, fontSize: 11.5, fontWeight: "700", marginTop: 2 },
+  optionalPill: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(255,255,255,0.16)", backgroundColor: "rgba(255,255,255,0.06)" },
+  optionalPillText: { color: colors.textSecondary, fontSize: 10.5, fontWeight: "800" },
+  lowerFeatureBlock: { gap: spacing.sm },
+  lowerFeatureHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
+  lowerFeatureTitle: { color: colors.textMain, fontSize: 16, fontWeight: "900" },
+  lowerFeatureAction: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 9, paddingVertical: 6, borderRadius: radius.full, backgroundColor: "rgba(182,255,63,0.10)", borderWidth: 1, borderColor: "rgba(182,255,63,0.18)" },
+  lowerFeatureActionText: { color: colors.primaryLight, fontSize: 11, fontWeight: "900" },
+  programSection: { gap: spacing.sm },
+  programSectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
+  programSectionTitle: { color: colors.textMain, fontSize: 17, fontWeight: "900" },
+  programSectionHint: { flex: 1, color: colors.textMuted, fontSize: 11, fontWeight: "700", textAlign: "right" },
+  refaireButton: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 9, paddingVertical: 6, borderRadius: radius.full, backgroundColor: "rgba(182,255,63,0.10)", borderWidth: 1, borderColor: "rgba(182,255,63,0.18)" },
+  refaireText: { color: colors.primaryLight, fontSize: 11, fontWeight: "900" },
+  programJourneyCard: { gap: spacing.md, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1, borderColor: "rgba(255,255,255,0.13)", backgroundColor: "rgba(6,21,14,0.56)" },
+  programJourneyTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },
+  programJourneyStatusRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  programJourneyWeek: { color: colors.textMain, fontSize: 14, fontWeight: "900" },
+  programJourneyStatusPill: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: radius.full, backgroundColor: "rgba(182,255,63,0.13)", borderWidth: 1, borderColor: "rgba(182,255,63,0.22)" },
+  programJourneyStatusText: { color: colors.primaryLight, fontSize: 8.5, fontWeight: "900" },
+  programJourneyMeta: { color: colors.textMuted, fontSize: 11.5, fontWeight: "700", marginTop: 4 },
+  programJourneyPlanPill: { paddingHorizontal: 9, paddingVertical: 6, borderRadius: radius.full, borderWidth: 1 },
+  programJourneyPlanText: { fontSize: 10.5, fontWeight: "900", textTransform: "uppercase" },
+  programPhaseStack: { gap: 7 },
+  programPhaseRow: { minHeight: 50, flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.045)" },
+  programPhaseRowActive: { borderColor: "rgba(182,255,63,0.24)", backgroundColor: "rgba(182,255,63,0.07)" },
+  programPhaseAccent: { width: 4, alignSelf: "stretch", borderRadius: 2 },
+  programPhaseTitle: { color: colors.textMain, fontSize: 12.5, fontWeight: "900" },
+  programPhaseDetail: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700", marginTop: 2 },
+  programPhaseBars: { width: 38, height: 28, flexDirection: "row", alignItems: "flex-end", justifyContent: "flex-end", gap: 3 },
+  programPhaseBar: { width: 4, borderRadius: 3 },
+  programDayStack: { gap: 7 },
+  programJourneyDay: { minHeight: 58, flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.055)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
+  programJourneyDayActive: { backgroundColor: "rgba(182,255,63,0.09)", borderColor: "rgba(182,255,63,0.22)" },
+  programJourneyDayBadge: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.08)" },
+  programJourneyDayBadgeActive: { backgroundColor: colors.primary },
+  programJourneyDayBadgeText: { color: colors.textSecondary, fontSize: 12, fontWeight: "900" },
+  programJourneyDayBadgeTextActive: { color: "#102108" },
+  programJourneyDayTop: { flexDirection: "row", alignItems: "center", gap: 7 },
+  programJourneyDayTitle: { flex: 1, color: colors.textMain, fontSize: 13.5, fontWeight: "900" },
+  programJourneyDayText: { color: colors.textMuted, fontSize: 11.5, fontWeight: "700", marginTop: 3 },
+  todayTag: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: radius.full, backgroundColor: "rgba(182,255,63,0.12)", borderWidth: 1, borderColor: "rgba(182,255,63,0.22)" },
+  todayTagText: { color: colors.primaryLight, fontSize: 9.5, fontWeight: "900" },
   todayVisualWrap: {
     minHeight: 318,
     borderRadius: radius.lg,
     overflow: "hidden",
     marginBottom: spacing.md,
     borderWidth: 1,
-    borderColor: "rgba(182,255,63,0.28)",
+    borderColor: GLASS_BORDER,
     backgroundColor: "rgba(4,18,12,0.82)",
   },
   todayVisualImage: { opacity: 0.9, transform: [{ scale: 1.05 }] },
@@ -1840,6 +2962,16 @@ const styles = StyleSheet.create({
 
 // ----- Helpers / sub-components -----
 
+function DoneMetric({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
+  return (
+    <View style={styles.doneMetric}>
+      <Ionicons name={icon} size={16} color={colors.primaryLight} />
+      <Text style={styles.doneMetricValue}>{value}</Text>
+      <Text style={styles.doneMetricLabel}>{label}</Text>
+    </View>
+  );
+}
+
 function addMonths(d: Date, n: number) {
   const out = new Date(d);
   out.setMonth(out.getMonth() + n);
@@ -1864,110 +2996,79 @@ function SessionLegend() {
   );
 }
 
-function ProgramSummaryCard({
+function ProgramWeekSelector({
+  weeksTotal,
+  currentWeek,
+  selectedWeek,
+  onSelect,
+}: {
+  weeksTotal: number;
+  currentWeek: number;
+  selectedWeek: number;
+  onSelect: (week: number) => void;
+}) {
+  const count = Math.max(1, Math.min(24, weeksTotal || 1));
+  return (
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      contentContainerStyle={styles.programWeekScroller}
+      testID="program-week-selector"
+    >
+      {Array.from({ length: count }).map((_, index) => {
+        const week = index + 1;
+        const active = week === selectedWeek;
+        const current = week === currentWeek;
+        const done = week < currentWeek;
+        return (
+          <TouchableOpacity
+            key={week}
+            onPress={() => onSelect(week)}
+            style={[styles.programWeekDot, done && styles.programWeekDotDone, current && styles.programWeekDotCurrent, active && styles.programWeekDotSelected]}
+            testID={`program-week-dot-${week}`}
+          >
+            <Text style={[styles.programWeekDotText, (active || current) && styles.programWeekDotTextOn]}>{week}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </ScrollView>
+  );
+}
+
+function ProgramActionsFooter({
   program, onCreate, onTravel, onEndTravel, travelBusy,
 }: {
-  program: TrainingProgram | null;
+  program: TrainingProgram;
   onCreate: () => void;
   onTravel?: () => void;
   onEndTravel?: () => void;
   travelBusy?: boolean;
 }) {
-  if (!program) {
-    return (
-      <Card testID="program-summary-empty">
-        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-          <View style={[styles.focusBadge, { backgroundColor: colors.primaryPale }]}>
-            <Ionicons name="rocket-outline" size={20} color={colors.primary} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[typography.body, { fontWeight: "700" }]}>Objectif & programme</Text>
-            <Text style={typography.small}>Aucun programme défini. Crée le tien en 30s.</Text>
-          </View>
-          <TouchableOpacity onPress={onCreate} style={[styles.editBtn, { borderColor: colors.primary }]} testID="summary-create">
-            <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Créer</Text>
-          </TouchableOpacity>
-        </View>
-      </Card>
-    );
-  }
   const isTravel = (program as any).is_travel === true;
   return (
-    <Card testID="program-summary-card" style={{ borderColor: isTravel ? "#A85B0F" : colors.primary, borderWidth: 1.5, overflow: "hidden" }}>
-      <View style={styles.programNatureBand}>
-        <View style={styles.programSun} />
-        <View style={styles.programMountainBack} />
-        <View style={styles.programMountainFront} />
-        <View style={styles.programTrail} />
-        <View style={styles.programHiker}>
-          <Ionicons name="walk" size={18} color="#13230A" />
-        </View>
+    <Card testID="program-bottom-actions" style={styles.programBottomActions}>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.programBottomTitle}>Ajuster ton parcours</Text>
+        <Text style={styles.programBottomText}>Objectif, rythme ou déplacement temporaire.</Text>
       </View>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-        <View style={[styles.focusBadge, { backgroundColor: isTravel ? "#FCE3CB" : colors.primaryPale }]}>
-          <Ionicons name={isTravel ? "airplane" : "rocket"} size={20} color={isTravel ? "#A85B0F" : colors.primary} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[typography.caption, { color: isTravel ? "#A85B0F" : colors.primary, fontWeight: "700" }]}>
-            {isTravel ? "Mode déplacement actif" : "Objectif & programme"}
-          </Text>
-          <Text style={[typography.body, { fontWeight: "700" }]}>{program.goal_label} · {program.split.toUpperCase()} {program.frequency}j</Text>
-          <Text style={[typography.small, { marginTop: 2 }]}>
-            Semaine <Text style={{ fontWeight: "800", color: colors.primary }}>{program.current_week}/{program.weeks_total}</Text>
-          </Text>
-        </View>
-      </View>
-      <View style={styles.progressBar}>
-        <View style={[styles.progressFill, { width: `${Math.min(100, (program.current_week / program.weeks_total) * 100)}%`, backgroundColor: isTravel ? "#A85B0F" : colors.primary }]} />
-      </View>
-      <View style={styles.timelineRow}>
-        {Array.from({ length: program.weeks_total }).map((_, index) => {
-          const weekIndex = index + 1;
-          const active = weekIndex === program.current_week;
-          const done = weekIndex < program.current_week;
-          return (
-            <View
-              key={`timeline-${weekIndex}`}
-              style={[
-                styles.timelineDot,
-                done && styles.timelineDotDone,
-                active && styles.timelineDotActive,
-              ]}
-            >
-              <Text style={[styles.timelineDotText, active && styles.timelineDotTextActive]}>{weekIndex}</Text>
-            </View>
-          );
-        })}
-      </View>
-      <View style={styles.referenceMetricRow}>
-        <ReferenceMetric label="Phase" value={phaseForWeek(program.weeks_total, program.current_week)} />
-        <ReferenceMetric label="Rythme" value={`${program.frequency} séances`} />
-        <ReferenceMetric label="Plan" value={program.split.toUpperCase()} />
-      </View>
-      <View style={styles.phasePreviewStack}>
-        <PhasePreview label="Volume" weeks="Sem. 1 à 4" accent={colors.primaryLight} />
-        <PhasePreview label="Force" weeks="Sem. 5 à 8" accent={colors.aqua} />
-        <PhasePreview label="Consolidation" weeks="Sem. 9 à 12" accent={colors.amber} />
-      </View>
-      {/* Action buttons */}
-      <View style={{ flexDirection: "row", gap: 6, marginTop: spacing.sm, flexWrap: "wrap" }}>
+      <View style={styles.programBottomButtonRow}>
         {isTravel ? (
           <TouchableOpacity
             onPress={onEndTravel}
             disabled={travelBusy}
-            style={[styles.actionBtn, { borderColor: "#A85B0F", flex: 1 }, travelBusy && { opacity: 0.5 }]}
+            style={[styles.actionBtn, styles.programBottomButton, { borderColor: "#A85B0F" }, travelBusy && { opacity: 0.5 }]}
             testID="summary-end-travel"
           >
             <Ionicons name="arrow-undo" size={14} color="#A85B0F" />
-            <Text style={[typography.small, { color: "#A85B0F", fontWeight: "700" }]}>Reprendre mon programme</Text>
+            <Text style={[typography.small, { color: "#A85B0F", fontWeight: "700" }]}>Reprendre</Text>
           </TouchableOpacity>
         ) : (
           <>
-            <TouchableOpacity onPress={onCreate} style={styles.actionBtn} testID="summary-new-goals">
+            <TouchableOpacity onPress={onCreate} style={[styles.actionBtn, styles.programBottomButton]} testID="summary-new-goals">
               <Ionicons name="refresh" size={14} color={colors.primary} />
               <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Nouveaux objectifs</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={onTravel} style={styles.actionBtn} testID="summary-travel">
+            <TouchableOpacity onPress={onTravel} style={[styles.actionBtn, styles.programBottomButton]} testID="summary-travel">
               <Ionicons name="airplane-outline" size={14} color={colors.primary} />
               <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Déplacement</Text>
             </TouchableOpacity>
@@ -1978,362 +3079,70 @@ function ProgramSummaryCard({
   );
 }
 
-function RewardsRail({
-  streakDays,
-  weeklyChallengeProgress,
-  chestReady,
-}: {
-  streakDays: number;
-  weeklyChallengeProgress: number;
-  chestReady: boolean;
-}) {
-  return (
-    <Card testID="rewards-rail-card" style={{ gap: spacing.md }}>
-      <View style={styles.rewardHeader}>
-        <View>
-          <Text style={styles.rewardEyebrow}>GAMIFICATION PREMIUM</Text>
-          <Text style={[typography.h3, { marginTop: 2 }]}>Chaque séance nourrit ta progression.</Text>
-        </View>
-        <View style={styles.rewardCrown}>
-          <Ionicons name="trophy" size={18} color={colors.primaryLight} />
-        </View>
-      </View>
-      <View style={styles.rewardGrid}>
-        <RewardTile icon="flame" label="Streak" value={`${streakDays} j`} />
-        <RewardTile icon="ribbon" label="Badge proche" value="7 jours" />
-        <RewardTile icon="gift" label="Coffre" value={chestReady ? "Disponible" : "En cours"} />
-      </View>
-      <View style={styles.challengeBox}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.challengeTitle}>Défi hebdomadaire</Text>
-          <Text style={styles.challengeText}>Termine ton rythme prévu pour débloquer un coffre surprise, des XP et un bonus de motivation.</Text>
-        </View>
-        <View style={styles.challengeRing}>
-          <Text style={styles.challengeRingValue}>{weeklyChallengeProgress}%</Text>
-        </View>
-      </View>
-    </Card>
-  );
-}
-
-function TrainingPulseCard({ program }: { program: TrainingProgram | null }) {
-  const preset = presetByGoal(program?.goal_label);
-  const currentWeek = program?.current_week || 1;
-  const totalWeeks = program?.weeks_total || preset.defaultWeeks;
-  const completion = Math.min(100, Math.round((currentWeek / Math.max(1, totalWeeks)) * 100));
-  return (
-    <Card testID="training-pulse-card" style={{ gap: spacing.md }}>
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md }}>
-        <View style={{ flex: 1 }}>
-          <Text style={[typography.caption, { color: colors.primaryLight, fontWeight: "900" }]}>AVENTURE FIT AI</Text>
-          <Text style={[typography.h3, { marginTop: 3 }]}>Ton plan s&apos;adapte à toi, pas l&apos;inverse.</Text>
-        </View>
-        <View style={styles.xpRing}>
-          <Text style={styles.xpValue}>+80</Text>
-          <Text style={styles.xpLabel}>XP</Text>
-        </View>
-      </View>
-      <View style={styles.pulseGrid}>
-        <PulseStat icon="flame-outline" label="Streak" value="1 j" />
-        <PulseStat icon="trophy-outline" label="Badge proche" value="7 j" />
-        <PulseStat icon="analytics-outline" label="Cycle" value={`${completion}%`} />
-      </View>
-      <View style={styles.aiCoachBox}>
-        <Ionicons name="sparkles-outline" size={16} color={colors.primaryLight} />
-        <Text style={styles.aiCoachText}>{weeklyAiAdvice(program?.weeks?.find((w) => w.week_index === currentWeek)?.session_type, currentWeek)}</Text>
-      </View>
-    </Card>
-  );
-}
-
-function PulseStat({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
-  return (
-    <View style={styles.pulseStat}>
-      <Ionicons name={icon} size={16} color={colors.primaryLight} />
-      <Text style={styles.pulseValue}>{value}</Text>
-      <Text style={styles.pulseLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function RewardTile({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
-  return (
-    <View style={styles.rewardTile}>
-      <Ionicons name={icon} size={18} color={colors.primaryLight} />
-      <Text style={styles.rewardValue}>{value}</Text>
-      <Text style={styles.rewardLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function ExerciseSessionCard({
-  exercise,
-  index,
-  recommended,
-  points,
-  earnedPoints,
-  visual,
-  onPress,
-  testID,
-}: {
-  exercise: Exercise;
-  index: number;
-  recommended: boolean;
-  points: number;
-  earnedPoints: number;
-  visual: ImageSourcePropType;
-  onPress: () => void;
-  testID: string;
-}) {
-  const completed = earnedPoints > 0;
-  const progress = completed ? 100 : Math.min(86, 28 + index * 11);
-  return (
-    <TouchableOpacity
-      style={[styles.exerciseLuxuryCard, completed && styles.exerciseLuxuryCardDone]}
-      onPress={onPress}
-      testID={testID}
-      activeOpacity={0.82}
-    >
-      <ImageBackground source={visual} style={styles.exerciseThumb} imageStyle={styles.exerciseThumbImage} resizeMode="cover">
-        <View style={styles.exerciseThumbShade} />
-        <View style={[styles.exerciseNumLuxury, recommended && styles.exerciseNumReco]}>
-          <Text style={styles.exerciseNumLuxuryText}>{index + 1}</Text>
-        </View>
-      </ImageBackground>
-
-      <View style={styles.exerciseLuxuryBody}>
-        <View style={styles.exerciseLuxuryHeader}>
-          <View style={{ flex: 1 }}>
-            <View style={styles.exerciseNameRow}>
-              <Text style={styles.exerciseLuxuryName} numberOfLines={1}>{exercise.name}</Text>
-              {recommended ? (
-                <View style={styles.recoBadge}>
-                  <Ionicons name="flame" size={9} color="#F87171" />
-                  <Text style={styles.recoBadgeTxt}>IA</Text>
-                </View>
-              ) : null}
-            </View>
-            <Text style={styles.exerciseLuxuryMeta}>{exercise.sets} séries · {exercise.reps} reps · {exercise.rest_s}s repos</Text>
-          </View>
-          <View style={[styles.exercisePointPill, completed && styles.exercisePointPillDone]}>
-            <Ionicons name={completed ? "checkmark" : "star"} size={12} color={completed ? "#081207" : colors.primaryLight} />
-            <Text style={[styles.exercisePointText, completed && styles.exercisePointTextDone]}>
-              {completed ? `+${earnedPoints}` : `+${points}`}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.exerciseMicroStats}>
-          <View style={styles.exerciseMicroStat}>
-            <Text style={styles.exerciseMicroValue}>{exercise.sets}</Text>
-            <Text style={styles.exerciseMicroLabel}>séries</Text>
-          </View>
-          <View style={styles.exerciseMicroStat}>
-            <Text style={styles.exerciseMicroValue}>{exercise.reps}</Text>
-            <Text style={styles.exerciseMicroLabel}>cible</Text>
-          </View>
-          <View style={styles.exerciseMicroStat}>
-            <Text style={styles.exerciseMicroValue}>{Math.round(exercise.rest_s / 15) * 15}s</Text>
-            <Text style={styles.exerciseMicroLabel}>repos</Text>
-          </View>
-        </View>
-
-        <View style={styles.exerciseLuxuryProgress}>
-          <View style={[styles.exerciseLuxuryProgressFill, { width: `${progress}%` }]} />
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-}
-
-function SessionPerformanceGraph({
-  completed,
-  total,
-  earnedPoints,
-}: {
-  completed: boolean;
-  total: number;
-  earnedPoints: number;
-}) {
-  const done = completed ? total : Math.min(total, Math.max(1, Math.round(total * 0.42)));
-  const ratio = total > 0 ? Math.round((done / total) * 100) : 0;
-  return (
-    <View style={styles.sessionGraphPanel}>
-      <View style={styles.sessionGraphRing}>
-        <Text style={styles.sessionGraphRingValue}>{done}/{Math.max(1, total)}</Text>
-        <Text style={styles.sessionGraphRingLabel}>exercices</Text>
-      </View>
-      <View style={{ flex: 1, gap: 8 }}>
-        <View style={styles.sessionGraphTopLine}>
-          <View>
-            <Text style={styles.sessionGraphTitle}>Suivi de séance</Text>
-            <Text style={styles.sessionGraphText}>{completed ? "Séance complète. Coffre prêt." : "Objectif : valider série par série."}</Text>
-          </View>
-          <View style={styles.sessionGraphXp}>
-            <Ionicons name="sparkles" size={12} color={colors.primaryLight} />
-            <Text style={styles.sessionGraphXpText}>+{earnedPoints || 80} pts</Text>
-          </View>
-        </View>
-        <View style={styles.sessionBars}>
-          {[0.36, 0.62, 0.48, 0.78, 0.56, 0.88].map((height, index) => (
-            <View
-              key={`session-bar-${index}`}
-              style={[
-                styles.sessionBar,
-                {
-                  height: 12 + height * 34,
-                  backgroundColor: index < Math.ceil((ratio / 100) * 6) ? colors.primaryLight : "rgba(255,255,255,0.16)",
-                },
-              ]}
-            />
-          ))}
-        </View>
-      </View>
-    </View>
-  );
-}
-
-function SessionGuideStat({ icon, title, text }: { icon: keyof typeof Ionicons.glyphMap; title: string; text: string }) {
-  return (
-    <View style={styles.sessionGuideStat}>
-      <Ionicons name={icon} size={16} color={colors.primaryLight} />
-      <Text style={styles.sessionGuideTitle}>{title}</Text>
-      <Text style={styles.sessionGuideText}>{text}</Text>
-    </View>
-  );
-}
-
-function PhasePreview({ label, weeks, accent }: { label: string; weeks: string; accent: string }) {
-  return (
-    <View style={styles.phasePreview}>
-      <View style={[styles.phaseAccent, { backgroundColor: accent }]} />
-      <View style={{ flex: 1 }}>
-        <Text style={styles.phasePreviewLabel}>{label}</Text>
-        <Text style={styles.phasePreviewWeeks}>{weeks}</Text>
-      </View>
-      <View style={styles.sparkline}>
-        {[0.25, 0.52, 0.38, 0.72, 0.58].map((height, index) => (
-          <View key={`${label}-${index}`} style={[styles.sparkBar, { height: 8 + height * 20, backgroundColor: accent }]} />
-        ))}
-      </View>
-    </View>
-  );
-}
-
-function ReferenceMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.referenceMetric}>
-      <Text style={styles.referenceMetricValue}>{value}</Text>
-      <Text style={styles.referenceMetricLabel}>{label}</Text>
-    </View>
-  );
-}
-
-function SciencePanel() {
-  return (
-    <Card testID="science-panel" style={{ gap: spacing.sm, marginTop: spacing.md }}>
-      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-        <View style={styles.scienceIcon}>
-          <Ionicons name="flask-outline" size={16} color={colors.aqua} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={[typography.body, { fontWeight: "900" }]}>Basé sur la science</Text>
-          <Text style={typography.small}>Repères courts, sans jargon.</Text>
-        </View>
-      </View>
-      {SCIENCE_NOTES.slice(0, 4).map((note) => (
-        <View key={note} style={styles.scienceRow}>
-          <View style={styles.scienceDot} />
-          <Text style={styles.scienceText}>{note}</Text>
-        </View>
-      ))}
-    </Card>
-  );
-}
-
-function ProgramWeekCard({
-  week, totalWeeks, currentWeek, isExpanded, isCurrent, onToggle, onEditDay,
+function ProgramJourneyCard({
+  week, totalWeeks, currentWeek, isCurrent, selectedDay, onEditDay,
 }: {
   week: ProgramWeek;
   totalWeeks: number;
   currentWeek: number;
-  isExpanded: boolean;
   isCurrent: boolean;
-  onToggle: () => void;
+  selectedDay?: ProgramDay;
   onEditDay: (dayIndex: number) => void;
 }) {
+  const phase = phaseForWeek(totalWeeks, week.week_index);
   const palette = SESSION_COLOR[week.session_type] || SESSION_COLOR.volume;
-  const status = week.week_index < currentWeek ? "Terminée" : isCurrent ? "En cours" : "À venir";
-  const adherence = week.week_index < currentWeek ? 88 : isCurrent ? 68 : 0;
+  const status = week.week_index < currentWeek ? "TERMINÉE" : isCurrent ? "EN COURS" : "À VENIR";
+  const planLabel = week.session_type || "Volume";
+
   return (
-    <Card style={{ marginBottom: 0, borderLeftWidth: 4, borderLeftColor: palette.fg }} testID={`program-week-${week.week_index}`}>
-      <TouchableOpacity onPress={onToggle} activeOpacity={0.7}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
-          <View style={{ flex: 1 }}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <Text style={[typography.body, { fontWeight: "700" }]}>Semaine {week.week_index}</Text>
-              {isCurrent && (
-                <View style={[styles.currentBadge, { backgroundColor: colors.primary }]}>
-                  <Text style={[typography.small, { fontSize: 9, color: "#fff", fontWeight: "800" }]}>EN COURS</Text>
-                </View>
-              )}
+    <View style={styles.programJourneyCard} testID={`program-journey-${week.week_index}`}>
+      <View style={styles.programJourneyTop}>
+        <View>
+          <View style={styles.programJourneyStatusRow}>
+            <Text style={styles.programJourneyWeek}>Semaine {week.week_index}</Text>
+            <View style={styles.programJourneyStatusPill}>
+              <Text style={styles.programJourneyStatusText}>{status}</Text>
             </View>
-            <Text style={typography.small}>
-              {status} · {phaseForWeek(totalWeeks, week.week_index)} · {week.days.length} séances
-            </Text>
           </View>
-          <View style={[styles.weekTypePill, { backgroundColor: palette.bg, borderColor: palette.border }]}>
-            <Text style={{ fontSize: 11, fontWeight: "700", color: palette.fg, textTransform: "uppercase" }}>{week.session_type}</Text>
-          </View>
-          <Ionicons name={isExpanded ? "chevron-up" : "chevron-down"} size={18} color={colors.textMuted} />
+          <Text style={styles.programJourneyMeta}>{phase} · {week.days.length} séances</Text>
         </View>
-      </TouchableOpacity>
-      {isExpanded && (
-        <View style={{ marginTop: spacing.md, gap: 6 }}>
-          <View style={styles.weekMetrics}>
-            <MiniMetric label="Adhérence" value={adherence ? `${adherence}%` : "À venir"} />
-            <MiniMetric label="Charge" value={week.week_index <= currentWeek ? "+2%" : "Planifié"} />
-            <MiniMetric label="Fatigue" value={isCurrent ? "Modérée" : week.week_index < currentWeek ? "OK" : "—"} />
-          </View>
-          <View style={styles.aiCoachBox}>
-            <Ionicons name="sparkles-outline" size={15} color={colors.primaryLight} />
-            <Text style={styles.aiCoachText}>{weeklyAiAdvice(week.session_type, week.week_index)}</Text>
-          </View>
-          {week.days.map((d) => (
+        <View style={[styles.programJourneyPlanPill, { borderColor: palette.border, backgroundColor: "rgba(255,255,255,0.06)" }]}>
+          <Text style={[styles.programJourneyPlanText, { color: palette.fg }]}>{planLabel}</Text>
+        </View>
+      </View>
+
+      <View style={styles.programDayStack}>
+        {week.days.map((d) => {
+          const active = selectedDay?.day_index === d.day_index;
+          return (
             <TouchableOpacity
               key={d.day_index}
               onPress={() => onEditDay(d.day_index)}
-              style={styles.programDayRow}
+              style={[styles.programJourneyDay, active && styles.programJourneyDayActive]}
+              activeOpacity={0.82}
               testID={`program-day-${week.week_index}-${d.day_index}`}
             >
-              <View style={styles.programDayNum}>
-                <Text style={[typography.small, { color: colors.primary, fontWeight: "800" }]}>J{d.day_index + 1}</Text>
+              <View style={[styles.programJourneyDayBadge, active && styles.programJourneyDayBadgeActive]}>
+                <Text style={[styles.programJourneyDayBadgeText, active && styles.programJourneyDayBadgeTextActive]}>J{d.day_index + 1}</Text>
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={[typography.body, { fontWeight: "600" }]}>{d.focus}</Text>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2 }}>
-                  {d.exercises.some((e) => e.is_recommended) && (
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary }} />
+                <View style={styles.programJourneyDayTop}>
+                  <Text style={styles.programJourneyDayTitle} numberOfLines={1}>{d.focus || "Séance"}</Text>
+                  {active && (
+                    <View style={styles.todayTag}>
+                      <Text style={styles.todayTagText}>Aujourd&apos;hui</Text>
+                    </View>
                   )}
-                  <Text style={typography.small} numberOfLines={1}>
-                    {d.exercises.length} ex. · {d.exercises.slice(0, 2).map((e) => e.name.split(" ")[0]).join(", ")}…
-                  </Text>
                 </View>
+                <Text style={styles.programJourneyDayText} numberOfLines={1}>
+                  {d.exercises.length} ex. · {d.exercises.slice(0, 3).map((e) => e.name.split(" ")[0]).join(", ")}
+                </Text>
               </View>
-              <Ionicons name="create-outline" size={16} color={colors.textMuted} />
+              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
             </TouchableOpacity>
-          ))}
-        </View>
-      )}
-    </Card>
-  );
-}
-
-function MiniMetric({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.miniMetric}>
-      <Text style={styles.miniMetricValue}>{value}</Text>
-      <Text style={styles.miniMetricLabel}>{label}</Text>
+          );
+        })}
+      </View>
     </View>
   );
 }

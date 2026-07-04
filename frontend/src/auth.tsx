@@ -137,7 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else {
       redirectUrl = Linking.createURL("auth");
     }
-    const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+    const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}&app_name=${encodeURIComponent("FIT AI")}&name=${encodeURIComponent("FIT AI")}`;
     if (Platform.OS === "web" && typeof window !== "undefined") {
       window.location.href = authUrl;
       return;

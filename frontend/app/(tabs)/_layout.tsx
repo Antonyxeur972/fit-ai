@@ -20,12 +20,13 @@ export default function TabsLayout() {
         router.replace("/login");
         return;
       }
-      if (!user.onboarded) {
+      const subscription = await getSubscriptionState();
+      if (!mounted) return;
+      if (subscription.active) return;
+      if (!user.onboarded || !user.silhouette || !user.mascot) {
         router.replace("/onboarding");
         return;
       }
-      const subscription = await getSubscriptionState();
-      if (!mounted || subscription.active) return;
       const signed = await hasSignedCommitment();
       if (mounted) router.replace(signed ? "/paywall" : "/commitment");
     };
@@ -90,31 +91,15 @@ export default function TabsLayout() {
       <Tabs.Screen
         name="challenges"
         options={{
-          title: "Activités",
-          tabBarIcon: ({ focused }) => (
-            <Ionicons
-              name="add"
-              size={34}
-              color="#071207"
-              style={{
-                width: 52,
-                height: 52,
-                borderRadius: 26,
-                lineHeight: 52,
-                textAlign: "center",
-                marginTop: -20,
-                backgroundColor: focused ? colors.primaryLight : colors.primary,
-                overflow: "hidden",
-              }}
-            />
-          ),
+          title: "Défis",
+          tabBarIcon: ({ color, size }) => <Ionicons name="trophy-outline" size={size} color={color} />,
           tabBarButtonTestID: "tab-challenges",
         }}
       />
       <Tabs.Screen
         name="progress"
         options={{
-          title: "Progression",
+          title: "Suivi",
           tabBarIcon: ({ color, size }) => <Ionicons name="trending-up-outline" size={size} color={color} />,
           tabBarButtonTestID: "tab-progress",
         }}

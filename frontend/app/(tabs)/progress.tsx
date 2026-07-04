@@ -3,12 +3,13 @@ import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, Touchable
 import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { HydrationCard } from "@/src/components/HydrationCard";
+import { SleepCard, readSleepHoursForDate } from "@/src/components/SleepCard";
 import { useFocusEffect } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { api } from "@/src/api";
-import { Card, Button, SectionTitle, WeekBars, LineChart1RM } from "@/src/components/UI";
+import { Card, Button, SectionTitle, WeekBars, LineChart1RM, ProgressRing } from "@/src/components/UI";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type Transfo = {
@@ -36,11 +37,24 @@ type Perf = {
 };
 
 type PerfPayload = { items: Perf[]; personal_bests: Perf[] };
+type Workout = {
+  id: string;
+  date: string;
+  title: string;
+  focus: string;
+  duration_min: number;
+  completed: boolean;
+};
+
+type HistoryWeek = { label: string; sessions: number; duration: number; time: number; sleepAvg: number; sleepLow: boolean };
 
 export default function Progress() {
   const [transfos, setTransfos] = useState<Transfo[]>([]);
   const [week, setWeek] = useState<Week | null>(null);
   const [perf, setPerf] = useState<PerfPayload>({ items: [], personal_bests: [] });
+  const [workouts, setWorkouts] = useState<Workout[]>([]);
+  const [history, setHistory] = useState<Workout[]>([]);
+  const [sleepByDate, setSleepByDate] = useState<Record<string, number>>({});
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   // Phase 5: date picker for the photo
@@ -49,14 +63,18 @@ export default function Progress() {
 
   const load = useCallback(async () => {
     try {
-      const [list, w, p] = await Promise.all([
+      const [list, w, p, wk, hist] = await Promise.all([
         api<Transfo[]>("/transformations"),
         api<Week>("/dashboard/week"),
         api<PerfPayload>("/perf/recent?limit=200"),
+        api<Workout[]>("/workouts/week").catch(() => []),
+        api<Workout[]>("/workouts/history?limit=40").catch(() => []),
       ]);
       setTransfos(list);
       setWeek(w);
       setPerf(p);
+      setWorkouts(wk || []);
+      setHistory(hist || []);
       if (!selectedExercise && p.personal_bests.length > 0) {
         const counts: Record<string, number> = {};
         p.items.forEach((it) => { counts[it.exercise_name] = (counts[it.exercise_name] || 0) + 1; });
@@ -68,7 +86,22 @@ export default function Progress() {
     }
   }, [selectedExercise]);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  const loadSleepHistory = useCallback(async () => {
+    const today = new Date();
+    const entries: [string, number][] = [];
+    for (let offset = 0; offset < 84; offset += 1) {
+      const date = new Date(today);
+      date.setDate(today.getDate() - offset);
+      const iso = date.toISOString().slice(0, 10);
+      entries.push([iso, await readSleepHoursForDate(date)]);
+    }
+    setSleepByDate(Object.fromEntries(entries));
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    load();
+    loadSleepHistory();
+  }, [load, loadSleepHistory]));
 
   const upload = async (fromCamera: boolean) => {
     const perm = fromCamera
@@ -98,11 +131,27 @@ export default function Progress() {
     }
   };
 
+  const toggleWorkout = async (workout: Workout) => {
+    try {
+      await api(`/workouts/${workout.id}/${workout.completed ? "uncomplete" : "complete"}`, { method: "POST" });
+      await load();
+    } catch (e) {
+      console.warn("progress toggle workout", e);
+    }
+  };
+
   const totalWeekSteps = week?.days.reduce((s, d) => s + d.steps, 0) || 0;
   const totalCardioMin = week?.days.reduce((s, d) => s + d.cardio_minutes, 0) || 0;
-  const adherenceScore = week?.days?.length ? Math.min(100, Math.round((week.days.filter((d) => d.consumed > 0).length / week.days.length) * 100)) : 0;
-  const estimatedMuscleGain = Math.max(0.4, Math.min(2.4, perf.personal_bests.length * 0.18));
-  const estimatedFatDelta = transfos.length >= 2 ? -2.1 : -0.6;
+  const totalConsumed = week?.days.reduce((s, d) => s + d.consumed, 0) || 0;
+  const burnedEstimate = Math.round(totalWeekSteps * 0.04 + totalCardioMin * 7 + workouts.filter((w) => w.completed).length * 260);
+  const completedWorkouts = workouts.filter((w) => w.completed).length;
+  const plannedWorkouts = Math.max(workouts.length || 0, 5);
+  const historyWeeks = buildHistoryWeeks(history, sleepByDate);
+  const weekSleepValues = (week?.days || []).map((day) => sleepByDate[day.date] || 0).filter((hours) => hours > 0);
+  const avgWeekSleep = weekSleepValues.length
+    ? weekSleepValues.reduce((sum, hours) => sum + hours, 0) / weekSleepValues.length
+    : 0;
+  const lowWeekSleep = avgWeekSleep > 0 && avgWeekSleep < 6.5;
 
   // 1RM chart data for the selected exercise (chronological order)
   const chartData = useMemo(() => {
@@ -135,9 +184,9 @@ export default function Progress() {
     <ScreenBackground bg="progress">
       <View style={styles.header}>
         <View>
-          <Text style={styles.heroEyebrow}>Progression</Text>
-          <Text style={styles.title}>Ton évolution</Text>
-          <Text style={styles.heroSubtitle}>en un coup d&apos;œil</Text>
+          <Text style={styles.heroEyebrow}>Suivi</Text>
+          <Text style={styles.title}>Ta semaine</Text>
+          <Text style={styles.heroSubtitle}>séances, énergie, progrès</Text>
           <MotivationalScript style={styles.heroScript}>chaque effort laisse une trace.</MotivationalScript>
         </View>
         <View style={styles.heroStats}>
@@ -148,36 +197,33 @@ export default function Progress() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <ProgressCoachHero
-          objective={Math.max(68, adherenceScore)}
-          force={`${trend && trend.pct >= 0 ? "+" : ""}${Math.round(trend?.pct || 12)}%`}
-          muscle={`+${estimatedMuscleGain.toFixed(1)} kg`}
+        <FollowSummaryCard
+          workouts={workouts}
+          completed={completedWorkouts}
+          planned={plannedWorkouts}
+          onCheck={toggleWorkout}
         />
 
-        <Card testID="coach-summary-card" style={{ gap: spacing.md }}>
-          <View style={styles.coachHeader}>
-            <View style={styles.coachAvatar}>
-              <Ionicons name="sparkles" size={18} color={colors.primaryLight} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.coachName}>Coach IA Alex</Text>
-              <Text style={styles.coachLine}>Tu récupères bien. On peut consolider la progression sans forcer inutilement.</Text>
-            </View>
+        <View style={styles.wellnessCompactRow}>
+          <View style={styles.wellnessCompactItem}>
+            <HydrationCard compact />
           </View>
-          <View style={styles.coachRecapGrid}>
-            <CoachMiniMetric label="Adhérence" value={`${adherenceScore}%`} />
-            <CoachMiniMetric label="Graisse estimée" value={`${estimatedFatDelta.toFixed(1)} kg`} />
-            <CoachMiniMetric label="Masse estimée" value={`+${estimatedMuscleGain.toFixed(1)} kg`} />
+          <View style={styles.wellnessCompactItem}>
+            <SleepCard compact />
           </View>
-          <View style={styles.coachRecommendation}>
-            <Ionicons name="trending-up" size={16} color={colors.primaryLight} />
-            <Text style={styles.coachRecommendationText}>
-              Continue les exercices principaux avec une série de plus sur le haut du corps et garde une récupération élevée les jours les plus chargés.
-            </Text>
-          </View>
-        </Card>
+        </View>
 
-        <HydrationCard />
+        <WeeklyFollowRecap
+          steps={totalWeekSteps}
+          consumed={totalConsumed}
+          burned={burnedEstimate}
+          completed={completedWorkouts}
+          planned={plannedWorkouts}
+          sleepAvg={avgWeekSleep}
+          sleepLow={lowWeekSleep}
+        />
+
+        <HistoryWeeksCard weeks={historyWeeks} />
 
         {/* 1RM Progression — THE addictive number */}
         <Card testID="rm-card">
@@ -289,21 +335,6 @@ export default function Progress() {
           </View>
         </Card>
 
-        {/* Week activity totals */}
-        <Card testID="activity-totals-card">
-          <SectionTitle title="Activité de la semaine" />
-          <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: spacing.sm }}>
-            <View>
-              <Text style={typography.caption}>Pas totaux</Text>
-              <Text style={[typography.h3, { marginTop: 4 }]}>{totalWeekSteps.toLocaleString("fr-FR")}</Text>
-            </View>
-            <View>
-              <Text style={typography.caption}>Cardio</Text>
-              <Text style={[typography.h3, { marginTop: 4 }]}>{totalCardioMin} <Text style={typography.small}>min</Text></Text>
-            </View>
-          </View>
-        </Card>
-
         {/* Private photo gallery */}
         <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: spacing.sm }}>
           <SectionTitle title="Galerie privée" />
@@ -397,6 +428,171 @@ export default function Progress() {
       </ScrollView>
     </ScreenBackground>
   );
+}
+
+function FollowSummaryCard({
+  workouts,
+  completed,
+  planned,
+  onCheck,
+}: {
+  workouts: Workout[];
+  completed: number;
+  planned: number;
+  onCheck: (workout: Workout) => void;
+}) {
+  const ratio = planned > 0 ? completed / planned : 0;
+  const dayLabels = ["L", "M", "M", "J", "V", "S", "D"];
+  return (
+    <Card testID="follow-summary-card" style={styles.followSummary}>
+      <ProgressRing progress={ratio} size={118} stroke={9}>
+        <Text style={styles.followRingKicker}>Cette semaine</Text>
+        <Text style={styles.followRingValue}>{completed}/{planned}</Text>
+        <Text style={styles.followRingLabel}>séances</Text>
+      </ProgressRing>
+      <View style={styles.followDaysRow}>
+        {dayLabels.map((label, index) => {
+          const workout = workouts[index];
+          const done = workout?.completed;
+          return (
+            <TouchableOpacity
+              key={`${label}-${index}`}
+              onPress={() => workout && onCheck(workout)}
+              disabled={!workout}
+              style={styles.followDay}
+              testID={`follow-day-${index}`}
+            >
+              <Text style={styles.followDayLabel}>{label}</Text>
+              <View style={[styles.followDayCircle, done && styles.followDayCircleOn, !workout && styles.followDayCircleEmpty]}>
+                {done ? <Ionicons name="checkmark" size={13} color="#102108" /> : workout ? <Ionicons name="add" size={13} color={colors.textSecondary} /> : null}
+              </View>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      <Text style={styles.followMotivation}>Top ! Continue comme ça.</Text>
+    </Card>
+  );
+}
+
+function WeeklyFollowRecap({
+  steps,
+  consumed,
+  burned,
+  completed,
+  planned,
+  sleepAvg,
+  sleepLow,
+}: {
+  steps: number;
+  consumed: number;
+  burned: number;
+  completed: number;
+  planned: number;
+  sleepAvg: number;
+  sleepLow: boolean;
+}) {
+  return (
+    <Card testID="weekly-follow-recap" style={{ gap: spacing.md }}>
+      <SectionTitle title="Récapitulatif de la semaine" />
+      <View style={styles.recapGrid}>
+        <RecapStat icon="footsteps" label="Pas" value={steps.toLocaleString("fr-FR")} />
+        <RecapStat icon="restaurant-outline" label="Calories consommées" value={`${consumed.toLocaleString("fr-FR")} kcal`} />
+        <RecapStat icon="flame-outline" label="Calories brûlées" value={`${burned.toLocaleString("fr-FR")} kcal`} />
+        <RecapStat icon="barbell-outline" label="Séances" value={`${completed}/${planned}`} />
+        <RecapStat icon="moon-outline" label="Sommeil moyen" value={sleepAvg > 0 ? `${sleepAvg.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} h` : "À saisir"} warning={sleepLow} />
+      </View>
+      {sleepLow ? (
+        <View style={styles.sleepWarningBox} testID="weekly-sleep-warning">
+          <Ionicons name="warning-outline" size={15} color={colors.amber} />
+          <Text style={styles.sleepWarningText}>Attention, ton sommeil moyen est faible cette semaine.</Text>
+        </View>
+      ) : null}
+    </Card>
+  );
+}
+
+function RecapStat({ icon, label, value, warning }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string; warning?: boolean }) {
+  return (
+    <View style={[styles.recapStat, warning && styles.recapStatWarning]}>
+      <Ionicons name={icon} size={16} color={warning ? colors.amber : colors.primaryLight} />
+      <Text style={[styles.recapValue, warning && { color: colors.amber }]}>{value}</Text>
+      <Text style={styles.recapLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function HistoryWeeksCard({ weeks }: { weeks: HistoryWeek[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const visibleWeeks = expanded ? weeks : weeks.slice(0, 3);
+  return (
+    <Card testID="history-weeks-card" style={{ gap: spacing.md }}>
+      <SectionTitle title="Historique" />
+      {weeks.length === 0 ? (
+        <Text style={typography.small}>Les semaines précédentes apparaîtront après tes premières séances terminées.</Text>
+      ) : (
+        <>
+          {visibleWeeks.map((week) => (
+            <View key={week.label} style={styles.historyWeekRow}>
+              <View style={styles.historyWeekIcon}>
+                <Ionicons name="calendar-outline" size={15} color={colors.primaryLight} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.historyWeekTitle}>{week.label}</Text>
+                <Text style={styles.historyWeekText}>
+                  {week.sessions} séance{week.sessions > 1 ? "s" : ""} · {week.duration} min
+                  {week.sleepAvg > 0 ? ` · sommeil ${week.sleepAvg.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} h` : ""}
+                </Text>
+                {week.sleepLow ? (
+                  <View style={styles.historySleepWarning}>
+                    <Ionicons name="warning-outline" size={12} color={colors.amber} />
+                    <Text style={styles.historySleepWarningText}>Sommeil faible</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={colors.textMuted} />
+            </View>
+          ))}
+          {weeks.length > 3 ? (
+            <TouchableOpacity onPress={() => setExpanded((value) => !value)} style={styles.historyMoreButton} testID="history-see-more">
+              <Text style={styles.historyMoreText}>{expanded ? "Voir moins" : "Voir plus"}</Text>
+              <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={15} color={colors.primaryLight} />
+            </TouchableOpacity>
+          ) : null}
+        </>
+      )}
+    </Card>
+  );
+}
+
+function buildHistoryWeeks(items: Workout[], sleepByDate: Record<string, number>) {
+  const groups = new Map<string, HistoryWeek & { key: string }>();
+  items.forEach((item) => {
+    const d = new Date(item.date);
+    const monday = new Date(d);
+    monday.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+    const key = monday.toISOString().slice(0, 10);
+    const label = `Semaine du ${monday.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`;
+    const current = groups.get(key) || { key, label, sessions: 0, duration: 0, time: monday.getTime(), sleepAvg: 0, sleepLow: false };
+    current.sessions += item.completed ? 1 : 0;
+    current.duration += item.completed ? item.duration_min || 0 : 0;
+    groups.set(key, current);
+  });
+  return Array.from(groups.values())
+    .map((item) => {
+      const monday = new Date(item.key);
+      const sleepValues: number[] = [];
+      for (let offset = 0; offset < 7; offset += 1) {
+        const d = new Date(monday);
+        d.setDate(monday.getDate() + offset);
+        const hours = sleepByDate[d.toISOString().slice(0, 10)] || 0;
+        if (hours > 0) sleepValues.push(hours);
+      }
+      const sleepAvg = sleepValues.length ? sleepValues.reduce((sum, hours) => sum + hours, 0) / sleepValues.length : 0;
+      return { ...item, sleepAvg, sleepLow: sleepAvg > 0 && sleepAvg < 6.5 };
+    })
+    .filter((item) => item.sessions > 0)
+    .sort((a, b) => b.time - a.time);
 }
 
 // ---- PhotoGallery: chronological + before/after compare ----
@@ -682,92 +878,6 @@ function HeroMetric({ value, label }: { value: string; label: string }) {
   );
 }
 
-function ProgressCoachHero({ objective, force, muscle }: { objective: number; force: string; muscle: string }) {
-  return (
-    <Card testID="progress-coach-hero" style={styles.coachHeroCard}>
-      <View style={styles.coachHeroGlow} />
-      <View style={styles.coachHeroTop}>
-        <View>
-          <Text style={styles.referenceHeroEyebrow}>PROGRESSION & COACH IA</Text>
-          <Text style={styles.referenceHeroTitle}>Des résultats visibles et un plan qui s&apos;ajuste.</Text>
-        </View>
-        <View style={styles.objectiveRing}>
-          <Text style={styles.objectiveRingValue}>{objective}%</Text>
-          <Text style={styles.objectiveRingLabel}>objectif</Text>
-        </View>
-      </View>
-      <View style={styles.coachHeroFeatureRow}>
-        <CoachFeature icon="analytics-outline" title="Courbes claires" text="Suis tes progrès" />
-        <CoachFeature icon="locate-outline" title="Objectifs" text="Repères mesurables" />
-        <CoachFeature icon="chatbubble-ellipses-outline" title="Conseils" text="Plan ajusté" />
-      </View>
-      <View style={styles.progressPhonePreview}>
-        <View style={styles.progressGraphStack}>
-          <MiniGraph label="Poids" value="-2.1 kg" down />
-          <MiniGraph label="Force" value={force} />
-          <MiniGraph label="Muscle" value={muscle} />
-        </View>
-        <View style={styles.objectiveTimeline}>
-          <TimelineStep week="S1" title="Fondations" done value="100%" />
-          <TimelineStep week="S4" title="Montée en charge" done value="100%" />
-          <TimelineStep week="S8" title="Optimisation" active value={`${objective}%`} />
-          <TimelineStep week="S12" title="Consolidation" value="à venir" />
-        </View>
-      </View>
-    </Card>
-  );
-}
-
-function CoachFeature({ icon, title, text }: { icon: keyof typeof Ionicons.glyphMap; title: string; text: string }) {
-  return (
-    <View style={styles.coachFeature}>
-      <Ionicons name={icon} size={16} color={colors.primaryLight} />
-      <Text style={styles.coachFeatureTitle}>{title}</Text>
-      <Text style={styles.coachFeatureText}>{text}</Text>
-    </View>
-  );
-}
-
-function MiniGraph({ label, value, down }: { label: string; value: string; down?: boolean }) {
-  return (
-    <View style={styles.miniGraph}>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.miniGraphLabel}>{label}</Text>
-        <Text style={[styles.miniGraphValue, down && { color: colors.amber }]}>{value}</Text>
-      </View>
-      <View style={styles.miniGraphBars}>
-        {[0.72, 0.54, 0.62, 0.38, 0.82].map((height, index) => (
-          <View key={`${label}-${index}`} style={[styles.miniGraphBar, { height: 9 + height * 28 }]} />
-        ))}
-      </View>
-    </View>
-  );
-}
-
-function TimelineStep({ week, title, value, done, active }: { week: string; title: string; value: string; done?: boolean; active?: boolean }) {
-  return (
-    <View style={[styles.timelineStep, active && styles.timelineStepActive]}>
-      <View style={[styles.timelineNode, (done || active) && styles.timelineNodeOn]}>
-        <Text style={styles.timelineNodeText}>{done ? "✓" : active ? "•" : ""}</Text>
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={styles.timelineWeek}>{week}</Text>
-        <Text style={styles.timelineTitle}>{title}</Text>
-      </View>
-      <Text style={[styles.timelineValue, active && { color: colors.primaryLight }]}>{value}</Text>
-    </View>
-  );
-}
-
-function CoachMiniMetric({ value, label }: { value: string; label: string }) {
-  return (
-    <View style={styles.coachMiniMetric}>
-      <Text style={styles.coachMiniMetricValue}>{value}</Text>
-      <Text style={styles.coachMiniMetricLabel}>{label}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
 
   header: { minHeight: 310, padding: spacing.lg, paddingBottom: spacing.xl, justifyContent: "space-between" },
@@ -780,6 +890,38 @@ const styles = StyleSheet.create({
   heroMetricValue: { fontSize: 20, fontWeight: "900", color: "#FFFFFF" },
   heroMetricLabel: { fontSize: 10, color: "rgba(255,255,255,0.68)", marginTop: 2 },
   content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: 130 },
+  followSummary: { alignItems: "center", gap: spacing.sm, paddingVertical: spacing.sm },
+  followRingKicker: { color: colors.textSecondary, fontSize: 9.5, fontWeight: "800" },
+  followRingValue: { color: colors.textMain, fontSize: 26, lineHeight: 29, fontWeight: "900", marginTop: 1 },
+  followRingLabel: { color: colors.textSecondary, fontSize: 10, fontWeight: "800" },
+  followDaysRow: { flexDirection: "row", justifyContent: "space-between", width: "100%", gap: 4 },
+  followDay: { alignItems: "center", gap: 6, flex: 1 },
+  followDayLabel: { color: colors.textSecondary, fontSize: 11, fontWeight: "900" },
+  followDayCircle: { width: 27, height: 27, borderRadius: 14, borderWidth: 1, borderColor: colors.borderBright, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,255,255,0.06)" },
+  followDayCircleOn: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
+  followDayCircleEmpty: { borderColor: "rgba(255,255,255,0.12)", backgroundColor: "rgba(255,255,255,0.025)" },
+  followMotivation: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
+  wellnessCompactRow: { flexDirection: "row", gap: spacing.sm },
+  wellnessCompactItem: { flex: 1, minWidth: 0 },
+  trendGrid: { gap: spacing.sm },
+  trendTile: { minHeight: 82, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: "rgba(255,255,255,0.05)", padding: spacing.sm },
+  trendTitle: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
+  trendValue: { fontSize: 12, fontWeight: "900" },
+  recapGrid: { flexDirection: "row", flexWrap: "wrap", gap: spacing.sm },
+  recapStat: { width: "47.5%", minHeight: 84, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: "rgba(255,255,255,0.05)", padding: spacing.sm, justifyContent: "space-between" },
+  recapStatWarning: { borderColor: "rgba(255,179,63,0.36)", backgroundColor: "rgba(255,179,63,0.08)" },
+  recapValue: { color: colors.textMain, fontSize: 14, fontWeight: "900", marginTop: 5 },
+  recapLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "800" },
+  sleepWarningBox: { minHeight: 38, flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,179,63,0.30)", backgroundColor: "rgba(255,179,63,0.09)" },
+  sleepWarningText: { color: colors.amber, fontSize: 11.5, fontWeight: "900", flex: 1 },
+  historyWeekRow: { minHeight: 56, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: "rgba(255,255,255,0.05)", padding: spacing.sm },
+  historyWeekIcon: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryPale },
+  historyWeekTitle: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
+  historyWeekText: { color: colors.textMuted, fontSize: 11.5, fontWeight: "700", marginTop: 2 },
+  historySleepWarning: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 4 },
+  historySleepWarningText: { color: colors.amber, fontSize: 10.5, fontWeight: "900" },
+  historyMoreButton: { minHeight: 42, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.08)" },
+  historyMoreText: { color: colors.primaryLight, fontSize: 12.5, fontWeight: "900" },
   coachHeroCard: { overflow: "hidden", gap: spacing.md },
   coachHeroGlow: { position: "absolute", right: -60, top: -58, width: 180, height: 180, borderRadius: 90, backgroundColor: "rgba(182,255,63,0.10)" },
   coachHeroTop: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: spacing.md },

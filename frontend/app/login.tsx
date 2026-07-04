@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Image, View, Text, StyleSheet } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { Animated, Easing, Image, View, Text, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -57,7 +57,7 @@ export default function Login() {
 
   return (
     <View style={styles.background}>
-      <Image source={require("../assets/images/fitai-hero-activities-hd.png")} style={styles.backgroundImage} resizeMode="cover" />
+      <Image source={require("../assets/images/fitai-hero-progress-hd.png")} style={styles.backgroundImage} resizeMode="cover" />
       <LinearGradient
         colors={["rgba(8,16,12,0.30)", "rgba(6,24,14,0.18)", "rgba(3,8,5,0.90)"]}
         locations={[0, 0.42, 1]}
@@ -69,7 +69,7 @@ export default function Login() {
       <View style={styles.container}>
         <View style={styles.brandRow}>
           <View style={styles.heroLeaf}>
-            <Ionicons name="leaf" size={24} color={colors.primaryLight} />
+            <RotatingLeaf size={36} />
           </View>
           <View>
             <Text style={styles.brandText}>FIT AI</Text>
@@ -110,6 +110,31 @@ export default function Login() {
       </View>
       </SafeAreaView>
     </View>
+  );
+}
+
+function RotatingLeaf({ size }: { size: number }) {
+  const spin = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 2400,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [spin]);
+
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+
+  return (
+    <Animated.View style={{ width: size, height: size, alignItems: "center", justifyContent: "center", transform: [{ rotate }] }}>
+      <Ionicons name="leaf" size={Math.round(size * 0.66)} color={colors.primaryLight} />
+    </Animated.View>
   );
 }
 

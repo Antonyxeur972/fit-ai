@@ -1,9 +1,10 @@
 import { forwardRef } from "react";
 import { View, Text, StyleSheet, Image, Dimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import Svg, { Path, Defs, Pattern, Rect, Circle } from "react-native-svg";
+import Svg, { Defs, Pattern, Rect, Circle } from "react-native-svg";
 import { Ionicons } from "@expo/vector-icons";
-import { Mascot, MascotAnimal } from "./Mascot";
+import type { MascotAnimal } from "./Mascot";
+import { MascotPortrait } from "./MascotPortrait";
 
 export type ShareCardData = {
   date?: string;
@@ -27,7 +28,7 @@ const { width: SCREEN_W } = Dimensions.get("window");
  *  - White + green identity, no dark veil
  *  - "Training du jour" + FIT AI brand
  *  - NO user name shown
- *  - Mascot (line-art) + Strength symbol + duration + 💪 emoji
+ *  - Mascot portrait + Strength symbol + duration
  *  - Points (optional)
  *  - Photo / video thumbnail as soft background WITHOUT any grey veil
  */
@@ -42,8 +43,6 @@ export const ShareCard = forwardRef<View, { data: ShareCardData; width?: number 
     });
     const bg = data.background_image_base64 || data.background_video_thumb_base64;
     const bgUri = data.background_image_uri || null;
-    const evolution = data.mascot?.evolution || data.strength_evolution || 1;
-
     return (
       <View ref={ref} collapsable={false} style={[styles.card, { width, height }]}>
         {/* Background image: NO dark veil. Use a soft white-to-green tint instead so text stays readable. */}
@@ -125,15 +124,9 @@ export const ShareCard = forwardRef<View, { data: ShareCardData; width?: number 
         <View style={styles.mascotRow}>
           <View style={styles.mascotCircle}>
             {data.mascot?.animal ? (
-              <Mascot
-                animal={data.mascot.animal}
-                evolution={evolution}
-                size={56}
-                color="#0F3F1B"
-                strokeWidth={2.4}
-              />
+              <MascotPortrait animal={data.mascot.animal} size={56} active />
             ) : (
-              <Mascot animal="lion" evolution={1} size={56} color="#0F3F1B" strokeWidth={2.4} />
+              <MascotPortrait animal="lion" size={56} active />
             )}
           </View>
           {data.show_points && typeof data.points_today === "number" && data.points_today > 0 && (

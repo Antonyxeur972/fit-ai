@@ -1,5 +1,7 @@
 import { Platform } from "react-native";
 import { storage } from "@/src/utils/storage";
+import { api } from "@/src/api";
+import { markCommitmentSigned } from "@/src/lib/commitment";
 
 export type SubscriptionPlan = "monthly" | "annual";
 
@@ -94,7 +96,15 @@ export function normalizePromoCode(code: string): string {
 
 export async function applyPromoCode(code: string): Promise<PurchaseResult> {
   if (normalizePromoCode(code) !== FREE_PROMO_CODE) {
-    return { ok: false, message: "Code promotionnel invalide." };
+    try {
+      await api("/affiliates/apply", {
+        method: "POST",
+        body: { code },
+      });
+      return { ok: false, message: "Code coach enregistré. La commission sera suivie au moment de l'abonnement." };
+    } catch {
+      return { ok: false, message: "Code promotionnel invalide." };
+    }
   }
 
   await saveSubscriptionState({
@@ -103,6 +113,7 @@ export async function applyPromoCode(code: string): Promise<PurchaseResult> {
     source: "promo",
     expiresAt: null,
   });
+  await markCommitmentSigned();
 
   return { ok: true, message: "Code validé. Accès FIT AI débloqué gratuitement." };
 }

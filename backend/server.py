@@ -30,6 +30,10 @@ DB_NAME = os.environ["DB_NAME"]
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 CLAUDE_MODEL = "claude-sonnet-4-5-20250929"
 anthropic_client = AsyncAnthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
+AI_DAILY_LIMIT = int(os.environ.get("FITAI_AI_DAILY_LIMIT", "20"))
+AI_MONTHLY_LIMIT = int(os.environ.get("FITAI_AI_MONTHLY_LIMIT", "300"))
+AI_ESTIMATED_CENTS_PER_CALL = float(os.environ.get("FITAI_AI_ESTIMATED_CENTS_PER_CALL", "3"))
+ALGORITHM_ONLY_AI = os.environ.get("FITAI_ALGORITHM_ONLY", "").lower() in {"1", "true", "yes", "on"}
 
 import certifi
 client = AsyncIOMotorClient(MONGO_URL, tlsCAFile=certifi.where())
@@ -65,6 +69,59 @@ def strip_id(doc: Optional[dict]) -> Optional[dict]:
         return None
     doc.pop("_id", None)
     return doc
+
+
+def normalize_code(code: str) -> str:
+    cleaned = re.sub(r"[^A-Z0-9_-]", "", (code or "").upper().strip())
+    return cleaned[:24]
+
+
+def ai_feature_limit(feature: str) -> int:
+    key = "FITAI_AI_LIMIT_" + re.sub(r"[^A-Z0-9]+", "_", feature.upper()).strip("_")
+    return int(os.environ.get(key, "0") or 0)
+
+
+async def record_ai_usage(user_id: str, feature: str, units: int = 1) -> Dict[str, Any]:
+    if ALGORITHM_ONLY_AI:
+        return {
+            "allowed": False,
+            "algorithm_only": True,
+            "daily_used": 0,
+            "monthly_used": 0,
+        }
+    day = today_str()
+    month = day[:7]
+    daily_used = await db.ai_usage.count_documents({"user_id": user_id, "date": day})
+    monthly_used = await db.ai_usage.count_documents({"user_id": user_id, "month": month})
+    feature_limit = ai_feature_limit(feature)
+    feature_used = 0
+    if feature_limit:
+        feature_used = await db.ai_usage.count_documents({"user_id": user_id, "date": day, "feature": feature})
+    if daily_used + units > AI_DAILY_LIMIT:
+        raise HTTPException(429, "Limite IA quotidienne atteinte. Réessaie demain.")
+    if monthly_used + units > AI_MONTHLY_LIMIT:
+        raise HTTPException(429, "Limite IA mensuelle atteinte.")
+    if feature_limit and feature_used + units > feature_limit:
+        raise HTTPException(429, "Limite IA atteinte pour cette fonction aujourd'hui.")
+    doc = {
+        "id": new_id("aiu"),
+        "user_id": user_id,
+        "feature": feature,
+        "units": units,
+        "estimated_cost_cents": round(AI_ESTIMATED_CENTS_PER_CALL * units, 3),
+        "date": day,
+        "month": month,
+        "created_at": now_utc(),
+        "model": CLAUDE_MODEL,
+    }
+    await db.ai_usage.insert_one(doc)
+    return {
+        "allowed": True,
+        "algorithm_only": False,
+        "daily_used": daily_used + units,
+        "monthly_used": monthly_used + units,
+        "doc": doc,
+    }
 
 
 async def get_current_user(authorization: Optional[str]) -> dict:
@@ -253,6 +310,13 @@ class ProgramDayUpdate(BaseModel):
     exercises: List[Dict[str, Any]]
 
 
+class ProgramDayWorkoutRequest(BaseModel):
+    program_id: Optional[str] = None
+    week_index: Optional[int] = None
+    day_index: Optional[int] = None
+    date: Optional[str] = None
+
+
 class AiExerciseRequest(BaseModel):
     description: str
 
@@ -304,6 +368,22 @@ class ChallengeCheckDayRequest(BaseModel):
     day_index: int  # 0-29
 
 
+class SleepLogRequest(BaseModel):
+    date: Optional[str] = None
+    hours: float
+
+
+class AffiliateCreateRequest(BaseModel):
+    code: Optional[str] = None
+    display_name: Optional[str] = None
+    commission_percent: float = 20
+    flat_fee_cents: int = 0
+
+
+class AffiliateApplyRequest(BaseModel):
+    code: str
+
+
 class WorkoutSession(BaseModel):
     id: str
     user_id: str
@@ -330,12 +410,33 @@ def compute_targets(p: ProfileIn) -> Dict[str, int]:
         "very_active": 1.9,
     }
     tdee = bmr * factors.get(p.activity_level, 1.55)
-    goal_adj = {"lose": -0.20, "gain": 0.12, "maintain": 0.0}
-    cals = tdee * (1 + goal_adj.get(p.goal, 0.0))
-    cals = max(1200, round(cals))
-    # Macros: protein 2g/kg, fat 25% of cals, rest carbs
-    protein_g = round(p.weight_kg * 2)
-    fat_g = round((cals * 0.25) / 9)
+    height_m = max(1.2, p.height_cm / 100)
+    bmi = p.weight_kg / (height_m * height_m)
+
+    if p.goal == "lose":
+        # Bigger deficit only when the starting point allows it; otherwise keep energy high.
+        deficit_pct = 0.18 if bmi >= 27 else 0.14
+        cals = tdee * (1 - deficit_pct)
+        protein_factor = 2.15
+        fat_ratio = 0.28
+    elif p.goal == "gain":
+        # Lean bulk: enough surplus to progress without pushing calories too high.
+        surplus_pct = 0.10 if bmi < 24 else 0.07
+        cals = tdee * (1 + surplus_pct)
+        protein_factor = 2.0
+        fat_ratio = 0.25
+    else:
+        # Maintenance / recomposition: slight nudge toward stable adherence.
+        cals = tdee * (0.98 if bmi >= 26 else 1.0)
+        protein_factor = 1.9
+        fat_ratio = 0.26
+
+    floor = 1500 if p.gender.lower().startswith("m") else 1250
+    ceiling = max(floor + 250, tdee * 1.18)
+    cals = int(max(floor, min(ceiling, round(cals))))
+    # Macros: protein by objective, fat floor by objective, rest carbs
+    protein_g = round(p.weight_kg * protein_factor)
+    fat_g = round((cals * fat_ratio) / 9)
     carbs_g = max(0, round((cals - protein_g * 4 - fat_g * 9) / 4))
     return {
         "bmr": round(bmr),
@@ -758,6 +859,46 @@ def compute_food_macros(food: Dict[str, Any], qty: float) -> Dict[str, Any]:
     }
 
 
+def local_food_search(query: str) -> List[Dict[str, Any]]:
+    q = re.sub(r"\s+", " ", query.lower().strip())
+    if len(q) < 2:
+        return []
+    scored: List[tuple[int, Dict[str, Any]]] = []
+    for food in FOOD_LIBRARY:
+        name = str(food.get("name", "")).lower()
+        category = str(food.get("category", "")).lower()
+        score = 0
+        if q == name:
+            score += 100
+        if q in name:
+            score += 50
+        if any(part and part in name for part in q.split()):
+            score += 15
+        if q in category:
+            score += 8
+        if score:
+            scored.append((score, food))
+    scored.sort(key=lambda item: item[0], reverse=True)
+    out: List[Dict[str, Any]] = []
+    for _, food in scored[:3]:
+        raw_unit = str(food.get("unit", "g")).lower()
+        unit = raw_unit if raw_unit in ("g", "ml") else "unit"
+        out.append({
+            "id": f"local_{food.get('id', new_id('food'))}",
+            "name": str(food.get("name", query))[:80],
+            "category": str(food.get("category", "Plats préparés"))[:30],
+            "unit": unit,
+            "default_qty": float(food.get("default_qty", 100 if unit in ("g", "ml") else 1)),
+            "kcal": float(food.get("kcal", 0)),
+            "protein_g": float(food.get("protein_g", 0)),
+            "carbs_g": float(food.get("carbs_g", 0)),
+            "fat_g": float(food.get("fat_g", 0)),
+            "portion_label": "Base interne FIT AI",
+            "source": "algorithm",
+        })
+    return out
+
+
 def reps_for(session_type: str) -> str:
     return SESSION_TYPES.get(session_type, SESSION_TYPES["volume"])["reps"]
 
@@ -1007,6 +1148,7 @@ CHALLENGE_BLUEPRINTS: Dict[str, Dict[str, Any]] = {
         "exercise": "Pompes",
         "muscle": "Pectoraux",
         "icon": "fitness",
+        "unit": "reps",
         "rest_days": [3, 6, 10, 13, 17, 20, 24, 27],  # Wed/Sat each week
     },
     "abs": {
@@ -1014,6 +1156,7 @@ CHALLENGE_BLUEPRINTS: Dict[str, Dict[str, Any]] = {
         "exercise": "Crunchs + Planche (mix)",
         "muscle": "Core",
         "icon": "shield-checkmark",
+        "unit": "reps",
         "rest_days": [3, 7, 10, 14, 17, 21, 24, 28],
     },
     "squats": {
@@ -1021,7 +1164,32 @@ CHALLENGE_BLUEPRINTS: Dict[str, Dict[str, Any]] = {
         "exercise": "Squats au poids du corps",
         "muscle": "Jambes",
         "icon": "barbell",
+        "unit": "reps",
         "rest_days": [3, 6, 10, 13, 17, 20, 24, 27],
+    },
+    "plank": {
+        "name": "30 jours de gainage",
+        "exercise": "Planche",
+        "muscle": "Core",
+        "icon": "timer",
+        "unit": "sec",
+        "rest_days": [3, 7, 11, 15, 19, 23, 27],
+    },
+    "steps10k": {
+        "name": "30 jours à 10 000 pas",
+        "exercise": "10 000 pas",
+        "muscle": "Cardio",
+        "icon": "walk",
+        "unit": "pas",
+        "rest_days": [],
+    },
+    "running": {
+        "name": "30 jours running",
+        "exercise": "Course",
+        "muscle": "Cardio",
+        "icon": "footsteps",
+        "unit": "km",
+        "rest_days": [3, 7, 11, 15, 19, 23, 27],
     },
 }
 
@@ -1032,6 +1200,18 @@ def _challenge_volume_for(day_index: int, level: int) -> int:
     # Linear progression: day 1 = base, day 30 = base * 4
     progress = 1.0 + (day_index / 29.0) * 3.0
     return int(round(base * progress))
+
+
+def _challenge_target_for(ch_type: str, day_index: int, level: Optional[int] = None) -> float:
+    if ch_type == "plank":
+        base = {1: 20, 2: 35, 3: 50}.get(level, 25)
+        return int(round(base + day_index * (4 + level)))
+    if ch_type == "steps10k":
+        return 10000
+    if ch_type == "running":
+        base = {1: 1.0, 2: 1.5, 3: 2.0}.get(level or 1, 1.2)
+        return round(base + day_index * (0.08 + (level or 1) * 0.03), 1)
+    return _challenge_volume_for(day_index, level)
 
 
 def _challenge_level_from_profile(profile: Optional[Dict[str, Any]]) -> int:
@@ -1062,7 +1242,8 @@ def _build_challenge_days(ch_type: str, level: int) -> List[Dict[str, Any]]:
             out.append({
                 "day_index": d,
                 "is_rest": False,
-                "target_reps": _challenge_volume_for(d, level),
+                "target_reps": _challenge_target_for(ch_type, d, level),
+                "unit": bp.get("unit", "reps"),
                 "label": f"{bp['exercise']}",
                 "completed": False,
             })
@@ -1252,6 +1433,41 @@ async def generate_recipes_with_claude(ingredients: List[str], goal: Optional[st
     return out
 
 
+def local_recipe_suggestions(ingredients: List[str], goal: Optional[str]) -> List[Dict[str, Any]]:
+    cleaned = [re.sub(r"\s+", " ", x.strip()) for x in ingredients if x.strip()]
+    if not cleaned:
+        return []
+    protein_words = [x for x in cleaned if any(w in x.lower() for w in ("poulet", "thon", "oeuf", "œuf", "boeuf", "bœuf", "tofu", "saumon", "whey", "dinde"))]
+    carb_words = [x for x in cleaned if any(w in x.lower() for w in ("riz", "pâte", "pates", "avoine", "pain", "pomme de terre", "quinoa", "semoule"))]
+    veg_words = [x for x in cleaned if x not in protein_words and x not in carb_words]
+    protein = protein_words[0] if protein_words else cleaned[0]
+    carb = carb_words[0] if carb_words else None
+    veg = veg_words[0] if veg_words else None
+    goal_clean = (goal or "maintenance").lower()
+    kcal = 430 if goal_clean == "cutting" else 620 if goal_clean == "bulking" else 520
+    protein_g = 38 if protein_words else 25
+    name_parts = [protein]
+    if carb:
+        name_parts.append(carb)
+    if veg:
+        name_parts.append(veg)
+    main_name = "Bol " + " + ".join(name_parts[:3])
+    return [{
+        "id": f"local_{new_id('recipe')}",
+        "name": main_name[:80],
+        "ingredients_used": name_parts[:6],
+        "instructions_brief": "Assemble une base simple : cuisson douce, portion protéinée au centre, glucides ajustés selon l'objectif, légumes ou fruits autour.",
+        "kcal": kcal,
+        "protein_g": protein_g,
+        "carbs_g": 45 if carb else 25,
+        "fat_g": 14,
+        "portion_label": "1 portion",
+        "prep_min": 15,
+        "category": "Plats préparés",
+        "source": "algorithm",
+    }]
+
+
 def validate_meal_date(d: Optional[str]) -> str:
     """Validate that the date is within the last 14 days. Returns YYYY-MM-DD."""
     if not d:
@@ -1366,6 +1582,121 @@ async def auth_me(authorization: Optional[str] = Header(default=None)):
         "force_metrics": user.get("force_metrics"),
         "mascot": user.get("mascot"),
         "notif_prefs": user.get("notif_prefs"),
+        "referral": user.get("referral"),
+    }
+
+
+@api.get("/ai/usage")
+async def ai_usage_summary(authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    day = today_str()
+    month = day[:7]
+    today_items = await db.ai_usage.find(
+        {"user_id": user["user_id"], "date": day}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    month_items = await db.ai_usage.find(
+        {"user_id": user["user_id"], "month": month}, {"_id": 0}
+    ).to_list(1000)
+    by_feature: Dict[str, int] = {}
+    for item in month_items:
+        feature = str(item.get("feature", "unknown"))
+        by_feature[feature] = by_feature.get(feature, 0) + int(item.get("units", 1))
+    return {
+        "algorithm_only": ALGORITHM_ONLY_AI,
+        "daily_limit": AI_DAILY_LIMIT,
+        "monthly_limit": AI_MONTHLY_LIMIT,
+        "today_used": sum(int(x.get("units", 1)) for x in today_items),
+        "month_used": sum(int(x.get("units", 1)) for x in month_items),
+        "estimated_month_cost_cents": round(sum(float(x.get("estimated_cost_cents", 0)) for x in month_items), 3),
+        "by_feature": by_feature,
+        "recent": today_items[:20],
+    }
+
+
+@api.post("/affiliates")
+async def create_affiliate_code(
+    body: AffiliateCreateRequest, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    base = body.code or body.display_name or user.get("name") or user.get("email") or "COACH"
+    code = normalize_code(base)
+    if len(code) < 4:
+        code = normalize_code(f"COACH-{user['user_id'][-6:]}")
+    existing = await db.affiliates.find_one({"code": code}, {"_id": 0})
+    if existing:
+        raise HTTPException(409, "Ce code coach existe déjà.")
+    doc = {
+        "id": new_id("aff"),
+        "code": code,
+        "owner_user_id": user["user_id"],
+        "display_name": (body.display_name or user.get("name") or "Coach")[:80],
+        "commission_percent": max(0, min(60, float(body.commission_percent))),
+        "flat_fee_cents": max(0, int(body.flat_fee_cents)),
+        "status": "active",
+        "created_at": now_utc(),
+    }
+    await db.affiliates.insert_one(doc)
+    return strip_id(doc)
+
+
+@api.get("/affiliates/me")
+async def my_affiliate_codes(authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    items = await db.affiliates.find(
+        {"owner_user_id": user["user_id"]}, {"_id": 0}
+    ).sort("created_at", -1).to_list(50)
+    return {"items": items}
+
+
+@api.post("/affiliates/apply")
+async def apply_affiliate_code(
+    body: AffiliateApplyRequest, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    code = normalize_code(body.code)
+    affiliate = await db.affiliates.find_one({"code": code, "status": "active"}, {"_id": 0})
+    if not affiliate:
+        raise HTTPException(404, "Code coach introuvable.")
+    if affiliate.get("owner_user_id") == user["user_id"]:
+        raise HTTPException(400, "Tu ne peux pas appliquer ton propre code.")
+    referral = {
+        "code": code,
+        "affiliate_id": affiliate["id"],
+        "owner_user_id": affiliate["owner_user_id"],
+        "applied_at": now_utc(),
+    }
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"referral": referral}})
+    await db.affiliate_events.insert_one({
+        "id": new_id("affe"),
+        "type": "code_applied",
+        "code": code,
+        "affiliate_id": affiliate["id"],
+        "owner_user_id": affiliate["owner_user_id"],
+        "user_id": user["user_id"],
+        "created_at": now_utc(),
+    })
+    return {"ok": True, "referral": referral}
+
+
+@api.get("/affiliates/{code}/stats")
+async def affiliate_stats(code: str, authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    normalized = normalize_code(code)
+    affiliate = await db.affiliates.find_one({"code": normalized}, {"_id": 0})
+    if not affiliate:
+        raise HTTPException(404, "Code coach introuvable.")
+    if affiliate.get("owner_user_id") != user["user_id"]:
+        raise HTTPException(403, "Accès réservé au propriétaire du code.")
+    signups = await db.users.count_documents({"referral.code": normalized})
+    events = await db.affiliate_events.find(
+        {"code": normalized}, {"_id": 0}
+    ).sort("created_at", -1).to_list(100)
+    return {
+        "code": normalized,
+        "signups": signups,
+        "conversions": 0,
+        "estimated_commission_cents": 0,
+        "events": events[:25],
     }
 
 
@@ -1418,7 +1749,11 @@ POINT_RULES = {
     "workout_completed": 20,
     "protein_target_hit": 10,
     "calories_on_track": 10,
-    "challenge_day": 15,
+    "challenge_day": 50,
+    "sleep_bonus_7h": 50,
+    "sleep_bonus_8h": 100,
+    "sleep_penalty_6h": -50,
+    "sleep_penalty_5h": -100,
     "pr_beaten": 25,
     "streak_bonus": 5,
     "combo_bonus": 20,  # 3+ goals in same day
@@ -1454,7 +1789,7 @@ def compute_level(total: int) -> Dict[str, int]:
 async def award_points(user_id: str, reason: str, qty: Optional[int] = None, meta: Optional[Dict[str, Any]] = None) -> int:
     """Insert a points event and return the awarded amount. Idempotent per (user, date, reason, meta.key)."""
     base = qty if qty is not None else POINT_RULES.get(reason, 0)
-    if base <= 0:
+    if base == 0:
         return 0
     d = today_str()
     key = (meta or {}).get("key") or reason
@@ -1523,6 +1858,46 @@ async def points_summary(authorization: Optional[str] = Header(default=None)):
             break
     lvl = compute_level(total)
     return {**lvl, "points_today": points_today, "recent": recent, "streak_days": streak}
+
+
+def sleep_points_for(hours: float) -> tuple[str, int]:
+    if hours >= 8:
+        return "sleep_bonus_8h", 100
+    if hours >= 7:
+        return "sleep_bonus_7h", 50
+    if hours > 0 and hours <= 5:
+        return "sleep_penalty_5h", -100
+    if hours > 0 and hours <= 6:
+        return "sleep_penalty_6h", -50
+    return "sleep_neutral", 0
+
+
+@api.post("/sleep")
+async def log_sleep(body: SleepLogRequest, authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    d = validate_meal_date(body.date)
+    hours = max(0, min(14, round(float(body.hours) * 2) / 2))
+    reason, amount = sleep_points_for(hours)
+    await db.sleep.update_one(
+        {"user_id": user["user_id"], "date": d},
+        {"$set": {"user_id": user["user_id"], "date": d, "hours": hours, "updated_at": now_utc()}},
+        upsert=True,
+    )
+    await db.points_events.delete_many(
+        {"user_id": user["user_id"], "date": d, "reason": {"$regex": "^sleep_"}, "key": f"sleep_{d}"}
+    )
+    if amount:
+        await db.points_events.insert_one({
+            "id": new_id("pt"),
+            "user_id": user["user_id"],
+            "date": d,
+            "reason": reason,
+            "key": f"sleep_{d}",
+            "amount": amount,
+            "meta": {"key": f"sleep_{d}", "hours": hours},
+            "created_at": now_utc(),
+        })
+    return {"ok": True, "date": d, "hours": hours, "points": amount, "reason": reason}
 
 
 @api.put("/users/me/silhouette")
@@ -1608,7 +1983,12 @@ async def auth_logout(authorization: Optional[str] = Header(default=None)):
 async def get_profile(authorization: Optional[str] = Header(default=None)):
     user = await get_current_user(authorization)
     prof = await db.profiles.find_one({"user_id": user["user_id"]}, {"_id": 0})
-    return prof or {}
+    if not prof:
+        return {"measurement_complete": False}
+    prof["measurement_complete"] = all(
+        float(prof.get(key, 0) or 0) > 0 for key in ("weight_kg", "height_cm", "age")
+    )
+    return prof
 
 
 @api.put("/profile")
@@ -1623,7 +2003,9 @@ async def upsert_profile(body: ProfileIn, authorization: Optional[str] = Header(
     }
     await db.profiles.update_one({"user_id": user["user_id"]}, {"$set": doc}, upsert=True)
     await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"onboarded": True}})
-    return strip_id(doc)
+    response = strip_id(doc)
+    response["measurement_complete"] = True
+    return response
 
 
 # --- MEALS ---
@@ -1703,6 +2085,9 @@ async def analyze_and_save_meal(
     body: MealAnalyzeRequest, authorization: Optional[str] = Header(default=None)
 ):
     user = await get_current_user(authorization)
+    usage = await record_ai_usage(user["user_id"], "meal_photo_analysis")
+    if usage.get("algorithm_only"):
+        raise HTTPException(503, "Analyse photo désactivée en mode sans IA externe.")
     analysis = await analyze_meal_with_claude(body.image_base64)
     target_date = validate_meal_date(body.date)
     created = now_utc()
@@ -1883,6 +2268,47 @@ async def ai_generate_exercise(description: str) -> Optional[Dict[str, Any]]:
     }
 
 
+def local_exercise_from_description(description: str) -> Optional[Dict[str, Any]]:
+    clean = re.sub(r"\s+", " ", (description or "").strip())
+    if len(clean) < 3:
+        return None
+    lower = clean.lower()
+    category = "Mobilité"
+    equipment = "Autre"
+    reps = "10-12"
+    rest = 60
+    if any(w in lower for w in ("pompe", "push", "développé", "pectoraux", "bench")):
+        category = "Pectoraux"
+    elif any(w in lower for w in ("rowing", "tirage", "traction", "dos")):
+        category = "Dos"
+    elif any(w in lower for w in ("squat", "presse", "fente", "jambe", "mollet")):
+        category = "Jambes"
+    elif any(w in lower for w in ("curl", "triceps", "biceps", "bras")):
+        category = "Bras"
+    elif any(w in lower for w in ("gainage", "abdo", "core")):
+        category = "Core"
+    if "haltère" in lower or "haltere" in lower:
+        equipment = "Haltères"
+    elif "barre" in lower or "bench" in lower:
+        equipment = "Barre"
+        rest = 90
+    elif "machine" in lower or "presse" in lower:
+        equipment = "Machine"
+        rest = 90
+    elif "poids du corps" in lower or "pompe" in lower or "traction" in lower:
+        equipment = "Poids du corps"
+    return {
+        "id": f"local_{new_id('ex')}",
+        "name": clean[:80],
+        "category": category,
+        "equipment": equipment,
+        "muscles_targeted": [category],
+        "recommended_reps": reps,
+        "recommended_rest_s": rest,
+        "source": "algorithm",
+    }
+
+
 @api.post("/exercises/ai-add")
 async def add_exercise_via_ai(
     body: AiExerciseRequest, authorization: Optional[str] = Header(default=None)
@@ -1890,7 +2316,13 @@ async def add_exercise_via_ai(
     user = await get_current_user(authorization)
     if len((body.description or "").strip()) < 3:
         raise HTTPException(400, "Description trop courte")
-    ex = await ai_generate_exercise(body.description)
+    if ALGORITHM_ONLY_AI:
+        ex = local_exercise_from_description(body.description)
+    else:
+        await record_ai_usage(user["user_id"], "exercise_generation")
+        ex = await ai_generate_exercise(body.description)
+        if not ex:
+            ex = local_exercise_from_description(body.description)
     if not ex:
         raise HTTPException(422, "L'IA n'a pas pu identifier cet exercice")
     doc = {**ex, "user_id": user["user_id"], "created_at": now_utc()}
@@ -2064,7 +2496,7 @@ async def challenge_start(
     user = await get_current_user(authorization)
     ch_type = body.type.lower()
     if ch_type not in CHALLENGE_BLUEPRINTS:
-        raise HTTPException(400, "Type invalide (pushups|abs|squats)")
+        raise HTTPException(400, "Type invalide")
     # Stop any active challenge of the same type
     await db.challenges.update_many(
         {"user_id": user["user_id"], "type": ch_type, "active": True},
@@ -2250,6 +2682,75 @@ async def program_update_day(
         {"$set": {"weeks": weeks}},
     )
     return target_d
+
+
+@api.post("/program/day-workout")
+async def program_day_to_workout(
+    body: ProgramDayWorkoutRequest, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    query: Dict[str, Any] = {"user_id": user["user_id"]}
+    if body.program_id:
+        query["id"] = body.program_id
+    else:
+        query["active"] = True
+    prog = await db.programs.find_one(query, {"_id": 0}, sort=[("created_at", -1)])
+    if not prog:
+        raise HTTPException(404, "Program not found")
+
+    target_date = body.date or today_str()
+    existing = await db.workouts.find_one(
+        {"user_id": user["user_id"], "date": target_date}, {"_id": 0}
+    )
+    if existing:
+        return existing
+
+    week_index = int(body.week_index or prog.get("current_week") or 1)
+    day_index = int(body.day_index if body.day_index is not None else 0)
+    weeks = prog.get("weeks") or []
+    target_w = next((w for w in weeks if int(w.get("week_index", -1)) == week_index), None)
+    if not target_w:
+        target_w = weeks[0] if weeks else None
+    if not target_w:
+        raise HTTPException(404, "Program week not found")
+    days = target_w.get("days") or []
+    target_d = next((d for d in days if int(d.get("day_index", -1)) == day_index), None)
+    if not target_d:
+        target_d = days[0] if days else None
+    if not target_d:
+        raise HTTPException(404, "Program day not found")
+
+    exercises: List[Dict[str, Any]] = []
+    for exercise in target_d.get("exercises") or []:
+        if exercise.get("checked") is False:
+            continue
+        exercises.append({
+            "name": str(exercise.get("name", "")).strip(),
+            "sets": int(exercise.get("sets", 3)),
+            "reps": str(exercise.get("reps", "10-12")),
+            "rest_s": int(exercise.get("rest_s", 60)),
+            "checked": True,
+            "is_recommended": bool(exercise.get("is_recommended", False)),
+            "category": str(exercise.get("category", "")),
+        })
+
+    workout = {
+        "id": new_id("wk"),
+        "user_id": user["user_id"],
+        "date": target_date,
+        "title": f"{str(prog.get('split', 'FULLBODY')).upper()} J{int(target_d.get('day_index', day_index)) + 1}",
+        "focus": str(target_d.get("focus") or prog.get("goal_label") or "Séance du jour"),
+        "duration_min": int(target_d.get("duration_min", 45) or 45),
+        "exercises": exercises,
+        "completed": False,
+        "session_type": str(target_w.get("session_type", "volume")),
+        "program_id": prog.get("id"),
+        "program_week_index": int(target_w.get("week_index", week_index)),
+        "program_day_index": int(target_d.get("day_index", day_index)),
+        "created_at": now_utc(),
+    }
+    await db.workouts.insert_one(workout)
+    return strip_id(workout)
 
 
 @api.delete("/program/{program_id}")
@@ -2881,11 +3382,17 @@ async def add_manual_meal(
 async def foods_ai_search(
     body: AiFoodSearchRequest, authorization: Optional[str] = Header(default=None)
 ):
-    """Suggest nutritional values for an unknown food name via Claude."""
-    _ = await get_current_user(authorization)
+    """Suggest nutritional values: local database first, Claude only when needed."""
+    user = await get_current_user(authorization)
     q = body.query.strip()
     if len(q) < 2:
         return {"suggestions": []}
+    local = local_food_search(q)
+    if local:
+        return {"suggestions": local}
+    if ALGORITHM_ONLY_AI:
+        return {"suggestions": []}
+    await record_ai_usage(user["user_id"], "food_text_search")
     suggestions = await ai_food_search(q)
     return {"suggestions": suggestions}
 
@@ -3037,11 +3544,17 @@ async def duplicate_day(
 async def recipes_from_ingredients(
     body: RecipeFromIngredientsRequest, authorization: Optional[str] = Header(default=None)
 ):
-    _ = await get_current_user(authorization)
+    user = await get_current_user(authorization)
     cleaned = [str(x).strip() for x in (body.ingredients or []) if str(x).strip()]
     if not cleaned:
         return {"recipes": []}
-    recipes = await generate_recipes_with_claude(cleaned[:25], body.goal)
+    if ALGORITHM_ONLY_AI:
+        recipes = local_recipe_suggestions(cleaned[:25], body.goal)
+    else:
+        await record_ai_usage(user["user_id"], "recipe_generation")
+        recipes = await generate_recipes_with_claude(cleaned[:25], body.goal)
+        if not recipes:
+            recipes = local_recipe_suggestions(cleaned[:25], body.goal)
     return {"recipes": recipes}
 
 
@@ -3120,7 +3633,29 @@ async def complete_workout(workout_id: str, authorization: Optional[str] = Heade
             await award_points(user["user_id"], "streak_bonus", meta={"key": f"streak_{today_str()}"})
         await evaluate_daily_combos(user["user_id"])
     except Exception as e:
-        logger.warning(f"complete_workout award: {e}")
+        log.warning(f"complete_workout award: {e}")
+    return {"ok": True}
+
+
+@api.post("/workouts/{workout_id}/uncomplete")
+async def uncomplete_workout(workout_id: str, authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    res = await db.workouts.update_one(
+        {"id": workout_id, "user_id": user["user_id"]},
+        {"$set": {"completed": False}, "$unset": {"completed_at": ""}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Workout not found")
+    try:
+        await db.points_events.delete_many(
+            {
+                "user_id": user["user_id"],
+                "reason": "workout_completed",
+                "meta.key": f"wk_{workout_id}",
+            }
+        )
+    except Exception as e:
+        log.warning(f"uncomplete_workout points cleanup: {e}")
     return {"ok": True}
 
 
@@ -3226,7 +3761,7 @@ async def dashboard_day(
                 if await award_points(user["user_id"], "calories_on_track", meta={"key": f"cal_{d}"}):
                     await evaluate_daily_combos(user["user_id"])
         except Exception as e:
-            logger.warning(f"award daily points: {e}")
+            log.warning(f"award daily points: {e}")
     return {
         "date": d,
         "target_calories": target,
@@ -3314,6 +3849,12 @@ async def startup_event():
     await db.favorites.create_index([("user_id", 1), ("created_at", -1)])
     await db.programs.create_index([("user_id", 1), ("active", 1)])
     await db.user_exercises.create_index([("user_id", 1), ("created_at", -1)])
+    await db.ai_usage.create_index([("user_id", 1), ("date", 1)])
+    await db.ai_usage.create_index([("user_id", 1), ("month", 1)])
+    await db.affiliates.create_index("code", unique=True)
+    await db.affiliates.create_index("owner_user_id")
+    await db.affiliate_events.create_index([("code", 1), ("created_at", -1)])
+    await db.sleep.create_index([("user_id", 1), ("date", 1)], unique=True)
     log.info("Indexes ready")
 
 
