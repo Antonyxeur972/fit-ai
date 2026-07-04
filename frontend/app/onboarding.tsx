@@ -15,6 +15,7 @@ import { SilhouettePicker } from "@/src/components/SilhouettePicker";
 import { getOrStartPaywallOffer } from "@/src/lib/subscription";
 import { ensureNotifPermission, schedulePreSubscriptionNudges } from "@/src/lib/notifications";
 import { setSimpleMode as saveSimpleMode } from "@/src/lib/simpleMode";
+import { prepareMotionAccess } from "@/src/lib/steps";
 import { colors, radius, spacing } from "@/src/theme";
 
 type Step = 0 | 1 | 2 | 3 | 4 | 5;
@@ -124,6 +125,7 @@ export default function Onboarding() {
 
       try {
         await ensureNotifPermission();
+        await prepareMotionAccess();
         const offer = await getOrStartPaywallOffer();
         await schedulePreSubscriptionNudges(offer.expiresAt, offer.revealedAt);
       } catch {}

@@ -55,6 +55,7 @@ type MuscleVolumeItem = {
   top_exercises: { name: string; volume: number }[];
 };
 type MuscleVolumePayload = { weeks: string[]; items: MuscleVolumeItem[] };
+type Profile = { weight_kg?: number; goal?: string };
 
 export default function Progress() {
   const [transfos, setTransfos] = useState<Transfo[]>([]);
@@ -63,6 +64,7 @@ export default function Progress() {
   const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [history, setHistory] = useState<Workout[]>([]);
   const [muscleVolume, setMuscleVolume] = useState<MuscleVolumePayload | null>(null);
+  const [profile, setProfile] = useState<Profile>({});
   const [sleepByDate, setSleepByDate] = useState<Record<string, number>>({});
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -72,13 +74,14 @@ export default function Progress() {
 
   const load = useCallback(async () => {
     try {
-      const [list, w, p, wk, hist, mv] = await Promise.all([
+      const [list, w, p, wk, hist, mv, pr] = await Promise.all([
         api<Transfo[]>("/transformations"),
         api<Week>("/dashboard/week"),
         api<PerfPayload>("/perf/recent?limit=200"),
         api<Workout[]>("/workouts/week").catch(() => []),
         api<Workout[]>("/workouts/history?limit=40").catch(() => []),
         api<MuscleVolumePayload>("/perf/muscle-volume?weeks=8").catch(() => null),
+        api<Profile>("/profile").catch(() => ({})),
       ]);
       setTransfos(list);
       setWeek(w);
@@ -86,6 +89,7 @@ export default function Progress() {
       setWorkouts(wk || []);
       setHistory(hist || []);
       setMuscleVolume(mv);
+      setProfile(pr || {});
       if (!selectedExercise && p.personal_bests.length > 0) {
         const counts: Record<string, number> = {};
         p.items.forEach((it) => { counts[it.exercise_name] = (counts[it.exercise_name] || 0) + 1; });
@@ -214,103 +218,20 @@ export default function Progress() {
           sleepLow={lowWeekSleep}
         />
 
-        <MuscleVolumeCard payload={muscleVolume} />
+        <BodyCompositionCard profile={profile} transfos={transfos} />
+
+        <PerformanceExplorerCard
+          muscleVolume={muscleVolume}
+          perf={perf}
+          selectedExercise={selectedExercise}
+          setSelectedExercise={setSelectedExercise}
+          chartData={chartData}
+          selectedBest={selectedBest}
+          trend={trend}
+          exerciseList={exerciseList}
+        />
 
         <HistoryWeeksCard weeks={historyWeeks} />
-
-        {/* 1RM Progression — THE addictive number */}
-        <Card testID="rm-card">
-          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: spacing.sm }}>
-            <Text style={typography.caption}>Force · Progression 1RM</Text>
-            {exerciseList.length > 0 && (
-              <View style={styles.flashChip}>
-                <Ionicons name="flash" size={12} color={colors.primary} />
-                <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>Epley</Text>
-              </View>
-            )}
-          </View>
-
-          {exerciseList.length === 0 ? (
-            <View style={{ alignItems: "center", paddingVertical: spacing.lg }}>
-              <View style={styles.emptyIcon}>
-                <Ionicons name="trending-up" size={28} color={colors.primary} />
-              </View>
-              <Text style={[typography.body, { fontWeight: "600", marginTop: spacing.md }]}>
-                {"Aucune perf enregistrée"}
-              </Text>
-              <Text style={[typography.small, { textAlign: "center", marginTop: 6 }]}>
-                {"Tape sur un exercice dans Training → enregistre charge × reps. Ta courbe 1RM commence ici."}
-              </Text>
-            </View>
-          ) : (
-            <>
-              {selectedExercise && (
-                <View style={{ marginBottom: spacing.sm }}>
-                  <Text style={[typography.h2, { lineHeight: 32 }]}>
-                    {selectedBest?.est_1rm.toFixed(1)} <Text style={[typography.small, { fontSize: 14 }]}>kg</Text>
-                  </Text>
-                  <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
-                    <Text style={[typography.small, { color: colors.textSecondary }]}>
-                      Record · {selectedExercise}
-                    </Text>
-                    {trend && (
-                      <View style={[styles.trendChip, { backgroundColor: trend.delta >= 0 ? "#DCFCE7" : "#FEE2E2" }]}>
-                        <Ionicons
-                          name={trend.delta >= 0 ? "trending-up" : "trending-down"}
-                          size={12}
-                          color={trend.delta >= 0 ? colors.primary : colors.alert}
-                        />
-                        <Text style={[typography.small, { fontWeight: "700", color: trend.delta >= 0 ? colors.primary : colors.alert }]}>
-                          {trend.delta >= 0 ? "+" : ""}{trend.delta.toFixed(1)} kg · {trend.pct >= 0 ? "+" : ""}{trend.pct.toFixed(0)}%
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              )}
-
-              <View style={{ alignItems: "center" }}>
-                {chartData.length >= 2 ? (
-                  <LineChart1RM data={chartData} width={320} height={160} testID="rm-chart" />
-                ) : (
-                  <View style={styles.chartEmpty}>
-                    <Text style={[typography.small, { textAlign: "center" }]}>
-                      {"Enregistre une 2e perf pour voir ta courbe d'évolution."}
-                    </Text>
-                  </View>
-                )}
-              </View>
-
-              {/* Exercise selector chips */}
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={{ gap: 8, paddingHorizontal: 0 }}
-                style={{ marginTop: spacing.md, marginHorizontal: -spacing.lg, paddingHorizontal: spacing.lg }}
-                testID="rm-exercise-chips"
-              >
-                {exerciseList.map((pb) => {
-                  const isOn = pb.exercise_name === selectedExercise;
-                  return (
-                    <TouchableOpacity
-                      key={pb.exercise_name}
-                      onPress={() => setSelectedExercise(pb.exercise_name)}
-                      style={[styles.exerciseChip, isOn && styles.exerciseChipOn]}
-                      testID={`rm-chip-${pb.exercise_name}`}
-                    >
-                      <Text style={[styles.exerciseChipText, isOn && { color: colors.primary, fontWeight: "700" }]} numberOfLines={1}>
-                        {pb.exercise_name}
-                      </Text>
-                      <Text style={[styles.exerciseChipKg, isOn && { color: colors.primary }]}>
-                        {pb.est_1rm.toFixed(0)} kg
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </>
-          )}
-        </Card>
 
         {/* Week chart */}
         <Card testID="week-card">
@@ -455,6 +376,187 @@ function WeeklyFollowRecap({
   );
 }
 
+function BodyCompositionCard({ profile, transfos }: { profile: Profile; transfos: Transfo[] }) {
+  const weights = transfos
+    .filter((item) => typeof item.weight_kg === "number")
+    .map((item) => ({
+      date: item.date || item.created_at,
+      weight: Number(item.weight_kg),
+      time: new Date(item.date || item.created_at).getTime(),
+    }))
+    .sort((a, b) => a.time - b.time);
+  const currentWeight = Number(profile.weight_kg || weights[weights.length - 1]?.weight || 0);
+  const startWeight = weights[0]?.weight || currentWeight;
+  const delta = currentWeight && startWeight ? currentWeight - startWeight : 0;
+  const fatLost = Math.max(0, profile.goal === "lose" ? -delta : Math.min(2.5, Math.max(0, -delta * 0.75)));
+  const muscleGain = Math.max(0, profile.goal === "gain" ? delta : Math.min(2.5, Math.max(0, delta * 0.55)));
+  const displayWeights = weights.length
+    ? weights.slice(-8)
+    : currentWeight
+      ? [{ date: new Date().toISOString(), weight: currentWeight, time: Date.now() }]
+      : [];
+  const min = Math.min(...displayWeights.map((p) => p.weight), currentWeight || 999);
+  const max = Math.max(...displayWeights.map((p) => p.weight), currentWeight || 0);
+  const span = Math.max(1, max - min);
+
+  return (
+    <Card testID="body-composition-card" style={{ gap: spacing.md }}>
+      <SectionTitle title="Résultats physiques" />
+      <View style={styles.bodyMetricGrid}>
+        <View style={styles.bodyMetric}>
+          <Ionicons name="flame-outline" size={17} color={colors.primaryLight} />
+          <Text style={styles.bodyMetricValue}>{fatLost.toFixed(1)} kg</Text>
+          <Text style={styles.bodyMetricLabel}>graisse perdue</Text>
+        </View>
+        <View style={styles.bodyMetric}>
+          <Ionicons name="barbell-outline" size={17} color={colors.primaryLight} />
+          <Text style={styles.bodyMetricValue}>{muscleGain.toFixed(1)} kg</Text>
+          <Text style={styles.bodyMetricLabel}>muscle gagné</Text>
+        </View>
+      </View>
+      <View style={styles.weightCurveBox}>
+        <View style={styles.weightCurveTop}>
+          <Text style={styles.weightCurveTitle}>Suivi du poids</Text>
+          <Text style={styles.weightCurveValue}>{currentWeight ? `${currentWeight.toFixed(1)} kg` : "À saisir"}</Text>
+        </View>
+        <View style={styles.weightBars}>
+          {displayWeights.map((point, index) => (
+            <View key={`${point.date}-${index}`} style={styles.weightBarCol}>
+              <View style={styles.weightBarTrack}>
+                <View style={[styles.weightBarFill, { height: `${Math.max(10, ((point.weight - min) / span) * 80 + 12)}%` }]} />
+              </View>
+            </View>
+          ))}
+        </View>
+      </View>
+    </Card>
+  );
+}
+
+function PerformanceExplorerCard({
+  muscleVolume,
+  perf,
+  selectedExercise,
+  setSelectedExercise,
+  chartData,
+  selectedBest,
+  trend,
+  exerciseList,
+}: {
+  muscleVolume: MuscleVolumePayload | null;
+  perf: PerfPayload;
+  selectedExercise: string | null;
+  setSelectedExercise: (exercise: string) => void;
+  chartData: { x: number; y: number }[];
+  selectedBest: Perf | null;
+  trend: { delta: number; pct: number } | null;
+  exerciseList: Perf[];
+}) {
+  const [mode, setMode] = useState<"muscle" | "exercise">("muscle");
+  return (
+    <Card testID="performance-explorer-card" style={{ gap: spacing.md }}>
+      <View style={styles.performanceHeader}>
+        <SectionTitle title="Courbes de progression" />
+        <View style={styles.performanceSwitch}>
+          <TouchableOpacity onPress={() => setMode("muscle")} style={[styles.performanceSwitchBtn, mode === "muscle" && styles.performanceSwitchOn]}>
+            <Text style={[styles.performanceSwitchText, mode === "muscle" && styles.performanceSwitchTextOn]}>Muscle</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setMode("exercise")} style={[styles.performanceSwitchBtn, mode === "exercise" && styles.performanceSwitchOn]}>
+            <Text style={[styles.performanceSwitchText, mode === "exercise" && styles.performanceSwitchTextOn]}>Exercice</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      {mode === "muscle" ? (
+        <MuscleVolumeCard payload={muscleVolume} embedded />
+      ) : (
+        <ExerciseProgressPanel
+          perf={perf}
+          selectedExercise={selectedExercise}
+          setSelectedExercise={setSelectedExercise}
+          chartData={chartData}
+          selectedBest={selectedBest}
+          trend={trend}
+          exerciseList={exerciseList}
+        />
+      )}
+    </Card>
+  );
+}
+
+function ExerciseProgressPanel({
+  selectedExercise,
+  setSelectedExercise,
+  chartData,
+  selectedBest,
+  trend,
+  exerciseList,
+}: {
+  perf: PerfPayload;
+  selectedExercise: string | null;
+  setSelectedExercise: (exercise: string) => void;
+  chartData: { x: number; y: number }[];
+  selectedBest: Perf | null;
+  trend: { delta: number; pct: number } | null;
+  exerciseList: Perf[];
+}) {
+  if (exerciseList.length === 0) {
+    return (
+      <View style={{ alignItems: "center", paddingVertical: spacing.lg }}>
+        <View style={styles.emptyIcon}>
+          <Ionicons name="trending-up" size={28} color={colors.primary} />
+        </View>
+        <Text style={[typography.body, { fontWeight: "600", marginTop: spacing.md }]}>Aucune perf enregistrée</Text>
+        <Text style={[typography.small, { textAlign: "center", marginTop: 6 }]}>
+          Enregistre charge et reps pendant une séance pour voir tes courbes.
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View testID="rm-card">
+      {selectedExercise && (
+        <View style={{ marginBottom: spacing.sm }}>
+          <Text style={[typography.h2, { lineHeight: 32 }]}>
+            {selectedBest?.est_1rm.toFixed(1)} <Text style={[typography.small, { fontSize: 14 }]}>kg</Text>
+          </Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
+            <Text style={[typography.small, { color: colors.textSecondary }]}>Record · {selectedExercise}</Text>
+            {trend ? (
+              <View style={[styles.trendChip, { backgroundColor: trend.delta >= 0 ? "#DCFCE7" : "#FEE2E2" }]}>
+                <Ionicons name={trend.delta >= 0 ? "trending-up" : "trending-down"} size={12} color={trend.delta >= 0 ? colors.primary : colors.alert} />
+                <Text style={[typography.small, { fontWeight: "700", color: trend.delta >= 0 ? colors.primary : colors.alert }]}>
+                  {trend.delta >= 0 ? "+" : ""}{trend.delta.toFixed(1)} kg · {trend.pct >= 0 ? "+" : ""}{trend.pct.toFixed(0)}%
+                </Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      )}
+      <View style={{ alignItems: "center" }}>
+        {chartData.length >= 2 ? (
+          <LineChart1RM data={chartData} width={320} height={160} testID="rm-chart" />
+        ) : (
+          <View style={styles.chartEmpty}>
+            <Text style={[typography.small, { textAlign: "center" }]}>{"Enregistre une 2e perf pour voir ta courbe d'évolution."}</Text>
+          </View>
+        )}
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, paddingHorizontal: 0 }} style={{ marginTop: spacing.md, marginHorizontal: -spacing.lg, paddingHorizontal: spacing.lg }} testID="rm-exercise-chips">
+        {exerciseList.map((pb) => {
+          const isOn = pb.exercise_name === selectedExercise;
+          return (
+            <TouchableOpacity key={pb.exercise_name} onPress={() => setSelectedExercise(pb.exercise_name)} style={[styles.exerciseChip, isOn && styles.exerciseChipOn]} testID={`rm-chip-${pb.exercise_name}`}>
+              <Text style={[styles.exerciseChipText, isOn && { color: colors.primary, fontWeight: "700" }]} numberOfLines={1}>{pb.exercise_name}</Text>
+              <Text style={[styles.exerciseChipKg, isOn && { color: colors.primary }]}>{pb.est_1rm.toFixed(0)} kg</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
 function RecapStat({ icon, label, value, warning }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string; warning?: boolean }) {
   return (
     <View style={[styles.recapStat, warning && styles.recapStatWarning]}>
@@ -465,13 +567,14 @@ function RecapStat({ icon, label, value, warning }: { icon: keyof typeof Ionicon
   );
 }
 
-function MuscleVolumeCard({ payload }: { payload: MuscleVolumePayload | null }) {
+function MuscleVolumeCard({ payload, embedded = false }: { payload: MuscleVolumePayload | null; embedded?: boolean }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const items = payload?.items || [];
   const maxVolume = Math.max(1, ...items.flatMap((item) => item.series.map((point) => point.volume)));
+  const Container = embedded ? View : Card;
 
   return (
-    <Card testID="muscle-volume-card" style={{ gap: spacing.md }}>
+    <Container testID="muscle-volume-card" style={{ gap: spacing.md }}>
       <View style={styles.muscleHeader}>
         <SectionTitle title="Kg soulevés par muscle" />
         <View style={styles.muscleWeekChip}>
@@ -537,7 +640,7 @@ function MuscleVolumeCard({ payload }: { payload: MuscleVolumePayload | null }) 
           );
         })
       )}
-    </Card>
+    </Container>
   );
 }
 
@@ -932,6 +1035,24 @@ const styles = StyleSheet.create({
   recapLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "800" },
   sleepWarningBox: { minHeight: 38, flexDirection: "row", alignItems: "center", gap: 7, paddingHorizontal: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,179,63,0.30)", backgroundColor: "rgba(255,179,63,0.09)" },
   sleepWarningText: { color: colors.amber, fontSize: 11.5, fontWeight: "900", flex: 1 },
+  bodyMetricGrid: { flexDirection: "row", gap: spacing.sm },
+  bodyMetric: { flex: 1, minHeight: 96, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.07)", padding: spacing.sm, justifyContent: "space-between" },
+  bodyMetricValue: { color: colors.textMain, fontSize: 24, fontWeight: "900", marginTop: 4 },
+  bodyMetricLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "800" },
+  weightCurveBox: { gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: colors.border, backgroundColor: "rgba(255,255,255,0.05)" },
+  weightCurveTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  weightCurveTitle: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
+  weightCurveValue: { color: colors.primaryLight, fontSize: 13, fontWeight: "900" },
+  weightBars: { height: 82, flexDirection: "row", alignItems: "flex-end", gap: 7 },
+  weightBarCol: { flex: 1, height: "100%", justifyContent: "flex-end" },
+  weightBarTrack: { height: "100%", borderRadius: 8, overflow: "hidden", justifyContent: "flex-end", backgroundColor: "rgba(255,255,255,0.08)" },
+  weightBarFill: { width: "100%", borderRadius: 8, backgroundColor: "rgba(88,183,255,0.82)" },
+  performanceHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+  performanceSwitch: { flexDirection: "row", padding: 3, borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: colors.border },
+  performanceSwitchBtn: { minHeight: 30, paddingHorizontal: 10, borderRadius: radius.full, alignItems: "center", justifyContent: "center" },
+  performanceSwitchOn: { backgroundColor: colors.primaryLight },
+  performanceSwitchText: { color: colors.textMuted, fontSize: 11, fontWeight: "900" },
+  performanceSwitchTextOn: { color: "#102108" },
   muscleHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
   muscleWeekChip: { flexDirection: "row", alignItems: "center", gap: 5, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.08)", paddingHorizontal: 9, minHeight: 28 },
   muscleWeekText: { color: colors.primaryLight, fontSize: 10.5, fontWeight: "900" },

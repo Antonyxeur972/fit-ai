@@ -49,6 +49,7 @@ export const PLAN_DETAILS: Record<SubscriptionPlan, {
   label: string;
   priceLabel: string;
   period: string;
+  trialLabel: string;
   monthlyLabel?: string;
   badge?: string;
   discountPriceLabel?: string;
@@ -57,18 +58,18 @@ export const PLAN_DETAILS: Record<SubscriptionPlan, {
 }> = {
   monthly: {
     label: "Mensuel",
-    priceLabel: "9,99 €",
+    priceLabel: "12,99 €",
     period: "/ mois",
+    trialLabel: "3 jours d'essai gratuit",
+    monthlyLabel: "sans engagement",
   },
   annual: {
     label: "Annuel",
-    priceLabel: "79,99 €",
+    priceLabel: "49,99 €",
     period: "/ an",
-    monthlyLabel: "soit 6,67 € / mois",
+    trialLabel: "7 jours d'essai gratuit",
+    monthlyLabel: "offre annuelle centrale",
     badge: "Meilleur choix",
-    discountPriceLabel: "39,99 €",
-    discountMonthlyLabel: "soit 3,33 € / mois",
-    discountLabel: "Offre -50% pendant 24h",
   },
 };
 

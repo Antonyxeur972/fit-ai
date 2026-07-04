@@ -20,6 +20,7 @@ import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { colors, spacing, typography, radius } from "@/src/theme";
 import { PROGRAM_PRESETS, phaseForWeek, presetByGoal } from "@/src/lib/programPresets";
 import { readDefaultTrainingTime } from "@/src/lib/trainingPreferences";
+import { getSimpleMode } from "@/src/lib/simpleMode";
 
 type Exercise = { name: string; sets: number; reps: string; rest_s: number; checked?: boolean; is_recommended?: boolean };
 type Workout = {
@@ -54,6 +55,44 @@ const SPLIT_LABELS: Record<string, string> = {
   upper_lower: "Upper / Lower",
   home: "Home",
 };
+
+const STRUCTURE_OPTIONS = [
+  {
+    v: "fullbody" as const,
+    label: "Full body",
+    ideal: "idéal 2 à 3 j / sem",
+    icon: "body-outline" as const,
+    points: ["Chaque muscle 2 à 3x / sem", "Simple, complet, très efficace"],
+  },
+  {
+    v: "upper_lower" as const,
+    label: "Upper / Lower",
+    ideal: "idéal 4 j / sem",
+    icon: "accessibility-outline" as const,
+    points: ["Chaque muscle 2x / sem", "Bon équilibre volume / récup"],
+  },
+  {
+    v: "ppl" as const,
+    label: "PPL",
+    ideal: "idéal 5 à 6 j / sem",
+    icon: "git-branch-outline" as const,
+    points: ["Push · Pull · Legs", "Très bon si tu t'entraînes souvent"],
+  },
+  {
+    v: "split" as const,
+    label: "Split + rappels",
+    ideal: "idéal 5 j / sem",
+    icon: "scan-circle-outline" as const,
+    points: ["1 groupe principal + rappels", "Plus de focus, moins de hasard"],
+  },
+  {
+    v: "home" as const,
+    label: "À la maison",
+    ideal: "déplacement",
+    icon: "home-outline" as const,
+    points: ["Poids du corps", "Simple quand tu n'as pas de matériel"],
+  },
+];
 
 type CalendarDay = {
   id: string | null; session_type: string; completed: boolean; focus: string; exercises_count: number; planned?: boolean;
@@ -377,6 +416,7 @@ export default function Training() {
   const { user } = useAuth();
   const today = new Date().toISOString().slice(0, 10);
   const [tab, setTab] = useState<TrainingTab>("today");
+  const [simpleMode, setSimpleMode] = useState(false);
   const [week, setWeek] = useState<Workout[]>([]);
   const [activity, setActivity] = useState<Activity | null>(null);
   const [library, setLibrary] = useState<LibExercise[]>([]);
@@ -425,6 +465,7 @@ export default function Training() {
   const [setupGoal, setSetupGoal] = useState("Masse");
   const [setupBlocks, setSetupBlocks] = useState<{ volume: number; puissance: number; force: number }>({ volume: 1, puissance: 1, force: 1 });
   const [setupChangeMode, setSetupChangeMode] = useState<"stable" | "changed">("stable");
+  const [setupShowRecommendation, setSetupShowRecommendation] = useState(false);
   const [setupSameTime, setSetupSameTime] = useState(true);
   const [setupDefaultTime, setSetupDefaultTime] = useState("18:30");
   const [setupTrainingTimes, setSetupTrainingTimes] = useState<Record<string, string>>({});
@@ -454,11 +495,12 @@ export default function Training() {
 
   const load = useCallback(async () => {
     try {
-      const [w, a, lib, prog] = await Promise.all([
+      const [w, a, lib, prog, simple] = await Promise.all([
         api<Workout[]>("/workouts/week"),
         api<Activity>(`/activity?date=${today}`),
         api<{ exercises: LibExercise[]; session_types: SessionTypes }>("/exercises/library"),
         api<{ program: TrainingProgram | null }>("/program/current").catch(() => ({ program: null })),
+        getSimpleMode().catch(() => false),
       ]);
       setWeek(w);
       setActivity(a);
@@ -468,6 +510,8 @@ export default function Training() {
       setLibrary(lib.exercises);
       setSessionTypes(lib.session_types);
       setProgram(prog.program || null);
+      setSimpleMode(Boolean(simple));
+      if (simple) setTab("today");
       if (prog.program && expandedWeek === null) {
         setExpandedWeek(prog.program.current_week);
       }
@@ -1350,6 +1394,7 @@ export default function Training() {
           </View>
         </View>
 
+        {!simpleMode && (
         <View style={styles.tabRow}>
           <TouchableOpacity onPress={() => setTab("today")} style={[styles.tabChip, tab === "today" && styles.tabChipActive]} testID="training-tab-today">
             <Ionicons name="leaf-outline" size={13} color={tab === "today" ? "#102108" : colors.textMuted} />
@@ -1364,6 +1409,7 @@ export default function Training() {
             <Text style={[styles.tabText, tab === "history" && styles.tabTextActive]}>Historique</Text>
           </TouchableOpacity>
         </View>
+        )}
       </ImageBackground>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -1502,7 +1548,7 @@ export default function Training() {
         )}
 
         {/* My Program (weeks) */}
-        {program && (
+        {program && !simpleMode && (
           <ProgramActionsFooter
             program={program}
             onCreate={openProgramSetup}
@@ -1556,6 +1602,7 @@ export default function Training() {
           </View>
         )}
 
+        {!simpleMode && (
         <Card testID="activity-card">
           <SectionTitle title="Activité du jour" action={
             <TouchableOpacity onPress={() => setShowActivity(true)} testID="activity-edit-button">
@@ -1570,6 +1617,7 @@ export default function Training() {
             <Stat label="Type" value={activity?.cardio_type || "—"} align="center" />
           </View>
         </Card>
+        )}
 
         <View style={{ height: spacing.xxl }} />
           </>
@@ -2228,25 +2276,74 @@ export default function Training() {
                 </View>
               )}
 
-              <Text style={[typography.caption, { marginTop: spacing.md }]}>Organisation des séances</Text>
-              <View style={styles.setupOptionRow}>
-                {([
-                  { v: "ppl" as const, label: "PPL", sub: "Push / Pull / Legs" },
-                  { v: "fullbody" as const, label: "Full body", sub: "Tout le corps" },
-                  { v: "upper_lower" as const, label: "Upper / Lower", sub: "Haut puis bas" },
-                  { v: "split" as const, label: "Split", sub: "1 groupe / séance" },
-                  { v: "home" as const, label: "À la maison", sub: "Poids du corps" },
-                ]).map((o) => (
-                  <TouchableOpacity
-                    key={o.v}
-                    onPress={() => setSetupSplit(o.v as any)}
-                    style={[styles.setupOption, setupSplit === o.v && styles.setupOptionOn]}
-                    testID={`setup-split-${o.v}`}
-                  >
-                    <Text style={[styles.setupOptionLabel, setupSplit === o.v && styles.setupOptionLabelOn]}>{o.label}</Text>
-                    <Text style={styles.setupOptionSub}>{o.sub}</Text>
-                  </TouchableOpacity>
-                ))}
+              <View style={styles.structureSetupPanel} testID="program-structure-picker">
+                <View style={styles.structureSetupHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.structureSetupTitle}>Choisis la bonne structure</Text>
+                    <Text style={styles.structureSetupSub}>Le plus important : répartir les muscles sur la semaine sans exploser le volume.</Text>
+                  </View>
+                  <View style={styles.sciencePill}>
+                    <Ionicons name="shield-checkmark-outline" size={12} color={colors.primaryLight} />
+                    <Text style={styles.sciencePillText}>fondé science</Text>
+                  </View>
+                </View>
+                <View style={styles.structureCardStack}>
+                  {STRUCTURE_OPTIONS.map((option) => (
+                    <TouchableOpacity
+                      key={option.v}
+                      activeOpacity={0.86}
+                      onPress={() => {
+                        setSetupSplit(option.v);
+                        setSetupShowRecommendation(false);
+                      }}
+                      style={[styles.structureChoiceCard, setupSplit === option.v && styles.structureChoiceCardOn]}
+                      testID={`setup-split-${option.v}`}
+                    >
+                      <View style={[styles.structureChoiceIcon, setupSplit === option.v && styles.structureChoiceIconOn]}>
+                        <Ionicons name={option.icon} size={24} color={setupSplit === option.v ? "#102108" : colors.primaryLight} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <View style={styles.structureChoiceTop}>
+                          <Text style={styles.structureChoiceTitle}>{option.label}</Text>
+                          <Text style={styles.structureChoiceIdeal}>{option.ideal}</Text>
+                        </View>
+                        {option.points.map((point) => (
+                          <View key={point} style={styles.structurePointRow}>
+                            <Ionicons name="checkmark-circle-outline" size={13} color={colors.primaryLight} />
+                            <Text style={styles.structurePointText}>{point}</Text>
+                          </View>
+                        ))}
+                      </View>
+                      <Ionicons name={setupSplit === option.v ? "star" : "chevron-forward"} size={18} color={setupSplit === option.v ? colors.primaryLight : colors.textMuted} />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <View style={styles.structureRulesBox}>
+                  <RuleLine icon="bar-chart-outline" text="Le volume hebdo compte le plus." />
+                  <RuleLine icon="repeat-outline" text="La fréquence aide à mieux répartir le travail." />
+                  <RuleLine icon="hourglass-outline" text="Le meilleur plan est celui que tu tiens." />
+                </View>
+                <TouchableOpacity
+                  activeOpacity={0.86}
+                  onPress={() => setSetupShowRecommendation((value) => !value)}
+                  style={styles.recommendationButton}
+                  testID="program-show-recommendation"
+                >
+                  <Ionicons name="sparkles-outline" size={17} color="#102108" />
+                  <Text style={styles.recommendationButtonText}>{setupShowRecommendation ? "Masquer la recommandation" : "Voir ma recommandation IA"}</Text>
+                </TouchableOpacity>
+                {setupShowRecommendation ? (
+                  <View style={styles.recommendationSetupCard} testID="program-ai-recommendation">
+                    <Text style={styles.recommendationKicker}>Recommandation FIT AI</Text>
+                    <Text style={styles.recommendationTitle}>{splitRecommendationTitle(setupSplit, setupFreq)}</Text>
+                    <Text style={styles.recommendationText}>{splitRecommendationReason(setupSplit, setupFreq)}</Text>
+                    <View style={styles.recommendationMetaRow}>
+                      <MiniSetupSignal icon="flame-outline" label="Objectif" value={setupGoal} />
+                      <MiniSetupSignal icon="calendar-outline" label="Fréquence" value={`${setupFreq} j / sem`} />
+                      <MiniSetupSignal icon="time-outline" label="Temps" value="45 min" />
+                    </View>
+                  </View>
+                ) : null}
               </View>
 
               <Text style={[typography.caption, { marginTop: spacing.md }]}>Durée du programme</Text>
@@ -2590,6 +2687,43 @@ function TypeChip({ type, compact }: { type: SessionKey; compact?: boolean }) {
   );
 }
 
+function splitRecommendationTitle(split: TrainingProgram["split"], frequency: number): string {
+  if (split === "fullbody") return `Full body ${Math.min(frequency, 3)}x / semaine`;
+  if (split === "upper_lower") return "Upper / Lower 4x / semaine";
+  if (split === "ppl") return `PPL ${Math.max(5, frequency)}x / semaine`;
+  if (split === "home") return "Programme maison";
+  return "Split + rappels";
+}
+
+function splitRecommendationReason(split: TrainingProgram["split"], frequency: number): string {
+  if (split === "fullbody") return "Parfait si tu veux progresser avec peu de séances : chaque groupe musculaire revient plusieurs fois sans surcharge.";
+  if (split === "upper_lower") return "Très bon équilibre à 4 séances : le haut et le bas du corps ont assez de place pour progresser et récupérer.";
+  if (split === "ppl") return frequency >= 5
+    ? "Cohérent quand tu t'entraînes souvent : Push, Pull et Legs restent lisibles et les exercices sont mieux regroupés."
+    : "PPL est plus solide avec 5 séances ou plus. Si tu restes à 3 jours, Full body sera souvent plus efficace.";
+  if (split === "home") return "Utile en déplacement ou sans matériel. FIT AI privilégie les mouvements au poids du corps faciles à répéter.";
+  return "Bon pour un focus plus précis, avec des rappels pour éviter d'oublier un groupe musculaire.";
+}
+
+function RuleLine({ icon, text }: { icon: keyof typeof Ionicons.glyphMap; text: string }) {
+  return (
+    <View style={styles.structureRuleLine}>
+      <Ionicons name={icon} size={14} color={colors.primaryLight} />
+      <Text style={styles.structureRuleText}>{text}</Text>
+    </View>
+  );
+}
+
+function MiniSetupSignal({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
+  return (
+    <View style={styles.miniSetupSignal}>
+      <Ionicons name={icon} size={14} color={colors.primaryLight} />
+      <Text style={styles.miniSetupLabel}>{label}</Text>
+      <Text style={styles.miniSetupValue}>{value}</Text>
+    </View>
+  );
+}
+
 function SessionTypeSelector({
   value, onChange, sessionTypes,
 }: { value: SessionKey; onChange: (k: SessionKey) => void; sessionTypes: SessionTypes }) {
@@ -2910,6 +3044,35 @@ const styles = StyleSheet.create({
   setupOptionLabel: { fontSize: 14, fontWeight: "700", color: "rgba(255,255,255,0.6)" },
   setupOptionLabelOn: { color: colors.primaryLight },
   setupOptionSub: { fontSize: 10, color: "rgba(255,255,255,0.38)", marginTop: 2 },
+  structureSetupPanel: { marginTop: spacing.md, gap: spacing.md, padding: spacing.md, borderRadius: radius.lg, borderWidth: 1, borderColor: "rgba(182,255,63,0.20)", backgroundColor: "rgba(255,255,255,0.045)" },
+  structureSetupHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: spacing.sm },
+  structureSetupTitle: { color: colors.textMain, fontSize: 20, lineHeight: 24, fontWeight: "900" },
+  structureSetupSub: { color: colors.textMuted, fontSize: 12, lineHeight: 17, fontWeight: "700", marginTop: 4 },
+  sciencePill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: GLASS_BORDER },
+  sciencePillText: { color: colors.primaryLight, fontSize: 9.5, fontWeight: "900" },
+  structureCardStack: { gap: 9 },
+  structureChoiceCard: { minHeight: 82, flexDirection: "row", alignItems: "center", gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.06)" },
+  structureChoiceCardOn: { borderColor: colors.primaryLight, backgroundColor: "rgba(182,255,63,0.14)" },
+  structureChoiceIcon: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(182,255,63,0.10)", borderWidth: 1, borderColor: "rgba(182,255,63,0.18)" },
+  structureChoiceIconOn: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
+  structureChoiceTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm, marginBottom: 4 },
+  structureChoiceTitle: { flex: 1, color: colors.textMain, fontSize: 15, fontWeight: "900" },
+  structureChoiceIdeal: { color: colors.textSecondary, fontSize: 10, fontWeight: "900" },
+  structurePointRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 },
+  structurePointText: { flex: 1, color: colors.textSecondary, fontSize: 11, fontWeight: "700" },
+  structureRulesBox: { gap: 7, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(182,255,63,0.18)", backgroundColor: "rgba(182,255,63,0.07)" },
+  structureRuleLine: { flexDirection: "row", alignItems: "center", gap: 7 },
+  structureRuleText: { flex: 1, color: colors.textSecondary, fontSize: 11.5, fontWeight: "800" },
+  recommendationButton: { minHeight: 46, borderRadius: radius.full, backgroundColor: colors.primaryLight, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  recommendationButtonText: { color: "#102108", fontSize: 13.5, fontWeight: "900" },
+  recommendationSetupCard: { gap: spacing.sm, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(182,255,63,0.28)", backgroundColor: "rgba(4,24,14,0.74)" },
+  recommendationKicker: { color: colors.primaryLight, fontSize: 10.5, fontWeight: "900", textTransform: "uppercase" },
+  recommendationTitle: { color: colors.textMain, fontSize: 20, fontWeight: "900" },
+  recommendationText: { color: colors.textSecondary, fontSize: 12.5, lineHeight: 18, fontWeight: "700" },
+  recommendationMetaRow: { flexDirection: "row", gap: 8 },
+  miniSetupSignal: { flex: 1, minHeight: 58, alignItems: "center", justifyContent: "center", padding: 6, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.055)" },
+  miniSetupLabel: { color: colors.textMuted, fontSize: 9.5, fontWeight: "900", marginTop: 2 },
+  miniSetupValue: { color: colors.textMain, fontSize: 11, fontWeight: "900", marginTop: 1, textAlign: "center" },
   setupTimeInput: { minHeight: 46, marginTop: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.07)", color: colors.textMain, fontSize: 18, fontWeight: "900", textAlign: "center", paddingHorizontal: spacing.md },
   setupTimeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: spacing.sm },
   setupTimeCell: { width: "30.5%", minHeight: 64, gap: 4, padding: 7, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.055)" },
