@@ -13,3 +13,11 @@ export async function syncPhoneStepsToday(_currentSteps = 0): Promise<StepSyncRe
     message: "La synchronisation automatique se fait depuis le podomètre du téléphone.",
   };
 }
+
+export async function prepareMotionAccess(): Promise<StepSyncResult> {
+  return {
+    ok: false,
+    status: "unavailable",
+    message: "L'accès mouvement sera demandé depuis l'app mobile.",
+  };
+}

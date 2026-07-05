@@ -11,6 +11,10 @@ import unicodedata
 from pathlib import Path
 from datetime import datetime, timezone, timedelta, date as dt_date
 from typing import List, Optional, Dict, Any, Set
+try:
+    from zoneinfo import ZoneInfo
+except Exception:
+    ZoneInfo = None
 
 import httpx
 from fastapi import FastAPI, APIRouter, HTTPException, Header, Request
@@ -57,8 +61,15 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def now_local() -> datetime:
+    tz_name = os.environ.get("FITAI_TIMEZONE", "Europe/Paris")
+    if ZoneInfo:
+        return datetime.now(ZoneInfo(tz_name))
+    return datetime.now(timezone(timedelta(hours=int(os.environ.get("FITAI_UTC_OFFSET", "1")))))
+
+
 def today_str() -> str:
-    return now_utc().date().isoformat()
+    return now_local().date().isoformat()
 
 
 def new_id(prefix: str = "id") -> str:
@@ -235,6 +246,11 @@ class ManualAiMealRequest(BaseModel):
     date: Optional[str] = None
 
 
+class MealUpdateRequest(BaseModel):
+    date: Optional[str] = None
+    meal_type: Optional[str] = None
+
+
 class ActivityIn(BaseModel):
     date: str
     steps: int = 0
@@ -389,6 +405,11 @@ class ChallengeCheckDayRequest(BaseModel):
 class SleepLogRequest(BaseModel):
     date: Optional[str] = None
     hours: float
+
+
+class WeightLogRequest(BaseModel):
+    weight_kg: float
+    date: Optional[str] = None
 
 
 class AffiliateCreateRequest(BaseModel):
@@ -992,7 +1013,7 @@ def generate_week_plan(profile: dict, session_type: str = "volume") -> List[Dict
             "exercises": [{"name": "Étirements doux", "sets": 1, "reps": "15 min", "rest_s": 0, "checked": True}],
         },
     ]
-    today = now_utc().date()
+    today = now_local().date()
     plan = []
     for i, day in enumerate(base):
         d = today + timedelta(days=i)
@@ -1565,11 +1586,23 @@ def validate_meal_date(d: Optional[str]) -> str:
         target = datetime.strptime(d, "%Y-%m-%d").date()
     except ValueError:
         raise HTTPException(400, "Invalid date format (expected YYYY-MM-DD)")
-    today = now_utc().date()
+    today = now_local().date()
     if target > today:
         raise HTTPException(400, "Date dans le futur non autorisée")
     if (today - target).days > 14:
         raise HTTPException(400, "Tu ne peux ajouter qu'aux 14 derniers jours")
+    return d
+
+
+def validate_log_date(d: Optional[str]) -> str:
+    if not d:
+        return today_str()
+    try:
+        target = datetime.strptime(d, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(400, "Invalid date format (expected YYYY-MM-DD)")
+    if target > now_local().date():
+        raise HTTPException(400, "Date dans le futur non autorisée")
     return d
 
 
@@ -2460,6 +2493,28 @@ async def get_meal(meal_id: str, authorization: Optional[str] = Header(default=N
     return meal
 
 
+@api.patch("/meals/{meal_id}")
+async def update_meal(meal_id: str, body: MealUpdateRequest, authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    update: Dict[str, Any] = {"updated_at": now_utc()}
+    if body.date is not None:
+        update["date"] = validate_meal_date(body.date)
+    if body.meal_type is not None:
+        update["meal_type"] = body.meal_type
+    if len(update) == 1:
+        raise HTTPException(400, "Nothing to update")
+    res = await db.meals.update_one(
+        {"id": meal_id, "user_id": user["user_id"]},
+        {"$set": update},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(404, "Not found")
+    meal = await db.meals.find_one(
+        {"id": meal_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    return meal
+
+
 @api.delete("/meals/{meal_id}")
 async def delete_meal(meal_id: str, authorization: Optional[str] = Header(default=None)):
     user = await get_current_user(authorization)
@@ -3294,6 +3349,20 @@ def _planned_program_workout_payload(prog: Dict[str, Any], target_date: str) -> 
         "planned": True,
         "training_time": training_time,
     }
+
+
+def _next_program_workout_payload(prog: Dict[str, Any], from_date: str, max_days: int = 28) -> Optional[Dict[str, Any]]:
+    try:
+        start = datetime.strptime(from_date, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    for offset in range(1, max_days + 1):
+        d = (start + timedelta(days=offset)).isoformat()
+        planned = _planned_program_workout_payload(prog, d)
+        if planned:
+            planned["upcoming"] = True
+            return planned
+    return None
 
 
 def _fallback_program_workout_payload(prog: Dict[str, Any], target_date: str) -> Optional[Dict[str, Any]]:
@@ -4336,7 +4405,12 @@ async def get_week_workouts(authorization: Optional[str] = Header(default=None))
 async def workout_today(authorization: Optional[str] = Header(default=None)):
     user = await get_current_user(authorization)
     w = await db.workouts.find_one(
-        {"user_id": user["user_id"], "date": today_str()}, {"_id": 0}
+        {
+            "user_id": user["user_id"],
+            "date": today_str(),
+            "$or": [{"challenge_id": {"$exists": False}}, {"challenge_id": None}],
+        },
+        {"_id": 0},
     )
     if not w:
         prog = await db.programs.find_one(
@@ -4436,6 +4510,43 @@ async def list_transformations(authorization: Optional[str] = Header(default=Non
     return items
 
 
+@api.post("/weight-logs")
+async def add_weight_log(body: WeightLogRequest, authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    d = validate_log_date(body.date)
+    weight = round(max(20.0, min(400.0, float(body.weight_kg))), 1)
+    doc = {
+        "id": new_id("weight"),
+        "user_id": user["user_id"],
+        "date": d,
+        "weight_kg": weight,
+        "created_at": now_utc(),
+        "updated_at": now_utc(),
+    }
+    existing = await db.weight_logs.find_one({"user_id": user["user_id"], "date": d}, {"_id": 0})
+    if existing:
+        doc["id"] = existing.get("id", doc["id"])
+        doc["created_at"] = existing.get("created_at", doc["created_at"])
+    await db.weight_logs.update_one(
+        {"user_id": user["user_id"], "date": d},
+        {"$set": doc},
+        upsert=True,
+    )
+    await db.profiles.update_one(
+        {"user_id": user["user_id"]},
+        {"$set": {"weight_kg": weight, "updated_at": now_utc()}},
+    )
+    return strip_id(doc)
+
+
+@api.get("/weight-logs")
+async def list_weight_logs(authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    return await db.weight_logs.find(
+        {"user_id": user["user_id"]}, {"_id": 0}
+    ).sort("date", 1).to_list(240)
+
+
 @api.delete("/transformations/{transfo_id}")
 async def delete_transformation(transfo_id: str, authorization: Optional[str] = Header(default=None)):
     user = await get_current_user(authorization)
@@ -4476,14 +4587,19 @@ async def dashboard_day(
         {"user_id": user["user_id"], "date": d}, {"_id": 0}
     ) or {"steps": 0, "cardio_minutes": 0}
     workout = await db.workouts.find_one(
-        {"user_id": user["user_id"], "date": d}, {"_id": 0}
+        {
+            "user_id": user["user_id"],
+            "date": d,
+            "$or": [{"challenge_id": {"$exists": False}}, {"challenge_id": None}],
+        },
+        {"_id": 0},
     )
     if not workout:
         prog = await db.programs.find_one(
             {"user_id": user["user_id"], "active": True}, {"_id": 0}, sort=[("created_at", -1)]
         )
         if prog:
-            workout = _planned_program_workout_payload(prog, d)
+            workout = _planned_program_workout_payload(prog, d) or _next_program_workout_payload(prog, d)
 
     consumed = sum(m.get("calories", 0) for m in meals)
     protein = sum(m.get("protein_g", 0) for m in meals)

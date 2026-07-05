@@ -39,7 +39,7 @@ type DashboardData = {
   macros: { protein_g: number; carbs_g: number; fat_g: number; protein_target: number; carbs_target: number; fat_target: number };
   burned: { bmr: number; steps: number; cardio: number; workout: number; total: number };
   activity: { steps: number; cardio_minutes: number };
-  workout: { title?: string; focus?: string; completed?: boolean; duration_min?: number } | null;
+  workout: { title?: string; focus?: string; completed?: boolean; duration_min?: number; date?: string; upcoming?: boolean; planned?: boolean } | null;
   meals_count: number;
   balance: number;
 };
@@ -64,6 +64,19 @@ type PointsSummary = {
 };
 
 type WeekWorkout = { id: string; date: string; completed?: boolean };
+
+function parseLocalDate(iso?: string) {
+  if (!iso) return null;
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
+}
+
+function formatWorkoutDate(iso?: string) {
+  const d = parseLocalDate(iso);
+  if (!d) return "";
+  return d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+}
 
 export default function Dashboard() {
   const router = useRouter();
@@ -204,7 +217,9 @@ export default function Dashboard() {
   const activeBurned = Math.max(0, (data.burned.steps || 0) + (data.burned.cardio || 0) + (data.burned.workout || 0));
   const stepsProgress = Math.min(1, data.activity.steps / STEPS_GOAL);
   const activeMinutesProgress = Math.min(1, data.activity.cardio_minutes / ACTIVE_MINUTES_GOAL);
-  const workoutDone = Boolean(data.workout?.completed);
+  const workoutDate = data.workout?.date || data.date;
+  const isWorkoutToday = workoutDate === data.date;
+  const workoutDone = Boolean(data.workout?.completed && isWorkoutToday);
   const dailyStepXp = Math.floor((data.activity.steps || 0) / 4000) * 5;
   const waterXp = hydration.amountMl >= WATER_GOAL_ML ? 20 : 0;
   const workoutXp = workoutDone ? 100 : 0;
@@ -213,7 +228,12 @@ export default function Dashboard() {
   const level = Math.floor(totalXp / XP_PER_LEVEL) + 1;
   const xpInLevel = totalXp % XP_PER_LEVEL;
   const gainedToday = points?.points_gained_today ?? Math.max(0, points?.points_today || fallbackXp);
-  const workoutLabel = data.workout?.focus || data.workout?.title || "Séance du jour";
+  const workoutLabel = data.workout?.focus || data.workout?.title || (isWorkoutToday ? "Séance du jour" : "Prochaine séance");
+  const workoutActionText = workoutDone ? "Validée" : isWorkoutToday ? "Commencer la séance" : "Préparer la séance";
+  const workoutSectionLabel = isWorkoutToday ? "Séance du jour" : "Prochaine séance";
+  const workoutMeta = isWorkoutToday
+    ? `${data.workout?.duration_min || ACTIVE_MINUTES_GOAL} min · ${workoutDone ? "séance validée" : "à valider"}`
+    : `${data.workout?.duration_min || ACTIVE_MINUTES_GOAL} min · prévue ${formatWorkoutDate(workoutDate)}`;
 
   if (simpleMode) {
     return (
@@ -256,11 +276,11 @@ export default function Dashboard() {
             <Text style={styles.simpleLabel}>Programme</Text>
             <Text style={styles.simpleWorkoutTitle}>{workoutLabel}</Text>
             <Text style={styles.simpleSub}>
-              {data.workout?.duration_min || ACTIVE_MINUTES_GOAL} min · {workoutDone ? "terminée" : "prête"}
+              {workoutMeta}
             </Text>
             <TouchableOpacity onPress={() => router.push("/(tabs)/training")} style={styles.simplePrimaryButton} testID="dashboard-simple-start-workout">
               <Ionicons name="play-circle" size={21} color="#102108" />
-              <Text style={styles.simplePrimaryText}>Commencer ma séance</Text>
+              <Text style={styles.simplePrimaryText}>{workoutActionText}</Text>
             </TouchableOpacity>
           </Card>
 
@@ -340,14 +360,12 @@ export default function Dashboard() {
                 <Text style={styles.heroRingValue}>{workoutDone ? "100%" : `${Math.round(Math.max(activeMinutesProgress, 0.12) * 100)}%`}</Text>
               </ProgressRing>
               <View style={{ flex: 1 }}>
-                <Text style={styles.objectiveLabel}>Objectif du jour</Text>
+                <Text style={styles.objectiveLabel}>{workoutSectionLabel}</Text>
                 <Text style={styles.objectiveTitle}>{workoutLabel}</Text>
-                <Text style={styles.objectiveMeta}>
-                  {data.workout?.duration_min || ACTIVE_MINUTES_GOAL} min · {workoutDone ? "séance validée" : "à valider"}
-                </Text>
+                <Text style={styles.objectiveMeta}>{workoutMeta}</Text>
               </View>
               <TouchableOpacity onPress={() => router.push("/(tabs)/training")} style={styles.continueBtn} testID="dashboard-continue-workout">
-                <Text style={styles.continueText}>{workoutDone ? "Validée" : "Programme"}</Text>
+                <Text style={styles.continueText}>{workoutActionText}</Text>
               </TouchableOpacity>
             </View>
           </Card>
@@ -574,7 +592,7 @@ function BurnRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap;
 
 function SimpleCross({ label, done }: { label: string; done: boolean }) {
   return (
-    <Card style={[styles.simpleCrossCard, done && styles.simpleCrossCardDone]}>
+    <Card style={StyleSheet.flatten([styles.simpleCrossCard, done && styles.simpleCrossCardDone])}>
       <View style={[styles.simpleCrossIcon, done && styles.simpleCrossIconDone]}>
         <Ionicons name={done ? "checkmark" : "close"} size={30} color={done ? "#102108" : "rgba(255,255,255,0.76)"} />
       </View>
