@@ -1,5 +1,6 @@
-import { Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
-import { Mascot, MascotAnimal, MASCOT_LABELS } from "./Mascot";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
+import { MascotAnimal, MASCOT_LABELS } from "./Mascot";
+import { MascotPortrait } from "./MascotPortrait";
 import { colors, spacing, radius, typography } from "../theme";
 
 const ALL: MascotAnimal[] = ["lion", "tigre", "loup", "ours", "aigle"];
@@ -7,7 +8,6 @@ const ALL: MascotAnimal[] = ["lion", "tigre", "loup", "ours", "aigle"];
 export function MascotPicker({
   selected,
   onChange,
-  evolution = 1,
   size = 80,
 }: {
   selected: MascotAnimal | null;
@@ -15,6 +15,8 @@ export function MascotPicker({
   evolution?: 1 | 2 | 3;
   size?: number;
 }) {
+  const portraitSize = Math.max(104, size + 24);
+
   return (
     <ScrollView
       horizontal
@@ -31,16 +33,15 @@ export function MascotPicker({
             style={[styles.card, isOn && styles.cardOn]}
             testID={`mascot-${a}`}
           >
-            <Mascot
-              animal={a}
-              evolution={evolution}
-              size={size}
-              color={isOn ? colors.primary : "#6E8A72"}
-              strokeWidth={isOn ? 2 : 1.4}
-            />
+            <MascotPortrait animal={a} size={portraitSize} active={isOn} />
             <Text style={[styles.label, isOn && { color: colors.primary, fontWeight: "800" }]}>
               {MASCOT_LABELS[a]}
             </Text>
+            {isOn ? (
+              <View style={styles.check}>
+                <Text style={styles.checkText}>✓</Text>
+              </View>
+            ) : null}
           </TouchableOpacity>
         );
       })}
@@ -51,25 +52,40 @@ export function MascotPicker({
 const styles = StyleSheet.create({
   row: { gap: spacing.sm, paddingVertical: 4, paddingHorizontal: 2 },
   card: {
-    width: 114,
-    padding: 10,
+    width: 154,
+    minHeight: 166,
+    padding: 12,
     borderRadius: radius.lg,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)",
-    backgroundColor: "rgba(5,22,16,0.78)",
+    backgroundColor: "rgba(5,22,16,0.72)",
     alignItems: "center",
-    gap: 5,
+    justifyContent: "space-between",
+    gap: 8,
+    overflow: "hidden",
   },
   cardOn: {
     borderColor: colors.primaryLight,
-    backgroundColor: "rgba(142,234,47,0.16)",
+    backgroundColor: "rgba(142,234,47,0.15)",
     shadowColor: colors.primary,
-    shadowOpacity: 0.28,
-    shadowRadius: 14,
+    shadowOpacity: 0.32,
+    shadowRadius: 18,
     shadowOffset: { width: 0, height: 6 },
     elevation: 5,
   },
-  label: { ...typography.small, color: colors.textSecondary, fontSize: 12, marginTop: 2 },
+  label: { ...typography.small, color: colors.textSecondary, fontSize: 17, marginTop: 2, fontWeight: "800" },
+  check: {
+    position: "absolute",
+    top: 10,
+    right: 10,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.primaryLight,
+  },
+  checkText: { color: "#102108", fontSize: 16, fontWeight: "900" },
 });
 
 export default MascotPicker;

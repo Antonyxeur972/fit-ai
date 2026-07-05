@@ -24,7 +24,7 @@ export type AppUser = {
   notif_prefs?: {
     reminders: Array<{
       id: string;
-      kind: "workout" | "protein";
+      kind: "workout" | "protein" | "meal" | "hydration" | "morning" | "weekly" | "level" | "custom";
       hour: number;
       minute: number;
       enabled: boolean;
@@ -137,7 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else {
       redirectUrl = Linking.createURL("auth");
     }
-    const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+    const authUrl = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}&app_name=${encodeURIComponent("FIT AI")}&name=${encodeURIComponent("FIT AI")}`;
     if (Platform.OS === "web" && typeof window !== "undefined") {
       window.location.href = authUrl;
       return;

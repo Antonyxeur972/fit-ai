@@ -10,6 +10,23 @@ export type StepSyncResult = {
   message: string;
 };
 
+export async function prepareMotionAccess(): Promise<boolean> {
+  if (Platform.OS === "web") return false;
+  try {
+    const available = await Pedometer.isAvailableAsync();
+    if (!available) return false;
+    const request = (Pedometer as any).requestPermissionsAsync;
+    if (typeof request === "function") {
+      const permission = await request();
+      return Boolean(permission?.granted);
+    }
+    await Pedometer.getStepCountAsync(startOfToday(), new Date());
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function startOfToday(): Date {
   const d = new Date();
   d.setHours(0, 0, 0, 0);

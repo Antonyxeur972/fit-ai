@@ -1,5 +1,7 @@
-import { useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ImageBackground } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { Animated, Easing, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import type { StyleProp, ViewStyle } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
@@ -7,20 +9,22 @@ import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/src/auth";
 import { api } from "@/src/api";
-import { Button, Card } from "@/src/components/UI";
-import { SilhouettePicker } from "@/src/components/SilhouettePicker";
-import { MascotPicker } from "@/src/components/MascotPicker";
 import { MascotAnimal } from "@/src/components/Mascot";
+import { MascotPortrait } from "@/src/components/MascotPortrait";
 import { getOrStartPaywallOffer } from "@/src/lib/subscription";
-import { schedulePreSubscriptionNudges } from "@/src/lib/notifications";
-import { colors, spacing, typography, radius } from "@/src/theme";
+import { ensureNotifPermission, schedulePreSubscriptionNudges } from "@/src/lib/notifications";
+import { setSimpleMode as saveSimpleMode } from "@/src/lib/simpleMode";
+import { prepareMotionAccess } from "@/src/lib/steps";
+import { colors, radius, spacing } from "@/src/theme";
 
-type Step = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+type Step = 0 | 1 | 2 | 3 | 4;
 type Gender = "male" | "female";
 type Goal = "lose" | "maintain" | "gain";
 type ActivityLevel = "sedentary" | "light" | "moderate" | "active" | "very_active";
 
-const STEPS_COUNT = 7;
+const STEPS_COUNT = 5;
+
+const STEP_TITLES = ["Départ intelligent", "Tes mesures", "Objectif principal", "Version de l'app", "Ta mascotte"] as const;
 
 const GOAL_OPTIONS: { value: Goal; label: string; desc: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { value: "lose", label: "Perdre du gras", desc: "Déficit calorique modéré", icon: "trending-down" },
@@ -28,43 +32,53 @@ const GOAL_OPTIONS: { value: Goal; label: string; desc: string; icon: keyof type
   { value: "gain", label: "Gagner du muscle", desc: "Surplus contrôlé", icon: "trending-up" },
 ];
 
-const ACTIVITY_OPTIONS: { value: ActivityLevel; label: string; desc: string }[] = [
-  { value: "sedentary", label: "Sédentaire", desc: "Travail assis, peu d'activité" },
-  { value: "light", label: "Léger", desc: "1-3 séances / semaine" },
-  { value: "moderate", label: "Modéré", desc: "3-5 séances / semaine" },
-  { value: "active", label: "Actif", desc: "6-7 séances / semaine" },
-  { value: "very_active", label: "Très actif", desc: "Athlète, métier physique" },
+const MASCOTS: { value: MascotAnimal; label: string }[] = [
+  { value: "lion", label: "Lion" },
+  { value: "tigre", label: "Tigre" },
+  { value: "loup", label: "Loup" },
+  { value: "ours", label: "Ours" },
+  { value: "aigle", label: "Aigle" },
 ];
 
 export default function Onboarding() {
   const router = useRouter();
   const { refreshUser, user } = useAuth();
   const [step, setStep] = useState<Step>(0);
+  const [thinking, setThinking] = useState(false);
   const [gender, setGender] = useState<Gender>("male");
   const [age, setAge] = useState("28");
   const [weight, setWeight] = useState("75");
   const [height, setHeight] = useState("178");
   const [goal, setGoal] = useState<Goal>("lose");
-  const [activity, setActivity] = useState<ActivityLevel>("moderate");
+  const [simpleMode, setSimpleMode] = useState(true);
+  const [activity] = useState<ActivityLevel>("moderate");
+  const [mascot, setMascot] = useState<MascotAnimal>((user?.mascot?.animal as MascotAnimal | undefined) || "lion");
   const [submitting, setSubmitting] = useState(false);
+  const thinkingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Phase 4: Silhouette + 1RM
-  const [silhouetteLevel, setSilhouetteLevel] = useState<number>(3);
-  const [silhouetteSex, setSilhouetteSex] = useState<Gender>(gender);
+  const isLastStep = step === STEPS_COUNT - 1;
 
-  // Phase 5: Mascot
-  const [mascot, setMascot] = useState<MascotAnimal | null>(null);
+  useEffect(() => {
+    return () => {
+      if (thinkingTimer.current) clearTimeout(thinkingTimer.current);
+    };
+  }, []);
 
-  const [squatKg, setSquatKg] = useState("");
-  const [squatReps, setSquatReps] = useState("");
-  const [benchKg, setBenchKg] = useState("");
-  const [benchReps, setBenchReps] = useState("");
-  const [deadliftKg, setDeadliftKg] = useState("");
-  const [deadliftReps, setDeadliftReps] = useState("");
-  const [skipForce, setSkipForce] = useState(false);
+  const selectGender = (nextGender: Gender) => {
+    setGender(nextGender);
+  };
 
-  const next = () => setStep((s) => Math.min(STEPS_COUNT - 1, (s + 1)) as Step);
-  const prev = () => setStep((s) => Math.max(0, (s - 1)) as Step);
+  const next = () => {
+    const target = Math.min(STEPS_COUNT - 1, step + 1) as Step;
+    if (target === step) return;
+    setThinking(true);
+    if (thinkingTimer.current) clearTimeout(thinkingTimer.current);
+    thinkingTimer.current = setTimeout(() => {
+      setStep(target);
+      setThinking(false);
+    }, 1700);
+  };
+  const prev = () => setStep((current) => Math.max(0, current - 1) as Step);
 
   const submit = async () => {
     setSubmitting(true);
@@ -80,470 +94,968 @@ export default function Onboarding() {
           activity_level: activity,
         },
       });
-      // Save silhouette
+
       try {
-        await api("/users/me/silhouette", {
+        await api("/users/me/mascot", {
           method: "PUT",
-          body: { sex: silhouetteSex, level: silhouetteLevel },
+          body: { animal: mascot },
         });
       } catch {}
 
-      // Save mascot (Phase 5)
-      if (mascot) {
-        try {
-          await api("/users/me/mascot", {
-            method: "PUT",
-            body: { animal: mascot },
-          });
-        } catch {}
-      }
+      try {
+        await saveSimpleMode(simpleMode);
+      } catch {}
 
-      // Save 1RM estimations only if user provided at least one valid value
-      if (!skipForce) {
-        const hasAny =
-          (parseFloat(squatKg) > 0 && parseInt(squatReps, 10) > 0) ||
-          (parseFloat(benchKg) > 0 && parseInt(benchReps, 10) > 0) ||
-          (parseFloat(deadliftKg) > 0 && parseInt(deadliftReps, 10) > 0);
-        if (hasAny) {
-          try {
-            await api("/workouts/estimate-1rm", {
-              method: "POST",
-              body: {
-                squat_kg: parseFloat(squatKg) || null,
-                squat_reps: parseInt(squatReps, 10) || null,
-                bench_kg: parseFloat(benchKg) || null,
-                bench_reps: parseInt(benchReps, 10) || null,
-                deadlift_kg: parseFloat(deadliftKg) || null,
-                deadlift_reps: parseInt(deadliftReps, 10) || null,
-              },
-            });
-          } catch {}
-        }
-      }
-
-      // Generate workouts (legacy week)
       try {
         await api("/workouts/generate", { method: "POST" });
       } catch {}
+
       await refreshUser();
+
       try {
+        await ensureNotifPermission();
+        await prepareMotionAccess();
         const offer = await getOrStartPaywallOffer();
         await schedulePreSubscriptionNudges(offer.expiresAt, offer.revealedAt);
       } catch {}
+
       router.replace("/commitment");
-    } catch (e) {
-      console.warn("profile submit", e);
+    } catch (error) {
+      console.warn("profile submit", error);
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <ImageBackground
-      source={require("../assets/images/fitai-hero-progress-hd.png")}
-      style={styles.background}
-      imageStyle={styles.backgroundImage}
-      resizeMode="cover"
-    >
+    <View style={styles.background}>
+      <Image source={require("../assets/images/fitai-hero-progress-hd.png")} style={styles.backgroundImage} resizeMode="cover" />
       <LinearGradient
-        colors={["rgba(8,16,12,0.34)", "rgba(7,22,13,0.24)", "rgba(3,8,5,0.90)"]}
-        locations={[0, 0.40, 1]}
+        colors={["rgba(3,12,9,0.10)", "rgba(3,13,8,0.16)", "rgba(3,9,6,0.88)"]}
+        locations={[0, 0.55, 1]}
         style={StyleSheet.absoluteFillObject}
       />
-    <SafeAreaView style={styles.safe} edges={["top", "bottom"]} testID="onboarding-screen">
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
+      <SafeAreaView style={styles.safe} edges={["top", "bottom"]} testID="onboarding-screen">
+        <View style={styles.header}>
           <Text style={styles.brand}>FIT AI</Text>
-          <Text style={styles.headerStep}>{step + 1}/{STEPS_COUNT}</Text>
+          <Text style={styles.headerSubtitle}>{STEP_TITLES[step]}</Text>
         </View>
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${((step + 1) / STEPS_COUNT) * 100}%` }]} />
-        </View>
-      </View>
 
-      <KeyboardAwareScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={styles.content}
-        keyboardShouldPersistTaps="handled"
-        bottomOffset={100}
-      >
-        {step === 0 && (
-          <>
-            <Text style={styles.title}>Salut {user?.name?.split(" ")[0] || ""}</Text>
-            <Text style={styles.subtitle}>
-              On pose ici un profil précis, propre et exploitable pour que tout le reste garde la même cohérence.
-            </Text>
-            <Card style={{ marginTop: spacing.lg }}>
-              <Text style={[typography.caption, { marginBottom: spacing.md }]}>Genre</Text>
-              <View style={styles.row}>
-                {(["male", "female"] as Gender[]).map((g) => (
+        <KeyboardAwareScrollView
+          style={styles.scroll}
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          bottomOffset={110}
+        >
+          {step === 0 && (
+            <>
+              <GlassPanel style={styles.heroPanel}>
+                <Kicker icon="leaf" label="INSCRIPTION INTELLIGENTE" />
+                <Text style={styles.heroTitle}>Un départ ultra simple, motivant et personnalisé.</Text>
+                <Text style={styles.heroCopy}>
+                  On transforme tes réponses en plan, objectifs mesurables, rythme réaliste et premiers bonus de progression.
+                </Text>
+                <View style={styles.featureGrid}>
+                  <IntroFeature icon="person-outline" title="Personnalisé" body="Un plan adapté à toi" />
+                  <IntroFeature icon="bulb-outline" title="Intelligent" body="L'IA ajuste ton plan" />
+                  <IntroFeature icon="trophy-outline" title="Motivant" body="XP, badges, défis" />
+                </View>
+              </GlassPanel>
+
+              <GlassPanel style={styles.promisePanel}>
+                <Text style={styles.promiseTitle}>
+                  Transforme ton corps,{"\n"}
+                  <Text style={styles.accentText}>libère ton potentiel.</Text>
+                </Text>
+                <Text style={styles.promiseCopy}>
+                  On construit un programme sérieux, motivant et mesurable autour de ton niveau réel.
+                </Text>
+                <View style={styles.promiseRows}>
+                  <PromiseRow icon="clipboard-outline" label="Programme adapté à toi" />
+                  <PromiseRow icon="analytics-outline" label="Suivi intelligent" />
+                  <PromiseRow icon="leaf-outline" label="Résultats mesurables" />
+                </View>
+              </GlassPanel>
+
+              <View style={styles.formBlock}>
+                <Text style={styles.fieldLabel}>Genre</Text>
+                <GenderSwitch value={gender} onChange={selectGender} />
+              </View>
+            </>
+          )}
+
+          {step === 1 && (
+            <View style={styles.stepBody}>
+              <Text style={styles.screenTitle}>
+                Tes <Text style={styles.accentText}>mesures</Text>
+              </Text>
+              <Text style={styles.screenSubtitle}>Sois précis. Les calculs en dépendent.</Text>
+              <View style={styles.measureStack}>
+                <NumericCard
+                  icon="calendar-outline"
+                  label="Âge"
+                  value={age}
+                  onChange={setAge}
+                  unit="ans"
+                  testID="onboarding-age"
+                />
+                <NumericCard
+                  icon="scale-outline"
+                  label="Poids"
+                  value={weight}
+                  onChange={setWeight}
+                  unit="kg"
+                  testID="onboarding-weight"
+                />
+                <NumericCard
+                  icon="resize-outline"
+                  label="Taille"
+                  value={height}
+                  onChange={setHeight}
+                  unit="cm"
+                  testID="onboarding-height"
+                />
+              </View>
+            </View>
+          )}
+
+          {step === 2 && (
+            <View style={styles.stepBody}>
+              <Text style={styles.screenTitle}>Ton objectif</Text>
+              <Text style={styles.screenSubtitle}>Choisis ce qui correspond à ce que tu veux RÉELLEMENT.</Text>
+              <View style={styles.goalStack}>
+                {GOAL_OPTIONS.map((option) => (
                   <TouchableOpacity
-                    key={g}
-                    testID={`onboarding-gender-${g}`}
-                    style={[styles.choice, gender === g && styles.choiceActive]}
-                    onPress={() => {
-                      setGender(g);
-                      setSilhouetteSex(g);
-                    }}
+                    key={option.value}
+                    testID={`onboarding-goal-${option.value}`}
+                    activeOpacity={0.82}
+                    style={[styles.goalCard, goal === option.value && styles.goalCardActive]}
+                    onPress={() => setGoal(option.value)}
                   >
-                    <Ionicons
-                      name={g === "male" ? "male" : "female"}
-                      size={20}
-                      color={gender === g ? colors.primary : colors.textSecondary}
-                    />
-                    <Text style={[styles.choiceText, gender === g && { color: colors.primary }]}>
-                      {g === "male" ? "Homme" : "Femme"}
-                    </Text>
+                    <View style={[styles.goalIcon, goal === option.value && styles.goalIconActive]}>
+                      <Ionicons name={option.icon} size={24} color={goal === option.value ? "#172506" : colors.primaryLight} />
+                    </View>
+                    <View style={styles.goalText}>
+                      <Text style={[styles.goalTitle, goal !== option.value && styles.goalTitleMuted]}>{option.label}</Text>
+                      <Text style={styles.goalDesc}>{option.desc}</Text>
+                    </View>
+                    <View style={[styles.radio, goal === option.value && styles.radioActive]}>
+                      {goal === option.value ? <Ionicons name="checkmark" size={20} color="#24370A" /> : null}
+                    </View>
                   </TouchableOpacity>
                 ))}
               </View>
-            </Card>
-          </>
-        )}
-
-        {step === 1 && (
-          <>
-            <Text style={styles.title}>Tes mesures</Text>
-            <Text style={styles.subtitle}>Sois précis. Les calculs en dépendent.</Text>
-            <Card style={{ marginTop: spacing.lg, gap: spacing.lg }}>
-              <NumericField label="Âge" value={age} onChange={setAge} unit="ans" testID="onboarding-age" />
-              <NumericField label="Poids" value={weight} onChange={setWeight} unit="kg" testID="onboarding-weight" />
-              <NumericField label="Taille" value={height} onChange={setHeight} unit="cm" testID="onboarding-height" />
-            </Card>
-          </>
-        )}
-
-        {step === 2 && (
-          <>
-            <Text style={styles.title}>Ton objectif</Text>
-            <Text style={styles.subtitle}>Choisis ce qui correspond à ce que tu veux RÉELLEMENT.</Text>
-            <View style={{ marginTop: spacing.lg, gap: spacing.md }}>
-              {GOAL_OPTIONS.map((g) => (
-                <TouchableOpacity
-                  key={g.value}
-                  testID={`onboarding-goal-${g.value}`}
-                  activeOpacity={0.8}
-                  style={[styles.optionCard, goal === g.value && styles.optionCardActive]}
-                  onPress={() => setGoal(g.value)}
-                >
-                  <View style={[styles.optionIcon, goal === g.value && { backgroundColor: colors.primary }]}>
-                    <Ionicons name={g.icon} size={20} color={goal === g.value ? "#fff" : colors.primary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.optionTitle}>{g.label}</Text>
-                    <Text style={styles.optionDesc}>{g.desc}</Text>
-                  </View>
-                  {goal === g.value && <Ionicons name="checkmark-circle" size={22} color={colors.primary} />}
-                </TouchableOpacity>
-              ))}
             </View>
-          </>
-        )}
+          )}
 
-        {step === 3 && (
-          <>
-            <Text style={styles.title}>{"Niveau d'activité"}</Text>
-            <Text style={styles.subtitle}>{"Combien tu bouges en moyenne ?"}</Text>
-            <View style={{ marginTop: spacing.lg, gap: spacing.sm }}>
-              {ACTIVITY_OPTIONS.map((a) => (
-                <TouchableOpacity
-                  key={a.value}
-                  testID={`onboarding-activity-${a.value}`}
-                  activeOpacity={0.8}
-                  style={[styles.optionCardSmall, activity === a.value && styles.optionCardActive]}
-                  onPress={() => setActivity(a.value)}
-                >
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.optionTitle}>{a.label}</Text>
-                    <Text style={styles.optionDesc}>{a.desc}</Text>
-                  </View>
-                  {activity === a.value && <Ionicons name="checkmark-circle" size={22} color={colors.primary} />}
-                </TouchableOpacity>
-              ))}
-            </View>
-          </>
-        )}
-
-        {step === 4 && (
-          <>
-            <Text style={styles.title}>Ta silhouette actuelle</Text>
-            <Text style={styles.subtitle}>
-              Choisis le visuel qui ressemble le plus à ton corps aujourd&apos;hui. Ça sert de point de départ.
-            </Text>
-            <Card style={{ marginTop: spacing.lg }}>
-              <SilhouettePicker
-                sex={silhouetteSex}
-                level={silhouetteLevel}
-                onChange={(sx, lv) => {
-                  setSilhouetteSex(sx);
-                  setSilhouetteLevel(lv);
-                }}
-              />
-              <Text style={[typography.small, { marginTop: spacing.md, color: colors.textMuted }]}>
-                Tu pourras toujours la modifier depuis ton profil.
+          {step === 3 && (
+            <View style={styles.stepBody}>
+              <Text style={styles.screenTitle}>
+                Version <Text style={styles.accentText}>simple</Text> ou complète ?
               </Text>
-            </Card>
-          </>
-        )}
-
-        {step === 5 && (
-          <>
-            <Text style={styles.title}>Ta mascotte</Text>
-            <Text style={styles.subtitle}>
-              Choisis ton animal totem. Il évoluera avec toi (chaque pallier de progression).
-            </Text>
-            <Card style={{ marginTop: spacing.lg }}>
-              <MascotPicker
-                selected={mascot}
-                onChange={setMascot}
-                evolution={1}
-                size={84}
-              />
-              <Text style={[typography.small, { marginTop: spacing.md, color: colors.textMuted }]}>
-                Tu pourras la changer depuis ton profil à tout moment.
-              </Text>
-            </Card>
-          </>
-        )}
-
-        {step === 6 && (
-          <>
-            <Text style={styles.title}>Tes records (optionnel)</Text>
-            <Text style={styles.subtitle}>
-              Indique ton meilleur effort par exercice (charge × reps). On calcule ton 1RM. Sans ces données, ton profil reste plus pauvre.
-            </Text>
-            <Card style={{ marginTop: spacing.lg, gap: spacing.md }}>
-              <LiftRow label="Squat" wKey={squatKg} rKey={squatReps} setW={setSquatKg} setR={setSquatReps} testID="lift-squat" />
-              <LiftRow label="Développé couché" wKey={benchKg} rKey={benchReps} setW={setBenchKg} setR={setBenchReps} testID="lift-bench" />
-              <LiftRow label="Soulevé de terre" wKey={deadliftKg} rKey={deadliftReps} setW={setDeadliftKg} setR={setDeadliftReps} testID="lift-deadlift" />
-              <TouchableOpacity onPress={() => setSkipForce(!skipForce)} style={styles.skipBtn} testID="lift-skip">
-                <Ionicons
-                  name={skipForce ? "checkbox" : "square-outline"}
-                  size={18}
-                  color={skipForce ? colors.primary : colors.textSecondary}
+              <Text style={styles.screenSubtitle}>{"Tu peux changer ce choix plus tard depuis l'accueil."}</Text>
+              <View style={styles.appModeStack}>
+                <AppModeCard
+                  icon="phone-portrait-outline"
+                  title="Version simplifiée"
+                  body="Calories à viser, séance du jour, repas, points, mascotte et partage."
+                  active={simpleMode}
+                  onPress={() => setSimpleMode(true)}
                 />
-                <Text style={[typography.small, { color: colors.textSecondary }]}>
-                  Je ne connais pas mes records pour l&apos;instant
-                </Text>
-              </TouchableOpacity>
-            </Card>
-          </>
-        )}
-      </KeyboardAwareScrollView>
+                <AppModeCard
+                  icon="grid-outline"
+                  title="Version complète"
+                  body="Toutes les stats, quêtes, macros, suivi détaillé, défis et réglages avancés."
+                  active={!simpleMode}
+                  onPress={() => setSimpleMode(false)}
+                />
+              </View>
+            </View>
+          )}
 
-      <View style={styles.footer}>
-        {step > 0 ? (
-          <Button title="Retour" onPress={prev} variant="secondary" style={{ flex: 1 }} testID="onboarding-back" />
+          {step === 4 && (
+            <View style={styles.stepBody}>
+              <GlassPanel style={styles.mascotPanel}>
+                <Text style={styles.screenTitle}>
+                  Ta <Text style={styles.accentText}>mascotte</Text>
+                </Text>
+                <Text style={styles.screenSubtitle}>
+                  Choisis ton compagnon de progression. Il évoluera avec toi à chaque palier.
+                </Text>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.mascotRow}
+                >
+                  {MASCOTS.map((item) => {
+                    const selected = mascot === item.value;
+                    return (
+                      <TouchableOpacity
+                        key={item.value}
+                        activeOpacity={0.84}
+                        style={[styles.mascotCard, selected && styles.mascotCardActive]}
+                        onPress={() => setMascot(item.value)}
+                        testID={`onboarding-mascot-${item.value}`}
+                      >
+                        <MascotPortrait animal={item.value} active={selected} size={92} />
+                        {selected ? (
+                          <View style={styles.mascotCheck}>
+                            <Ionicons name="checkmark" size={18} color="#172506" />
+                          </View>
+                        ) : null}
+                        <Text style={[styles.mascotName, selected && styles.mascotNameActive]}>{item.label}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              </GlassPanel>
+            </View>
+          )}
+        </KeyboardAwareScrollView>
+
+        {(thinking || submitting) ? (
+          <ThinkingOverlay text={submitting ? "Nous préparons ton protocole FIT AI." : "FIT AI analyse ta réponse."} />
         ) : null}
-        <Button
-          title={step === STEPS_COUNT - 1 ? "Terminer & calculer" : "Continuer"}
-          onPress={step === STEPS_COUNT - 1 ? submit : next}
-          loading={submitting}
-          style={{ flex: step > 0 ? 1.4 : 1 }}
-          testID="onboarding-next"
-        />
-      </View>
-    </SafeAreaView>
-    </ImageBackground>
+
+        <View style={styles.footer}>
+          {step > 0 ? (
+            <TouchableOpacity activeOpacity={0.84} onPress={prev} style={styles.backButton} testID="onboarding-back">
+              <Ionicons name="arrow-back" size={22} color={colors.primaryLight} />
+              <Text style={styles.backButtonText}>Retour</Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={isLastStep ? submit : next}
+            disabled={submitting || thinking}
+            style={[styles.nextButton, step === 0 && styles.nextButtonFull, (submitting || thinking) && styles.buttonDisabled]}
+            testID="onboarding-next"
+          >
+            <Text style={styles.nextButtonText}>{step === 0 ? "Commencer" : isLastStep ? "Terminer" : "Continuer"}</Text>
+            <Ionicons name="arrow-forward" size={24} color="#142407" />
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    </View>
   );
 }
 
-function NumericField({
+function GlassPanel({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+  return <View style={[styles.glassPanel, style]}>{children}</View>;
+}
+
+function Kicker({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+  return (
+    <View style={styles.kicker}>
+      <RotatingLeaf size={34} icon={icon} />
+      <Text style={styles.kickerText}>{label}</Text>
+    </View>
+  );
+}
+
+function RotatingLeaf({ size, icon = "leaf" }: { size: number; icon?: keyof typeof Ionicons.glyphMap }) {
+  const spin = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.timing(spin, {
+        toValue: 1,
+        duration: 2600,
+        easing: Easing.inOut(Easing.quad),
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [spin]);
+
+  const rotate = spin.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
+
+  return (
+    <Animated.View
+      style={[
+        styles.kickerIcon,
+        { width: size, height: size, transform: [{ rotate }] },
+      ]}
+    >
+      <Ionicons name={icon} size={Math.round(size * 0.44)} color="#172506" />
+    </Animated.View>
+  );
+}
+
+function ThinkingOverlay({ text }: { text: string }) {
+  return (
+    <View style={styles.thinkingOverlay} pointerEvents="auto">
+      <View style={styles.thinkingBox}>
+        <RotatingLeaf size={62} />
+        <Text style={styles.thinkingTitle}>Réflexion en cours</Text>
+        <Text style={styles.thinkingText}>{text}</Text>
+      </View>
+    </View>
+  );
+}
+
+function IntroFeature({
+  icon,
+  title,
+  body,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  body: string;
+}) {
+  return (
+    <View style={styles.featureCard}>
+      <View style={styles.featureIcon}>
+        <Ionicons name={icon} size={18} color={colors.textMain} />
+      </View>
+      <Text style={styles.featureTitle}>{title}</Text>
+      <Text style={styles.featureBody}>{body}</Text>
+    </View>
+  );
+}
+
+function PromiseRow({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
+  return (
+    <View style={styles.promiseRow}>
+      <Ionicons name={icon} size={20} color={colors.primaryLight} />
+      <Text style={styles.promiseRowText}>{label}</Text>
+    </View>
+  );
+}
+
+function AppModeCard({
+  icon,
+  title,
+  body,
+  active,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  body: string;
+  active: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity activeOpacity={0.84} onPress={onPress} style={[styles.appModeCard, active && styles.appModeCardActive]}>
+      <View style={[styles.appModeIcon, active && styles.appModeIconActive]}>
+        <Ionicons name={icon} size={26} color={active ? "#172506" : colors.primaryLight} />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.appModeTitle, active && styles.appModeTitleActive]}>{title}</Text>
+        <Text style={[styles.appModeBody, active && styles.appModeBodyActive]}>{body}</Text>
+      </View>
+      <View style={[styles.appModeRadio, active && styles.appModeRadioActive]}>
+        {active ? <Ionicons name="checkmark" size={20} color="#172506" /> : null}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function GenderSwitch({
+  value,
+  onChange,
+  compact = false,
+}: {
+  value: Gender;
+  onChange: (gender: Gender) => void;
+  compact?: boolean;
+}) {
+  return (
+    <View style={[styles.genderSwitch, compact && styles.genderSwitchCompact]}>
+      {(["male", "female"] as Gender[]).map((item) => {
+        const selected = value === item;
+        return (
+          <TouchableOpacity
+            key={item}
+            activeOpacity={0.84}
+            onPress={() => onChange(item)}
+            style={[styles.genderOption, selected && styles.genderOptionActive]}
+            testID={`onboarding-gender-${item}`}
+          >
+            <Ionicons name={item === "male" ? "male" : "female"} size={22} color={selected ? "#1D2D08" : colors.textSecondary} />
+            <Text style={[styles.genderText, selected && styles.genderTextActive]}>{item === "male" ? "Homme" : "Femme"}</Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+}
+
+function NumericCard({
+  icon,
   label,
   value,
   onChange,
   unit,
   testID,
 }: {
+  icon: keyof typeof Ionicons.glyphMap;
   label: string;
   value: string;
-  onChange: (v: string) => void;
+  onChange: (value: string) => void;
   unit: string;
   testID?: string;
 }) {
   return (
-    <View>
-      <Text style={[typography.caption, { marginBottom: 6 }]}>{label}</Text>
-      <View style={styles.inputRow}>
+    <GlassPanel style={styles.numericCard}>
+      <View style={styles.numericHeader}>
+        <View style={styles.numericIcon}>
+          <Ionicons name={icon} size={22} color="#152507" />
+        </View>
+        <Text style={styles.numericLabel}>{label}</Text>
+      </View>
+      <View style={styles.numericInputWrap}>
         <TextInput
           testID={testID}
           value={value}
-          onChangeText={(t) => onChange(t.replace(/[^0-9.]/g, ""))}
+          onChangeText={(text) => onChange(text.replace(/[^0-9.]/g, ""))}
           keyboardType="decimal-pad"
-          style={styles.input}
           placeholder="0"
-          placeholderTextColor={colors.textMuted}
+          placeholderTextColor="rgba(255,255,255,0.38)"
+          style={styles.numericInput}
         />
-        <Text style={styles.inputUnit}>{unit}</Text>
+        <Text style={styles.numericUnit}>{unit}</Text>
       </View>
-    </View>
-  );
-}
-
-function LiftRow({
-  label,
-  wKey,
-  rKey,
-  setW,
-  setR,
-  testID,
-}: {
-  label: string;
-  wKey: string;
-  rKey: string;
-  setW: (v: string) => void;
-  setR: (v: string) => void;
-  testID: string;
-}) {
-  const w = parseFloat(wKey || "0");
-  const r = parseInt(rKey || "0", 10);
-  const est = w > 0 && r > 0 ? (r === 1 ? Math.round(w * 10) / 10 : Math.round(w * (1 + Math.min(r, 12) / 30) * 10) / 10) : 0;
-  return (
-    <View style={styles.liftRow}>
-      <Text style={[typography.body, { fontWeight: "700", flex: 1 }]}>{label}</Text>
-      <View style={{ flexDirection: "row", gap: 6, alignItems: "center" }}>
-        <View style={styles.liftInputWrap}>
-          <TextInput
-            testID={`${testID}-kg`}
-            value={wKey}
-            onChangeText={(t) => setW(t.replace(/[^0-9.]/g, ""))}
-            keyboardType="decimal-pad"
-            placeholder="kg"
-            placeholderTextColor={colors.textMuted}
-            style={styles.liftInput}
-          />
-        </View>
-        <Text style={[typography.small, { color: colors.textMuted, fontWeight: "700" }]}>×</Text>
-        <View style={styles.liftInputWrap}>
-          <TextInput
-            testID={`${testID}-reps`}
-            value={rKey}
-            onChangeText={(t) => setR(t.replace(/[^0-9]/g, ""))}
-            keyboardType="numeric"
-            placeholder="reps"
-            placeholderTextColor={colors.textMuted}
-            style={styles.liftInput}
-          />
-        </View>
-      </View>
-      {est > 0 ? (
-        <View style={styles.estPill}>
-          <Text style={styles.estTxt}>1RM ≈ {est}</Text>
-        </View>
-      ) : null}
-    </View>
+    </GlassPanel>
   );
 }
 
 const styles = StyleSheet.create({
-  background: { flex: 1, backgroundColor: "#06100B" },
-  backgroundImage: { transform: [{ scale: 1.02 }] },
-  safe: { flex: 1 },
-  header: { paddingHorizontal: spacing.lg, paddingTop: spacing.md, gap: spacing.sm },
-  headerTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  brand: { color: colors.textMain, fontSize: 20, fontWeight: "600", letterSpacing: 0.6 },
-  headerStep: { color: "rgba(255,255,255,0.76)", fontSize: 12, fontWeight: "600" },
-  progressTrack: { height: 8, backgroundColor: "rgba(255,255,255,0.16)", borderRadius: radius.full, overflow: "hidden" },
-  progressFill: { height: "100%", backgroundColor: colors.primary, borderRadius: radius.full },
-  content: { padding: spacing.lg, paddingBottom: 120 },
-  title: { fontSize: 31, fontWeight: "600", color: colors.textMain, letterSpacing: 0, lineHeight: 36 },
-  subtitle: { ...typography.body, color: "rgba(255,255,255,0.78)", marginTop: spacing.sm, lineHeight: 23 },
-  row: { flexDirection: "row", gap: spacing.sm },
-  choice: {
+  background: {
     flex: 1,
-    paddingVertical: spacing.md,
+    backgroundColor: "#06110B",
+  },
+  backgroundImage: {
+    ...StyleSheet.absoluteFillObject,
+    width: "100%",
+    height: "100%",
+  },
+  safe: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.sm,
+    gap: 2,
+  },
+  brand: {
+    color: colors.textMain,
+    fontSize: 34,
+    fontWeight: "900",
+    letterSpacing: 0,
+  },
+  headerSubtitle: {
+    color: "rgba(255,255,255,0.82)",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+  scroll: {
+    flex: 1,
+  },
+  content: {
+    width: "100%",
+    maxWidth: 720,
+    alignSelf: "center",
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xl,
+    paddingBottom: 136,
+    gap: spacing.lg,
+  },
+  glassPanel: {
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.25)",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    overflow: "hidden",
+  },
+  heroPanel: {
+    padding: spacing.xl,
+    gap: spacing.lg,
+  },
+  kicker: {
+    alignSelf: "flex-start",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.35)",
+    backgroundColor: "rgba(218,255,164,0.36)",
+  },
+  kickerIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(182,255,63,0.68)",
+  },
+  kickerText: {
+    color: "#172506",
+    fontSize: 14,
+    fontWeight: "900",
+    letterSpacing: 1.6,
+  },
+  thinkingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
+    backgroundColor: "rgba(2,8,5,0.58)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: spacing.xl,
+  },
+  thinkingBox: {
+    width: "100%",
+    maxWidth: 360,
+    alignItems: "center",
+    gap: spacing.sm,
+    paddingVertical: spacing.xl,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.28)",
+    backgroundColor: "rgba(6,18,12,0.88)",
+    shadowColor: colors.primaryLight,
+    shadowOpacity: 0.28,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  thinkingTitle: {
+    color: colors.textMain,
+    fontSize: 21,
+    fontWeight: "900",
+    marginTop: spacing.sm,
+  },
+  thinkingText: {
+    color: colors.textSecondary,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+  },
+  heroTitle: {
+    color: colors.textMain,
+    fontSize: 38,
+    lineHeight: 45,
+    fontWeight: "900",
+    letterSpacing: 0,
+  },
+  heroCopy: {
+    color: "rgba(255,255,255,0.86)",
+    fontSize: 19,
+    lineHeight: 30,
+    fontWeight: "500",
+  },
+  featureGrid: {
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  featureCard: {
+    flex: 1,
+    minHeight: 120,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.22)",
+    backgroundColor: "rgba(255,255,255,0.10)",
+    padding: spacing.md,
+    justifyContent: "center",
+    gap: spacing.xs,
+  },
+  featureIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(142,234,47,0.62)",
+    marginBottom: spacing.sm,
+  },
+  featureTitle: {
+    color: colors.textMain,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+  featureBody: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+  },
+  promisePanel: {
+    padding: spacing.xl,
+    gap: spacing.md,
+  },
+  promiseTitle: {
+    color: colors.textMain,
+    fontSize: 30,
+    lineHeight: 37,
+    fontWeight: "900",
+  },
+  accentText: {
+    color: colors.primaryLight,
+  },
+  promiseCopy: {
+    color: "rgba(255,255,255,0.85)",
+    fontSize: 17,
+    lineHeight: 25,
+    fontWeight: "500",
+  },
+  promiseRows: {
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  promiseRow: {
+    minHeight: 54,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.20)",
-    alignItems: "center",
-    flexDirection: "row",
-    justifyContent: "center",
-    gap: 8,
-    backgroundColor: "rgba(7,18,15,0.84)",
-  },
-  choiceActive: { backgroundColor: "rgba(182,255,63,0.18)", borderColor: colors.primary },
-  choiceText: { fontSize: 15, color: colors.textMain, fontWeight: "600" },
-  inputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.18)",
-    borderRadius: radius.md,
+    backgroundColor: "rgba(255,255,255,0.09)",
     paddingHorizontal: spacing.md,
-    backgroundColor: "rgba(7,18,15,0.84)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
   },
-  input: { flex: 1, fontSize: 22, color: colors.textMain, paddingVertical: 14, fontWeight: "600" },
-  inputUnit: { fontSize: 14, color: colors.textSecondary, fontWeight: "500" },
-  optionCard: {
-    backgroundColor: "rgba(7,18,15,0.84)",
-    borderRadius: radius.lg,
+  promiseRowText: {
+    color: colors.textMain,
+    fontSize: 17,
+    fontWeight: "800",
+  },
+  formBlock: {
+    gap: spacing.sm,
+  },
+  fieldLabel: {
+    color: colors.textMain,
+    fontSize: 15,
+    fontWeight: "700",
+  },
+  genderSwitch: {
+    flexDirection: "row",
+    minHeight: 76,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.25)",
+    backgroundColor: "rgba(11,18,11,0.48)",
+    overflow: "hidden",
+  },
+  genderSwitchCompact: {
+    marginTop: spacing.lg,
+    minHeight: 62,
+  },
+  genderOption: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+  },
+  genderOptionActive: {
+    backgroundColor: "rgba(182,255,63,0.86)",
+  },
+  genderText: {
+    color: colors.textMain,
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  genderTextActive: {
+    color: "#1D2D08",
+  },
+  stepBody: {
+    gap: spacing.lg,
+  },
+  screenTitle: {
+    color: colors.textMain,
+    fontSize: 52,
+    lineHeight: 60,
+    fontWeight: "900",
+    letterSpacing: 0,
+  },
+  screenSubtitle: {
+    color: "rgba(255,255,255,0.86)",
+    fontSize: 22,
+    lineHeight: 32,
+    fontWeight: "500",
+    maxWidth: 520,
+  },
+  measureStack: {
+    gap: spacing.xl,
+    marginTop: spacing.xl,
+  },
+  numericCard: {
     padding: spacing.lg,
+    gap: spacing.md,
+  },
+  numericHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
-  optionCardActive: { borderColor: colors.primary, backgroundColor: "rgba(182,255,63,0.18)" },
-  optionCardSmall: {
-    backgroundColor: "rgba(7,18,15,0.84)",
-    borderRadius: radius.md,
-    padding: spacing.md,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  optionIcon: {
+  numericIcon: {
     width: 44,
     height: 44,
     borderRadius: radius.full,
-    backgroundColor: "rgba(182,255,63,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(182,255,63,0.74)",
+  },
+  numericLabel: {
+    color: colors.textMain,
+    fontSize: 21,
+    fontWeight: "900",
+  },
+  numericInputWrap: {
+    minHeight: 74,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.30)",
+    backgroundColor: "rgba(3,12,8,0.18)",
+    paddingHorizontal: spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  numericInput: {
+    flex: 1,
+    color: colors.textMain,
+    fontSize: 38,
+    fontWeight: "900",
+    paddingVertical: 8,
+  },
+  numericUnit: {
+    color: colors.textMain,
+    fontSize: 20,
+    fontWeight: "600",
+  },
+  goalStack: {
+    gap: spacing.lg,
+    marginTop: spacing.lg,
+  },
+  appModeStack: {
+    gap: spacing.md,
+    marginTop: spacing.xl,
+  },
+  appModeCard: {
+    minHeight: 142,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.25)",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    padding: spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+  },
+  appModeCardActive: {
+    borderColor: colors.primaryLight,
+    backgroundColor: "rgba(182,255,63,0.82)",
+    shadowColor: colors.primaryLight,
+    shadowOpacity: 0.32,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  appModeIcon: {
+    width: 62,
+    height: 62,
+    borderRadius: radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(182,255,63,0.14)",
+  },
+  appModeIconActive: {
+    backgroundColor: "rgba(255,255,255,0.24)",
+  },
+  appModeTitle: {
+    color: colors.textMain,
+    fontSize: 23,
+    fontWeight: "900",
+  },
+  appModeTitleActive: {
+    color: "#172506",
+  },
+  appModeBody: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "600",
+    marginTop: spacing.xs,
+  },
+  appModeBodyActive: {
+    color: "rgba(23,37,6,0.72)",
+  },
+  appModeRadio: {
+    width: 42,
+    height: 42,
+    borderRadius: radius.full,
+    borderWidth: 3,
+    borderColor: "rgba(255,255,255,0.62)",
     alignItems: "center",
     justifyContent: "center",
   },
-  optionTitle: { fontSize: 16, fontWeight: "600", color: colors.textMain },
-  optionDesc: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
-  footer: {
-    flexDirection: "row",
-    padding: spacing.lg,
-    gap: spacing.sm,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.14)",
-    backgroundColor: "rgba(4,14,12,0.88)",
+  appModeRadioActive: {
+    borderColor: "rgba(23,37,6,0.42)",
   },
-  liftRow: {
+  goalCard: {
+    minHeight: 118,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.25)",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    padding: spacing.lg,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingVertical: 6,
-    flexWrap: "wrap",
+    gap: spacing.lg,
   },
-  liftInputWrap: {
-    width: 60,
+  goalCardActive: {
+    backgroundColor: "rgba(182,255,63,0.82)",
+    borderColor: "rgba(224,255,132,0.95)",
+    shadowColor: colors.primaryLight,
+    shadowOpacity: 0.32,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  goalIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "rgba(142,234,47,0.22)",
+  },
+  goalIconActive: {
+    backgroundColor: "rgba(182,255,63,0.86)",
+  },
+  goalText: {
+    flex: 1,
+    gap: spacing.xs,
+  },
+  goalTitle: {
+    color: "#18230A",
+    fontSize: 24,
+    fontWeight: "900",
+  },
+  goalTitleMuted: {
+    color: colors.textMain,
+  },
+  goalDesc: {
+    color: "rgba(255,255,255,0.78)",
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  radio: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.full,
+    borderWidth: 3,
+    borderColor: "rgba(255,255,255,0.70)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  radioActive: {
+    borderColor: "rgba(42,70,13,0.66)",
+    backgroundColor: "rgba(255,255,255,0.18)",
+  },
+  pickerPanel: {
+    padding: spacing.md,
+  },
+  mascotPanel: {
+    padding: spacing.xl,
+    gap: spacing.lg,
+  },
+  mascotRow: {
+    gap: spacing.md,
+    paddingRight: spacing.md,
+  },
+  mascotCard: {
+    width: 150,
+    minHeight: 204,
+    borderRadius: radius.xl,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.16)",
-    borderRadius: radius.sm,
-    backgroundColor: "rgba(7,18,15,0.92)",
-    paddingHorizontal: 8,
+    borderColor: "rgba(255,255,255,0.22)",
+    backgroundColor: "rgba(255,255,255,0.12)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.md,
+    gap: spacing.md,
   },
-  liftInput: { fontSize: 15, paddingVertical: 8, color: colors.textMain, fontWeight: "700" },
-  estPill: {
-    backgroundColor: colors.primaryPale,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+  mascotCardActive: {
+    borderColor: colors.primaryLight,
+    backgroundColor: "rgba(182,255,63,0.20)",
+    shadowColor: colors.primaryLight,
+    shadowOpacity: 0.36,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  mascotCheck: {
+    position: "absolute",
+    top: 14,
+    right: 14,
+    width: 34,
+    height: 34,
+    borderRadius: radius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.primaryLight,
+  },
+  mascotName: {
+    color: colors.textMain,
+    fontSize: 21,
+    fontWeight: "900",
+  },
+  mascotNameActive: {
+    color: colors.primaryLight,
+  },
+  footer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
+    flexDirection: "row",
+    gap: spacing.md,
+    backgroundColor: "rgba(3,9,6,0.18)",
+  },
+  backButton: {
+    flex: 1,
+    minHeight: 68,
     borderRadius: radius.full,
     borderWidth: 1,
-    borderColor: colors.primary,
-    marginLeft: "auto",
-  },
-  estTxt: { color: colors.primary, fontWeight: "800", fontSize: 11 },
-  skipBtn: {
+    borderColor: "rgba(182,255,63,0.55)",
+    backgroundColor: "rgba(5,18,12,0.58)",
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingVertical: 6,
-    marginTop: spacing.sm,
+    justifyContent: "center",
+    gap: spacing.sm,
+  },
+  backButtonText: {
+    color: colors.primaryLight,
+    fontSize: 20,
+    fontWeight: "900",
+  },
+  nextButton: {
+    flex: 1.25,
+    minHeight: 68,
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryLight,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.md,
+  },
+  nextButtonFull: {
+    flex: 1,
+  },
+  nextButtonText: {
+    color: "#142407",
+    fontSize: 21,
+    fontWeight: "900",
+  },
+  buttonDisabled: {
+    opacity: 0.64,
   },
 });

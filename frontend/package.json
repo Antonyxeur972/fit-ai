@@ -9,7 +9,12 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "build:ios": "eas build -p ios --profile production",
+    "build:android": "eas build -p android --profile production",
+    "submit:ios": "eas submit -p ios --profile production",
+    "submit:android": "eas submit -p android --profile production",
+    "update:production": "eas update --channel production"
   },
   "dependencies": {
     "@expo/metro-runtime": "6.1.2",
@@ -26,6 +31,7 @@
     "expo-asset": "~12.0.13",
     "expo-audio": "~1.1.1",
     "expo-blur": "~15.0.8",
+    "expo-calendar": "~15.0.8",
     "expo-camera": "~17.0.10",
     "expo-constants": "~18.0.13",
     "expo-file-system": "~19.0.23",

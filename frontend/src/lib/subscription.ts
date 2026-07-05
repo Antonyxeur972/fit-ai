@@ -1,5 +1,7 @@
 import { Platform } from "react-native";
 import { storage } from "@/src/utils/storage";
+import { api } from "@/src/api";
+import { markCommitmentSigned } from "@/src/lib/commitment";
 
 export type SubscriptionPlan = "monthly" | "annual";
 
@@ -47,6 +49,7 @@ export const PLAN_DETAILS: Record<SubscriptionPlan, {
   label: string;
   priceLabel: string;
   period: string;
+  trialLabel: string;
   monthlyLabel?: string;
   badge?: string;
   discountPriceLabel?: string;
@@ -55,18 +58,18 @@ export const PLAN_DETAILS: Record<SubscriptionPlan, {
 }> = {
   monthly: {
     label: "Mensuel",
-    priceLabel: "9,99 €",
+    priceLabel: "12,99 €",
     period: "/ mois",
+    trialLabel: "3 jours d'essai gratuit",
+    monthlyLabel: "sans engagement",
   },
   annual: {
     label: "Annuel",
-    priceLabel: "79,99 €",
+    priceLabel: "49,99 €",
     period: "/ an",
-    monthlyLabel: "soit 6,67 € / mois",
+    trialLabel: "7 jours d'essai gratuit",
+    monthlyLabel: "offre annuelle centrale",
     badge: "Meilleur choix",
-    discountPriceLabel: "39,99 €",
-    discountMonthlyLabel: "soit 3,33 € / mois",
-    discountLabel: "Offre -50% pendant 24h",
   },
 };
 
@@ -94,7 +97,15 @@ export function normalizePromoCode(code: string): string {
 
 export async function applyPromoCode(code: string): Promise<PurchaseResult> {
   if (normalizePromoCode(code) !== FREE_PROMO_CODE) {
-    return { ok: false, message: "Code promotionnel invalide." };
+    try {
+      await api("/affiliates/apply", {
+        method: "POST",
+        body: { code },
+      });
+      return { ok: false, message: "Code coach enregistré. La commission sera suivie au moment de l'abonnement." };
+    } catch {
+      return { ok: false, message: "Code promotionnel invalide." };
+    }
   }
 
   await saveSubscriptionState({
@@ -103,6 +114,7 @@ export async function applyPromoCode(code: string): Promise<PurchaseResult> {
     source: "promo",
     expiresAt: null,
   });
+  await markCommitmentSigned();
 
   return { ok: true, message: "Code validé. Accès FIT AI débloqué gratuitement." };
 }

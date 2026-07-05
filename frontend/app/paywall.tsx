@@ -27,19 +27,10 @@ const BENEFITS = [
   { icon: "notifications-outline", label: "Rappels d'action, motivation et offres privées" },
 ] as const;
 
-function formatRemaining(ms: number): string {
-  const totalMinutes = Math.max(0, Math.floor(ms / 60000));
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return `${String(hours).padStart(2, "0")}h ${String(minutes).padStart(2, "0")}m`;
-}
-
 export default function Paywall() {
   const router = useRouter();
   const { user, loading } = useAuth();
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>("annual");
-  const [offerMs, setOfferMs] = useState(0);
-  const [offerRevealed, setOfferRevealed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [promoCode, setPromoCode] = useState("");
@@ -61,7 +52,6 @@ export default function Paywall() {
 
   useEffect(() => {
     let mounted = true;
-    let interval: ReturnType<typeof setInterval> | undefined;
 
     (async () => {
       const state = await getSubscriptionState();
@@ -78,21 +68,11 @@ export default function Paywall() {
 
       const offer = await getOrStartPaywallOffer();
       if (!mounted) return;
-      setOfferMs(offer.remainingMs);
-      setOfferRevealed(offer.revealed);
       schedulePreSubscriptionNudges(offer.expiresAt, offer.revealedAt).catch(() => undefined);
-
-      interval = setInterval(async () => {
-        const nextOffer = await getOrStartPaywallOffer();
-        if (!mounted) return;
-        setOfferMs(nextOffer.remainingMs);
-        setOfferRevealed(nextOffer.revealed);
-      }, 1000);
     })();
 
     return () => {
       mounted = false;
-      if (interval) clearInterval(interval);
     };
   }, [router]);
 
@@ -167,44 +147,29 @@ export default function Paywall() {
           </View>
 
           <View style={styles.heroBlock}>
-            <Text style={styles.script}>protocole prêt</Text>
-            <Text style={styles.title}>{"Ton plan est construit. Premium l'exécute avec toi."}</Text>
+            <Text style={styles.script}>essai gratuit</Text>
+            <Text style={styles.title}>{"Ton plan est prêt. Choisis comment démarrer."}</Text>
             <Text style={styles.subtitle}>
-              {"FIT AI n'est pas une app à essayer vaguement : le programme, les repas, les rappels et les ajustements se débloquent avec l'abonnement."}
+              {"L'annuel est mis en avant avec 7 jours gratuits. Le mensuel reste disponible avec 3 jours gratuits, sans engagement."}
             </Text>
           </View>
 
-          {offerRevealed ? (
-            <View style={styles.offerBand} testID="paywall-discount-notification">
-              <View style={styles.offerIcon}>
-                <Ionicons name="notifications-outline" size={18} color="#071207" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.offerTitle}>Offre privée débloquée : -50%</Text>
-                <Text style={styles.offerText}>Le cycle annuel passe à 39,99 € pendant 24h. Encore {formatRemaining(offerMs)}.</Text>
-              </View>
+          <View style={styles.offerBand} testID="paywall-trial-notice">
+            <View style={styles.offerIcon}>
+              <Ionicons name="gift-outline" size={18} color="#071207" />
             </View>
-          ) : (
-            <View style={styles.waitBand}>
-              <View style={styles.waitIcon}>
-                <Ionicons name="hourglass-outline" size={18} color={colors.primaryLight} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.waitTitle}>Ton protocole reste réservé</Text>
-                <Text style={styles.waitText}>
-                  {"Le tarif standard est affiché maintenant. Si tu ne démarres pas tout de suite, FIT AI continuera à te relancer avec entraînement, motivation et offres privées."}
-                </Text>
-              </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.offerTitle}>Essai gratuit inclus</Text>
+              <Text style={styles.offerText}>Annuel : 7 jours puis 49,99 € · Mensuel : 3 jours puis 12,99 €/mois.</Text>
             </View>
-          )}
+          </View>
 
           <View style={styles.planGrid}>
             {(["annual", "monthly"] as SubscriptionPlan[]).map((plan) => {
               const details = PLAN_DETAILS[plan];
               const active = selectedPlan === plan;
-              const annualDiscountUnlocked = plan === "annual" && offerRevealed && !!details.discountPriceLabel;
-              const priceLabel = annualDiscountUnlocked ? details.discountPriceLabel : details.priceLabel;
-              const monthlyLabel = annualDiscountUnlocked ? details.discountMonthlyLabel : details.monthlyLabel;
+              const priceLabel = details.priceLabel;
+              const monthlyLabel = details.monthlyLabel;
               return (
                 <TouchableOpacity
                   key={plan}
@@ -222,16 +187,12 @@ export default function Paywall() {
                     ) : null}
                   </View>
                   <View style={styles.priceRow}>
-                    {annualDiscountUnlocked ? <Text style={styles.oldPrice}>{details.priceLabel}</Text> : null}
                     <Text style={styles.price}>{priceLabel}</Text>
                     <Text style={styles.period}>{details.period}</Text>
                   </View>
+                  <Text style={styles.trialLabel}>{details.trialLabel}</Text>
                   {monthlyLabel ? <Text style={styles.monthlyEquivalent}>{monthlyLabel}</Text> : null}
-                  {annualDiscountUnlocked && details.discountLabel ? (
-                    <Text style={styles.discount}>{details.discountLabel}</Text>
-                  ) : (
-                    <Text style={styles.discountMuted}>{plan === "annual" ? "Tarif annuel standard" : "Cycle renouvelé automatiquement"}</Text>
-                  )}
+                  <Text style={styles.discountMuted}>{plan === "annual" ? "Meilleur prix pour suivre le programme" : "Annulable à tout moment"}</Text>
                   <View style={[styles.radio, active && styles.radioActive]}>
                     {active ? <Ionicons name="checkmark" size={14} color="#071207" /> : null}
                   </View>
@@ -307,7 +268,7 @@ export default function Paywall() {
           ) : null}
 
           <Text style={styles.finePrint}>
-            {"Sans abonnement actif, FIT AI conserve uniquement le protocole préparé et peut envoyer des rappels quotidiens d'entraînement, de motivation et des promotions. L'accès complet reste réservé aux abonnés."}
+            {"Avant abonnement, FIT AI peut déjà préparer notifications, mouvements et rappels utiles. L'accès complet au programme reste réservé aux abonnés."}
           </Text>
         </ScrollView>
       </SafeAreaView>
@@ -395,7 +356,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   planCardActive: { borderColor: colors.primaryLight, backgroundColor: "rgba(39,89,39,0.54)" },
-  planAnnual: { borderColor: "rgba(255,179,63,0.58)" },
+  planAnnual: { minHeight: 152, borderColor: "rgba(255,179,63,0.58)", backgroundColor: "rgba(44,70,28,0.78)" },
   planTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
   planLabel: { color: colors.textMain, fontSize: 17, fontWeight: "900" },
   planBadge: { paddingHorizontal: 9, paddingVertical: 4, borderRadius: radius.full, backgroundColor: colors.amber },
@@ -411,6 +372,7 @@ const styles = StyleSheet.create({
   },
   price: { color: colors.textMain, fontSize: 30, fontWeight: "900", letterSpacing: 0 },
   period: { color: colors.textSecondary, fontSize: 13, fontWeight: "700", marginBottom: 5, marginLeft: 4 },
+  trialLabel: { color: colors.primaryLight, fontSize: 15, fontWeight: "900", marginTop: 4 },
   monthlyEquivalent: { color: colors.textSecondary, fontSize: 13, fontWeight: "800", marginTop: 2 },
   discount: { color: colors.amber, fontSize: 13, fontWeight: "900", marginTop: 4 },
   discountMuted: { color: colors.textMuted, fontSize: 13, fontWeight: "700", marginTop: 4 },

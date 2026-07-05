@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { Silhouette, SilhouetteSex, SILHOUETTE_LABELS } from "./Silhouette";
-import { colors, spacing, typography, radius } from "../theme";
+import { Silhouette, SilhouetteSex } from "./Silhouette";
+import { colors, spacing, radius } from "../theme";
 
 export function SilhouettePicker({
   sex,
@@ -37,12 +37,12 @@ export function SilhouettePicker({
                 <Ionicons
                   name={s === "male" ? "male" : "female"}
                   size={16}
-                  color={isOn ? colors.primary : colors.textSecondary}
+                  color={isOn ? "#102108" : colors.textSecondary}
                 />
                 <Text
                   style={[
                     styles.sexLabel,
-                    isOn && { color: colors.primary, fontWeight: "700" },
+                    isOn && { color: "#102108", fontWeight: "800" },
                   ]}
                 >
                   {s === "male" ? "Homme" : "Femme"}
@@ -68,22 +68,13 @@ export function SilhouettePicker({
               style={[styles.card, isOn && styles.cardOn]}
               testID={`silhouette-level-${lv}`}
             >
-              <Silhouette sex={localSex} level={lv} size={70} active={isOn} />
-              <Text
-                style={[
-                  styles.cardLabel,
-                  isOn && { color: colors.primary, fontWeight: "800" },
-                ]}
-                numberOfLines={1}
-              >
-                {SILHOUETTE_LABELS[lv]}
-              </Text>
+              <Silhouette sex={localSex} level={lv} size={82} active={isOn} />
               <View style={[styles.lvBadge, isOn && styles.lvBadgeOn]}>
                 <Text
                   style={{
                     fontSize: 10,
                     fontWeight: "800",
-                    color: isOn ? "#fff" : colors.textSecondary,
+                    color: isOn ? "#102108" : colors.textSecondary,
                   }}
                 >
                   N{lv}
@@ -111,34 +102,28 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     borderRadius: radius.md,
   },
-  sexChipOn: { backgroundColor: "rgba(53,214,232,0.13)", borderColor: colors.aqua },
+  sexChipOn: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
   sexLabel: { fontSize: 14, color: colors.textSecondary, fontWeight: "600" },
   row: { gap: spacing.sm, paddingVertical: 4, paddingHorizontal: 2 },
   card: {
-    width: 100,
-    padding: 8,
+    width: 124,
+    minHeight: 172,
+    padding: 10,
     borderRadius: radius.lg,
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: "rgba(255,255,255,0.14)",
     backgroundColor: "rgba(5,22,16,0.78)",
     alignItems: "center",
-    gap: 4,
+    justifyContent: "center",
   },
   cardOn: {
-    borderColor: colors.aqua,
-    backgroundColor: "rgba(53,214,232,0.12)",
-    shadowColor: colors.aqua,
-    shadowOpacity: 0.24,
+    borderColor: colors.primaryLight,
+    backgroundColor: "rgba(182,255,63,0.13)",
+    shadowColor: colors.primaryLight,
+    shadowOpacity: 0.28,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
     elevation: 5,
-  },
-  cardLabel: {
-    ...typography.small,
-    fontSize: 11,
-    color: colors.textSecondary,
-    textAlign: "center",
-    marginTop: 2,
   },
   lvBadge: {
     position: "absolute",
@@ -151,7 +136,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
-  lvBadgeOn: { backgroundColor: colors.aqua, borderColor: colors.aqua },
+  lvBadgeOn: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
 });
 
 export default SilhouettePicker;

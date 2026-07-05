@@ -1,9 +1,10 @@
 import { forwardRef } from "react";
 import { View, Text, StyleSheet, Image, Dimensions } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
-import Svg, { Path, Defs, Pattern, Rect, Circle } from "react-native-svg";
+import Svg, { Defs, Pattern, Rect, Circle } from "react-native-svg";
 import { Ionicons } from "@expo/vector-icons";
-import { Mascot, MascotAnimal } from "./Mascot";
+import type { MascotAnimal } from "./Mascot";
+import { MascotPortrait } from "./MascotPortrait";
 
 export type ShareCardData = {
   date?: string;
@@ -13,6 +14,7 @@ export type ShareCardData = {
   show_points?: boolean;
   mascot?: { animal: MascotAnimal; evolution?: 1 | 2 | 3 } | null;
   background_image_base64?: string | null;
+  background_image_uri?: string | null;
   background_video_thumb_base64?: string | null;
   strength_evolution?: 1 | 2 | 3;
   strength_value?: number; // 0..1
@@ -26,7 +28,7 @@ const { width: SCREEN_W } = Dimensions.get("window");
  *  - White + green identity, no dark veil
  *  - "Training du jour" + FIT AI brand
  *  - NO user name shown
- *  - Mascot (line-art) + Strength symbol + duration + 💪 emoji
+ *  - Mascot portrait + Strength symbol + duration
  *  - Points (optional)
  *  - Photo / video thumbnail as soft background WITHOUT any grey veil
  */
@@ -40,15 +42,14 @@ export const ShareCard = forwardRef<View, { data: ShareCardData; width?: number 
       year: "numeric",
     });
     const bg = data.background_image_base64 || data.background_video_thumb_base64;
-    const evolution = data.mascot?.evolution || data.strength_evolution || 1;
-
+    const bgUri = data.background_image_uri || null;
     return (
       <View ref={ref} collapsable={false} style={[styles.card, { width, height }]}>
         {/* Background image: NO dark veil. Use a soft white-to-green tint instead so text stays readable. */}
-        {bg ? (
+        {bg || bgUri ? (
           <>
             <Image
-              source={{ uri: `data:image/jpeg;base64,${bg}` }}
+              source={bg ? { uri: `data:image/jpeg;base64,${bg}` } : { uri: bgUri! }}
               style={StyleSheet.absoluteFill}
               resizeMode="cover"
             />
@@ -60,10 +61,18 @@ export const ShareCard = forwardRef<View, { data: ShareCardData; width?: number 
             />
           </>
         ) : (
-          <LinearGradient
-            colors={["#FFFFFF", "#EAF7EF", "#D6EFDC"]}
-            style={StyleSheet.absoluteFill}
-          />
+          <>
+            <Image
+              source={require("../../assets/images/fitai-hero-activities-hd.png")}
+              style={StyleSheet.absoluteFill}
+              resizeMode="cover"
+            />
+            <LinearGradient
+              colors={["rgba(255,255,255,0.38)", "rgba(255,255,255,0.06)", "rgba(74,222,128,0.18)"]}
+              locations={[0, 0.45, 1]}
+              style={StyleSheet.absoluteFill}
+            />
+          </>
         )}
 
         {/* Decorative pattern lines */}
@@ -75,6 +84,9 @@ export const ShareCard = forwardRef<View, { data: ShareCardData; width?: number 
           </Defs>
           <Rect width="100%" height="100%" fill="url(#dots)" />
         </Svg>
+        <View pointerEvents="none" style={styles.frameOuter}>
+          <View style={styles.frameInner} />
+        </View>
 
         {/* Header — FIT AI brand with leaf logo, prominent */}
         <View style={styles.headerRow}>
@@ -112,15 +124,9 @@ export const ShareCard = forwardRef<View, { data: ShareCardData; width?: number 
         <View style={styles.mascotRow}>
           <View style={styles.mascotCircle}>
             {data.mascot?.animal ? (
-              <Mascot
-                animal={data.mascot.animal}
-                evolution={evolution}
-                size={56}
-                color="#0F3F1B"
-                strokeWidth={2.4}
-              />
+              <MascotPortrait animal={data.mascot.animal} size={56} active />
             ) : (
-              <Mascot animal="lion" evolution={1} size={56} color="#0F3F1B" strokeWidth={2.4} />
+              <MascotPortrait animal="lion" size={56} active />
             )}
           </View>
           {data.show_points && typeof data.points_today === "number" && data.points_today > 0 && (
@@ -140,6 +146,10 @@ export const ShareCard = forwardRef<View, { data: ShareCardData; width?: number 
             <View style={styles.brandDotSmall} />
             <Text style={styles.watermark}>FIT AI</Text>
           </View>
+          <View style={styles.shareTag}>
+            <Ionicons name="share-social-outline" size={13} color="#0F3F1B" />
+            <Text style={styles.shareTagText}>Partager</Text>
+          </View>
         </View>
       </View>
     );
@@ -156,6 +166,21 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     borderWidth: 1,
     borderColor: "rgba(45,124,62,0.18)",
+  },
+  frameOuter: {
+    position: "absolute",
+    inset: 12,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.62)",
+    backgroundColor: "rgba(255,255,255,0.06)",
+  },
+  frameInner: {
+    flex: 1,
+    margin: 8,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.34)",
   },
   headerRow: {
     flexDirection: "row",
@@ -241,6 +266,18 @@ const styles = StyleSheet.create({
   },
   watermarkRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   watermark: { color: "#0F3F1B", fontSize: 12, fontWeight: "900", letterSpacing: 2 },
+  shareTag: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: "rgba(255,255,255,0.72)",
+    borderWidth: 1,
+    borderColor: "rgba(45,124,62,0.18)",
+  },
+  shareTagText: { color: "#0F3F1B", fontSize: 11, fontWeight: "800" },
   footerTagline: { color: "#2D7C3E", fontSize: 10, fontWeight: "700", letterSpacing: 0.5 },
 });
 

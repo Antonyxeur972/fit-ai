@@ -86,7 +86,7 @@ export function ShareCardModal({
     }
   };
 
-  const removeBackground = () => {
+  const useFitAiBackground = () => {
     setBgPhoto(null);
   };
 
@@ -171,7 +171,7 @@ export function ShareCardModal({
         <View style={styles.sheet}>
           <View style={styles.handle} />
           <View style={styles.headerRow}>
-            <Text style={styles.title}>Partager ma performance</Text>
+            <Text style={styles.title}>Partager</Text>
             <TouchableOpacity onPress={onClose} testID="share-card-close">
               <Ionicons name="close" size={24} color={colors.textSecondary} />
             </TouchableOpacity>
@@ -201,6 +201,14 @@ export function ShareCardModal({
 
             <View style={styles.bgRow}>
               <TouchableOpacity
+                onPress={useFitAiBackground}
+                style={styles.bgBtn}
+                testID="share-bg-fitai"
+              >
+                <Ionicons name="sparkles-outline" size={16} color={colors.primary} />
+                <Text style={styles.bgBtnText}>Perso FIT AI</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
                 onPress={pickBackground}
                 style={styles.bgBtn}
                 testID="share-bg-image"
@@ -217,7 +225,7 @@ export function ShareCardModal({
                 <Text style={styles.bgBtnText}>Photo</Text>
               </TouchableOpacity>
               {bgPhoto ? (
-                <TouchableOpacity onPress={removeBackground} style={styles.bgBtnGhost} testID="share-bg-remove">
+                <TouchableOpacity onPress={useFitAiBackground} style={styles.bgBtnGhost} testID="share-bg-remove">
                   <Ionicons name="trash-outline" size={16} color={colors.alert} />
                 </TouchableOpacity>
               ) : null}
@@ -253,7 +261,7 @@ export function ShareCardModal({
             </View>
 
             <Text style={styles.disclaimer}>
-              Format 9:16 (Stories Instagram, WhatsApp…). Fond blanc / vert FIT AI.
+              Format 9:16 avec cadre transparent. Tu peux partager ton décor à toi ou le visuel HD FIT AI.
             </Text>
             <View style={{ height: spacing.xl }} />
           </ScrollView>

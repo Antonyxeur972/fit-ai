@@ -7,81 +7,53 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, typography } from "@/src/theme";
 import { Button } from "@/src/components/UI";
+import { PROGRAM_PRESETS, type ProgramFrequency, type Split } from "@/src/lib/programPresets";
 
 const { width: SW } = Dimensions.get("window");
 const CARD_W = Math.min(SW * 0.72, 280);
 const CARD_H = CARD_W * 1.35;
 
-export type Split = "ppl" | "fullbody" | "split";
-export type Freq = 3 | 4 | 5;
+export type Freq = ProgramFrequency | 5;
+export type { Split };
 
-export const PROGRAMS = [
-  {
-    id: "masse",
-    goal_label: "Masse",
-    title: "Prise de Masse",
-    emoji: "💪",
-    accent: colors.primaryDark,
-    cardGrad: ["#062A21", "#143B20"] as const,
-    imageSource: require("../../assets/images/fitai-hero-program-hd.png"),
-    tagline: "Construire du muscle",
-    description:
-      "La prise de masse est un cycle axé sur la construction musculaire maximale. On augmente le volume d'entraînement avec des séries de 8–15 répétitions et une progression régulière des charges.",
-    benefits: [
-      "Volume élevé : 4–5 séances par semaine",
-      "Séries de 8–15 reps pour stimuler la croissance",
-      "Progression régulière des charges chaque semaine",
-      "Alimentation en léger surplus calorique recommandée",
-    ],
-    defaultSplit: "ppl" as Split,
-    defaultFreq: 5 as Freq,
-  },
-  {
-    id: "seche",
-    goal_label: "Perte de gras",
-    title: "Sèche",
-    emoji: "🔥",
-    accent: "#D67A22",
-    cardGrad: ["#183623", "#8A4D18"] as const,
-    imageSource: require("../../assets/images/fitai-hero-activities-hd.png"),
-    tagline: "Révéler ta forme",
-    description:
-      "La sèche combine entraînement intense et cardio ciblé pour fondre la masse grasse tout en préservant le muscle. Idéal pour sculpter une silhouette définie et révéler les abdominaux.",
-    benefits: [
-      "Séances courtes et intenses (45–55 min)",
-      "Supersets et circuits pour brûler plus de calories",
-      "Cardio intégré 2× par semaine",
-      "Préservation maximale du muscle acquis",
-    ],
-    defaultSplit: "fullbody" as Split,
-    defaultFreq: 4 as Freq,
-  },
-  {
-    id: "hypertrophie",
-    goal_label: "Hypertrophie",
-    title: "Hypertrophie",
-    emoji: "⚡",
-    accent: colors.primaryDark,
-    cardGrad: ["#052E24", "#1A6A39"] as const,
-    imageSource: require("../../assets/images/fitai-hero-progress-hd.png"),
-    tagline: "Développer chaque muscle",
-    description:
-      "L'hypertrophie cible la croissance musculaire contrôlée, groupe par groupe. On alterne charges lourdes et répétitions modérées pour forcer l'adaptation et développer une physique équilibrée.",
-    benefits: [
-      "Travail précis muscle par muscle (split PPL)",
-      "Alternance de charges lourdes et modérées",
-      "Idéal pour sculpter une physique équilibrée",
-      "Progressions structurées semaine après semaine",
-    ],
-    defaultSplit: "ppl" as Split,
-    defaultFreq: 5 as Freq,
-  },
-];
+const IMAGE_SOURCE = {
+  program: require("../../assets/images/fitai-hero-program-hd.png"),
+  activities: require("../../assets/images/fitai-hero-activities-hd.png"),
+  progress: require("../../assets/images/fitai-hero-progress-hd.png"),
+} as const;
+
+const EMOJI: Record<string, string> = {
+  cut: "🔥",
+  mass: "💪",
+  recomp: "⚡",
+  strength: "🏆",
+  power: "🚀",
+  restart: "🌱",
+};
+
+export const PROGRAMS = PROGRAM_PRESETS.map((preset) => ({
+  id: preset.id,
+  goal_label: preset.goalLabel,
+  title: preset.title,
+  emoji: EMOJI[preset.id] || "💪",
+  accent: preset.accent,
+  cardGrad: ["#062A21", "#143B20"] as const,
+  imageSource: IMAGE_SOURCE[preset.image],
+  tagline: preset.tagline,
+  description: preset.motivation,
+  benefits: [...preset.parameters.slice(0, 2), ...preset.outcomes.slice(0, 2)],
+  phases: preset.phases,
+  progression: preset.progression,
+  outcomes: preset.outcomes,
+  defaultSplit: preset.defaultSplit,
+  defaultFreq: preset.defaultFrequency,
+  defaultWeeks: preset.defaultWeeks,
+}));
 
 const FREQ_OPTIONS: { v: Freq; label: string; sub: string }[] = [
-  { v: 3, label: "3 jours", sub: "Débutant / Récupération" },
-  { v: 4, label: "4 jours", sub: "Intermédiaire" },
-  { v: 5, label: "5 jours", sub: "Optimal / Avancé" },
+  { v: 2, label: "2 jours", sub: "Base solide / reprise" },
+  { v: 3, label: "3 jours", sub: "Rythme ideal" },
+  { v: 4, label: "4 jours", sub: "Plus ambitieux" },
 ];
 
 const SPLIT_OPTIONS: { v: Split; label: string; sub: string }[] = [
@@ -91,7 +63,7 @@ const SPLIT_OPTIONS: { v: Split; label: string; sub: string }[] = [
 ];
 
 type Props = {
-  onSelectProgram: (goalLabel: string, freq: Freq, split: Split) => void;
+  onSelectProgram: (goalLabel: string, freq: Freq, split: Split, weeks?: number) => void;
   loading?: boolean;
 };
 
@@ -112,7 +84,7 @@ export function ProgramCarousel({ onSelectProgram, loading }: Props) {
 
   const confirm = () => {
     if (!selected) return;
-    onSelectProgram(selected.goal_label, freq, split);
+    onSelectProgram(selected.goal_label, freq, split, selected.defaultWeeks);
     setSelected(null);
   };
 
@@ -183,9 +155,16 @@ export function ProgramCarousel({ onSelectProgram, loading }: Props) {
 
                 <ScrollView style={{ maxHeight: 320 }} contentContainerStyle={{ padding: spacing.lg, gap: spacing.md }}>
                   <Text style={styles.descText}>{selected.description}</Text>
-                  <Text style={styles.benefitsTitle}>Points clés</Text>
+                    <Text style={styles.benefitsTitle}>Cadre du cycle</Text>
                   {selected.benefits.map((b, i) => (
                     <View key={i} style={styles.benefitRow}>
+                      <View style={[styles.benefitDot, { backgroundColor: selected.accent }]} />
+                      <Text style={styles.benefitText}>{b}</Text>
+                    </View>
+                  ))}
+                  <Text style={styles.benefitsTitle}>Phases</Text>
+                  {selected.phases.map((b, i) => (
+                    <View key={`phase-${i}`} style={styles.benefitRow}>
                       <View style={[styles.benefitDot, { backgroundColor: selected.accent }]} />
                       <Text style={styles.benefitText}>{b}</Text>
                     </View>
@@ -266,7 +245,7 @@ export function ProgramCarousel({ onSelectProgram, loading }: Props) {
                 </View>
                 <Text style={styles.confirmTitle}>Parfait !</Text>
                 <Text style={styles.confirmBody}>
-                  Programme <Text style={{ fontWeight: "800" }}>{selected.title}</Text> · {freq} séances/sem. ·{" "}
+                  Programme <Text style={{ fontWeight: "800" }}>{selected.title}</Text> · {freq} séances/sem. · {selected.defaultWeeks} sem. ·{" "}
                   <Text style={{ fontWeight: "800" }}>
                     {SPLIT_OPTIONS.find((o) => o.v === split)?.label}
                   </Text>

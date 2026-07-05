@@ -9,9 +9,8 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { useAuth } from "@/src/auth";
 import { api } from "@/src/api";
 import { Card, SectionTitle, Stat, Button } from "@/src/components/UI";
-import { Silhouette, SILHOUETTE_LABELS } from "@/src/components/Silhouette";
-import { SilhouettePicker } from "@/src/components/SilhouettePicker";
-import { Mascot, MascotAnimal, MASCOT_LABELS } from "@/src/components/Mascot";
+import { MascotAnimal, MASCOT_LABELS } from "@/src/components/Mascot";
+import { MascotPortrait } from "@/src/components/MascotPortrait";
 import { MascotPicker } from "@/src/components/MascotPicker";
 import { StrengthSymbol } from "@/src/components/StrengthSymbol";
 import { scheduleReminders, Reminder, ReminderKind } from "@/src/lib/notifications";
@@ -50,12 +49,6 @@ export default function ProfileTab() {
   const [neck, setNeck] = useState("");
   const [hips, setHips] = useState("");
   const [savingMeasures, setSavingMeasures] = useState(false);
-
-  // Phase 4: silhouette edit modal
-  const [silhouetteModal, setSilhouetteModal] = useState(false);
-  const [silSex, setSilSex] = useState<"male" | "female">("male");
-  const [silLevel, setSilLevel] = useState(3);
-  const [savingSil, setSavingSil] = useState(false);
 
   // Phase 4: 1RM estimate modal
   const [forceModal, setForceModal] = useState(false);
@@ -110,27 +103,6 @@ export default function ProfileTab() {
       setReminders(user.notif_prefs.reminders);
     }
   }, [user?.notif_prefs]);
-
-  // sync silhouette modal seed values with currently-stored user data
-  const openSilhouette = () => {
-    setSilSex((user?.silhouette?.sex as any) || (profile.gender as any) || "male");
-    setSilLevel(user?.silhouette?.level || 3);
-    setSilhouetteModal(true);
-  };
-
-  const saveSilhouette = async () => {
-    setSavingSil(true);
-    try {
-      await api("/users/me/silhouette", {
-        method: "PUT",
-        body: { sex: silSex, level: silLevel },
-      });
-      await refreshUser();
-      setSilhouetteModal(false);
-    } finally {
-      setSavingSil(false);
-    }
-  };
 
   const openForce = () => {
     setSquatKg(""); setSquatReps("");
@@ -289,7 +261,7 @@ export default function ProfileTab() {
           } />
           <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.sm }}>
             {user?.mascot?.animal ? (
-              <Mascot animal={user.mascot.animal} evolution={evolution} size={88} color={colors.primary} strokeWidth={2} />
+              <MascotPortrait animal={user.mascot.animal as MascotAnimal} size={88} active />
             ) : (
               <View style={[styles.mascotPlaceholder]}>
                 <Ionicons name="paw-outline" size={32} color={colors.primary} />
@@ -342,39 +314,6 @@ export default function ProfileTab() {
               ))}
             </View>
           )}
-        </Card>
-
-        {/* Silhouette + 1RM card (Phase 4) */}
-        <Card testID="silhouette-card">
-          <SectionTitle title="Ta silhouette" action={
-            <TouchableOpacity onPress={openSilhouette} testID="edit-silhouette">
-              <Text style={[typography.small, { color: colors.primary, fontWeight: "700" }]}>
-                {user?.silhouette ? "Modifier" : "Choisir"}
-              </Text>
-            </TouchableOpacity>
-          } />
-          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, marginTop: spacing.sm }}>
-            <Silhouette
-              sex={(user?.silhouette?.sex as any) || (profile.gender as any) || "male"}
-              level={user?.silhouette?.level || 3}
-              size={90}
-              active
-            />
-            <View style={{ flex: 1 }}>
-              <Text style={[typography.h3]}>
-                {SILHOUETTE_LABELS[user?.silhouette?.level || 3]}
-              </Text>
-              <Text style={typography.small}>
-                Niveau {user?.silhouette?.level || 3} sur 5 ·{" "}
-                {(user?.silhouette?.sex || profile.gender) === "female" ? "Femme" : "Homme"}
-              </Text>
-              <Text style={[typography.small, { marginTop: 4, fontSize: 11, color: colors.textMuted }]}>
-                {user?.silhouette
-                  ? "Mise à jour rapide depuis ce profil."
-                  : "Indique ta morphologie actuelle pour personnaliser tes objectifs."}
-              </Text>
-            </View>
-          </View>
         </Card>
 
         <Card testID="force-card">
@@ -657,36 +596,6 @@ export default function ProfileTab() {
             </ScrollView>
 
             <Button title="Enregistrer" onPress={saveReminders} loading={savingReminders} style={{ marginTop: spacing.lg }} testID="reminders-save" />
-            <View style={{ height: spacing.md }} />
-          </View>
-        </View>
-      </Modal>
-
-      {/* Silhouette modal */}
-      <Modal visible={silhouetteModal} transparent animationType="slide" onRequestClose={() => setSilhouetteModal(false)}>
-        <View style={styles.modalBg}>
-          <View style={[styles.modalCard]}>
-            <View style={styles.modalHandle} />
-            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
-              <Text style={styles.modalTitle}>Choisis ta silhouette</Text>
-              <TouchableOpacity onPress={() => setSilhouetteModal(false)} testID="silhouette-modal-close">
-                <Ionicons name="close" size={22} color={colors.textSecondary} />
-              </TouchableOpacity>
-            </View>
-            <View style={{ marginTop: spacing.md }}>
-              <SilhouettePicker
-                sex={silSex}
-                level={silLevel}
-                onChange={(s, lv) => {
-                  setSilSex(s);
-                  setSilLevel(lv);
-                }}
-              />
-            </View>
-            <View style={{ flexDirection: "row", gap: spacing.sm, marginTop: spacing.lg }}>
-              <Button title="Annuler" variant="secondary" onPress={() => setSilhouetteModal(false)} style={{ flex: 1 }} testID="silhouette-cancel" />
-              <Button title="Enregistrer" onPress={saveSilhouette} loading={savingSil} style={{ flex: 1.4 }} testID="silhouette-save" />
-            </View>
             <View style={{ height: spacing.md }} />
           </View>
         </View>
