@@ -11,21 +11,20 @@ import { useAuth } from "@/src/auth";
 import { api } from "@/src/api";
 import { MascotAnimal } from "@/src/components/Mascot";
 import { MascotPortrait } from "@/src/components/MascotPortrait";
-import { SilhouettePicker } from "@/src/components/SilhouettePicker";
 import { getOrStartPaywallOffer } from "@/src/lib/subscription";
 import { ensureNotifPermission, schedulePreSubscriptionNudges } from "@/src/lib/notifications";
 import { setSimpleMode as saveSimpleMode } from "@/src/lib/simpleMode";
 import { prepareMotionAccess } from "@/src/lib/steps";
 import { colors, radius, spacing } from "@/src/theme";
 
-type Step = 0 | 1 | 2 | 3 | 4 | 5;
+type Step = 0 | 1 | 2 | 3 | 4;
 type Gender = "male" | "female";
 type Goal = "lose" | "maintain" | "gain";
 type ActivityLevel = "sedentary" | "light" | "moderate" | "active" | "very_active";
 
-const STEPS_COUNT = 6;
+const STEPS_COUNT = 5;
 
-const STEP_TITLES = ["Départ intelligent", "Tes mesures", "Objectif principal", "Version de l'app", "Ta silhouette", "Ta mascotte"] as const;
+const STEP_TITLES = ["Départ intelligent", "Tes mesures", "Objectif principal", "Version de l'app", "Ta mascotte"] as const;
 
 const GOAL_OPTIONS: { value: Goal; label: string; desc: string; icon: keyof typeof Ionicons.glyphMap }[] = [
   { value: "lose", label: "Perdre du gras", desc: "Déficit calorique modéré", icon: "trending-down" },
@@ -53,8 +52,6 @@ export default function Onboarding() {
   const [goal, setGoal] = useState<Goal>("lose");
   const [simpleMode, setSimpleMode] = useState(true);
   const [activity] = useState<ActivityLevel>("moderate");
-  const [silhouetteLevel, setSilhouetteLevel] = useState(3);
-  const [silhouetteSex, setSilhouetteSex] = useState<Gender>("male");
   const [mascot, setMascot] = useState<MascotAnimal>((user?.mascot?.animal as MascotAnimal | undefined) || "lion");
   const [submitting, setSubmitting] = useState(false);
   const thinkingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -69,7 +66,6 @@ export default function Onboarding() {
 
   const selectGender = (nextGender: Gender) => {
     setGender(nextGender);
-    setSilhouetteSex(nextGender);
   };
 
   const next = () => {
@@ -98,13 +94,6 @@ export default function Onboarding() {
           activity_level: activity,
         },
       });
-
-      try {
-        await api("/users/me/silhouette", {
-          method: "PUT",
-          body: { sex: silhouetteSex, level: silhouetteLevel },
-        });
-      } catch {}
 
       try {
         await api("/users/me/mascot", {
@@ -285,30 +274,6 @@ export default function Onboarding() {
           )}
 
           {step === 4 && (
-            <View style={styles.stepBody}>
-              <Text style={styles.screenTitle}>
-                Ta <Text style={styles.accentText}>silhouette</Text>
-                {"\n"}actuelle
-              </Text>
-              <Text style={styles.screenSubtitle}>
-                {"Choisis le visuel qui ressemble le plus à ton corps aujourd'hui. Ce sera le point de départ."}
-              </Text>
-              <GenderSwitch value={silhouetteSex} onChange={setSilhouetteSex} compact />
-              <GlassPanel style={styles.pickerPanel}>
-                <SilhouettePicker
-                  sex={silhouetteSex}
-                  level={silhouetteLevel}
-                  showSexToggle={false}
-                  onChange={(nextSex, nextLevel) => {
-                    setSilhouetteSex(nextSex);
-                    setSilhouetteLevel(nextLevel);
-                  }}
-                />
-              </GlassPanel>
-            </View>
-          )}
-
-          {step === 5 && (
             <View style={styles.stepBody}>
               <GlassPanel style={styles.mascotPanel}>
                 <Text style={styles.screenTitle}>

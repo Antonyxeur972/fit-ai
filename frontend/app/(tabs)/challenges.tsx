@@ -6,6 +6,7 @@ import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { Card, Button, SectionTitle } from "@/src/components/UI";
 import { api } from "@/src/api";
 import { colors, spacing, radius } from "@/src/theme";
+import { storage } from "@/src/utils/storage";
 
 type PointsSummary = {
   level: number;
@@ -36,14 +37,35 @@ type ChallengeDay = {
 };
 
 type ChallengeType = "pushups" | "abs" | "squats" | "plank" | "steps10k" | "running";
-const CHALLENGE_START_ALIASES: Record<ChallengeType, string> = {
-  pushups: "pompes",
-  abs: "abdos",
-  squats: "squats",
-  plank: "gainage",
-  steps10k: "10000 pas",
-  running: "running",
-};
+const CHALLENGE_TYPES: ChallengeType[] = ["pushups", "abs", "squats", "plank", "steps10k", "running"];
+const HIDDEN_CHALLENGES_KEY = "fitai_hidden_challenge_types";
+
+function normalizeChallengeType(value: unknown): ChallengeType | null {
+  const key = String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+  if (["pushup", "pushups", "pompe", "pompes", "defipompes"].includes(key)) return "pushups";
+  if (["abs", "abdo", "abdos", "abdominaux", "defiabdos"].includes(key)) return "abs";
+  if (["squat", "squats", "defisquats"].includes(key)) return "squats";
+  if (["plank", "planche", "gainage", "defigainage", "defigainage30jours"].includes(key)) return "plank";
+  if (key.includes("10000") || key.includes("10k") || key.includes("pas") || key.includes("step") || key.includes("marche")) return "steps10k";
+  if (key.includes("run") || key.includes("course") || key.includes("km")) return "running";
+  return null;
+}
+
+async function readHiddenChallengeTypes() {
+  try {
+    return JSON.parse((await storage.getItem(HIDDEN_CHALLENGES_KEY, "[]")) || "[]") as ChallengeType[];
+  } catch {
+    return [];
+  }
+}
+
+async function writeHiddenChallengeTypes(types: ChallengeType[]) {
+  await storage.setItem(HIDDEN_CHALLENGES_KEY, JSON.stringify(Array.from(new Set(types))));
+}
 
 type ActiveChallenge = {
   id: string;
@@ -76,6 +98,35 @@ const BADGE_IMAGES: Record<number, any> = {
   30: require("../../assets/images/fitai-badge-30.png"),
 };
 
+const START_ATTEMPTS: Record<ChallengeType, string[]> = {
+  pushups: ["pushups", "pompes", "defipompes"],
+  abs: ["abs", "abdos", "defiabdos"],
+  squats: ["squats", "squat", "defisquats"],
+  plank: ["plank", "gainage", "defigainage", "Défi Gainage"],
+  steps10k: ["steps10k", "10000pas", "10kpas", "Défi 10 000 pas"],
+  running: ["running", "run", "course", "defirunning", "Défi Running"],
+};
+
+function localChallenge(type: ChallengeType): ActiveChallenge {
+  const labels: Record<ChallengeType, { name: string; icon: string; exercise: string }> = {
+    pushups: { name: "30 jours de pompes", icon: "fitness", exercise: "Pompes" },
+    abs: { name: "30 jours d'abdos", icon: "shield-checkmark", exercise: "Abdos" },
+    squats: { name: "30 jours de squats", icon: "barbell", exercise: "Squats" },
+    plank: { name: "30 jours de gainage", icon: "timer", exercise: "Planche" },
+    steps10k: { name: "30 jours à 10 000 pas", icon: "walk", exercise: "10 000 pas" },
+    running: { name: "30 jours running", icon: "footsteps", exercise: "Course" },
+  };
+  return {
+    id: `local:${type}:${Date.now()}`,
+    type,
+    ...labels[type],
+    started_at: new Date().toISOString(),
+    streak: 0,
+    completed_count: 0,
+    days: previewChallengeDays(type),
+  };
+}
+
 export default function ChallengesTab() {
   const [points, setPoints] = useState<PointsSummary | null>(null);
   const [week, setWeek] = useState<Week | null>(null);
@@ -86,6 +137,7 @@ export default function ChallengesTab() {
 
   const load = useCallback(async () => {
     try {
+      const hiddenTypes = await readHiddenChallengeTypes();
       const [ps, w, wk, active] = await Promise.all([
         api<PointsSummary>("/points/summary").catch(() => null),
         api<Week>("/dashboard/week").catch(() => null),
@@ -95,7 +147,17 @@ export default function ChallengesTab() {
       setPoints(ps);
       setWeek(w);
       setWorkouts(wk || []);
-      setActiveChallenges(active.items || []);
+      const remoteItems = (active.items || []).map((item) => ({
+        ...item,
+        type: normalizeChallengeType(item.type) || item.type,
+      })).filter((item) => !hiddenTypes.includes(normalizeChallengeType(item.type) as ChallengeType)) as ActiveChallenge[];
+      setActiveChallenges((current) => {
+        const localItems = current.filter((item) => item.id.startsWith("local:"));
+        return [
+          ...remoteItems,
+          ...localItems.filter((local) => !remoteItems.some((remote) => normalizeChallengeType(remote.type) === normalizeChallengeType(local.type))),
+        ];
+      });
     } catch (e) {
       console.warn("rewards load", e);
     }
@@ -111,22 +173,31 @@ export default function ChallengesTab() {
   const fullBodyDone = workouts.some((w) => w.completed && `${w.focus} ${w.title}`.toLowerCase().includes("full"));
   const missionCount = [sessionsDone >= 3, weeklySteps >= 20000, cardioMinutes >= 45, fullBodyDone].filter(Boolean).length;
   const chestReady = missionCount >= 3;
-  const focusedChallenges = (["pushups", "abs", "squats", "plank", "steps10k", "running"] as const).map((type) => ({
+  const focusedChallenges = CHALLENGE_TYPES.map((type) => ({
     type,
-    challenge: activeChallenges.find((item) => item.type === type),
+    challenge: activeChallenges.find((item) => normalizeChallengeType(item.type) === type),
   }));
+
+  const upsertChallenge = (challenge: ActiveChallenge, fallbackType: ChallengeType) => {
+    const normalizedType = normalizeChallengeType(challenge.type) || fallbackType;
+    setActiveChallenges((current) => [
+      { ...challenge, type: normalizedType },
+      ...current.filter((item) => normalizeChallengeType(item.type) !== normalizedType),
+    ]);
+  };
 
   const startChallenge = async (type: ChallengeType) => {
     setChallengeBusy(type);
     try {
-      try {
-        await api("/challenges/start", { method: "POST", body: { type } });
-      } catch (firstError) {
-        const alias = CHALLENGE_START_ALIASES[type];
-        if (!alias || alias === type) throw firstError;
-        await api("/challenges/start", { method: "POST", body: { type: alias } });
+      await writeHiddenChallengeTypes((await readHiddenChallengeTypes()).filter((item) => item !== type));
+      let started: ActiveChallenge | null = null;
+      for (const requestType of START_ATTEMPTS[type]) {
+        try {
+          started = await api<ActiveChallenge>("/challenges/start", { method: "POST", body: { type: requestType }, retries: 0 });
+          break;
+        } catch {}
       }
-      await load();
+      upsertChallenge(started || localChallenge(type), type);
     } catch (e: any) {
       Alert.alert("Défi indisponible", e?.message || "Impossible de démarrer ce défi pour le moment.");
     } finally {
@@ -136,19 +207,36 @@ export default function ChallengesTab() {
 
   const validateChallengeDay = async (challenge: ActiveChallenge) => {
     const dayIndex = todayChallengeIndex(challenge);
+    await setChallengeDay(challenge, dayIndex, true);
+  };
+
+  const setChallengeDay = async (challenge: ActiveChallenge, dayIndex: number, completed: boolean) => {
     setChallengeBusy(challenge.type);
     try {
-      await api(`/challenges/${challenge.id}/check-day`, { method: "POST", body: { day_index: dayIndex } });
-      await load();
+      const days = challenge.days.map((day, index) => index === dayIndex ? { ...day, completed } : day);
+      upsertChallenge({ ...challenge, days, completed_count: days.filter((day) => day.completed && !day.is_rest).length }, challenge.type);
+      if (!challenge.id.startsWith("local:")) {
+        const path = completed ? "check-day" : "uncheck-day";
+        const result = await api<{ challenge?: ActiveChallenge }>(`/challenges/${challenge.id}/${path}`, { method: "POST", body: { day_index: dayIndex } });
+        if (result.challenge) upsertChallenge(result.challenge, challenge.type);
+      }
     } catch (e: any) {
-      Alert.alert("Validation impossible", e?.message || "Impossible de valider ce jour de défi.");
+      console.warn("challenge day sync", e?.message || e);
     } finally {
       setChallengeBusy(null);
     }
   };
 
   const restartChallenge = async (type: ChallengeType) => {
+    setActiveChallenges((current) => current.filter((item) => normalizeChallengeType(item.type) !== type));
     await startChallenge(type);
+  };
+
+  const restartAllChallenges = async () => {
+    await writeHiddenChallengeTypes(CHALLENGE_TYPES);
+    const current = activeChallenges;
+    setActiveChallenges([]);
+    await Promise.all(current.map((item) => api(`/challenges/${item.id}`, { method: "DELETE", retries: 0 }).catch(() => null)));
   };
 
   return (
@@ -222,7 +310,15 @@ export default function ChallengesTab() {
         </Card>
 
         <Card testID="daily-challenges-card" style={{ gap: spacing.md }}>
-          <SectionTitle title="Défis quotidiens" />
+          <SectionTitle
+            title="Défis quotidiens"
+            action={
+              <TouchableOpacity onPress={restartAllChallenges} style={styles.restartAllBtn} testID="challenge-restart-all">
+                <Ionicons name="refresh-outline" size={13} color={colors.primaryLight} />
+                <Text style={styles.restartText}>Tout recommencer</Text>
+              </TouchableOpacity>
+            }
+          />
           {focusedChallenges.map(({ type, challenge }) => (
             <DailyChallengeCard
               key={type}
@@ -232,6 +328,7 @@ export default function ChallengesTab() {
               onStart={() => startChallenge(type)}
               onRestart={() => restartChallenge(type)}
               onValidate={() => challenge ? validateChallengeDay(challenge) : undefined}
+              onToggleDay={(index, completed) => challenge ? setChallengeDay(challenge, index, completed) : startChallenge(type)}
             />
           ))}
         </Card>
@@ -357,6 +454,7 @@ function DailyChallengeCard({
   onStart,
   onRestart,
   onValidate,
+  onToggleDay,
 }: {
   type: ChallengeType;
   challenge?: ActiveChallenge;
@@ -364,6 +462,7 @@ function DailyChallengeCard({
   onStart: () => void;
   onRestart: () => void;
   onValidate: () => void;
+  onToggleDay: (dayIndex: number, completed: boolean) => void;
 }) {
   const meta: Record<ChallengeType, { label: string; icon: keyof typeof Ionicons.glyphMap; subtitle: string }> = {
     pushups: { label: "Défi Pompes", icon: "body-outline", subtitle: "Pectoraux et bras" },
@@ -410,20 +509,26 @@ function DailyChallengeCard({
             <Text style={styles.challengeCalendarHint}>Off = récupération</Text>
           </View>
           {(challenge?.days || previewChallengeDays(type)).map((item, index) => (
-            <View
+            <TouchableOpacity
               key={index}
+              onPress={() => challenge ? onToggleDay(index, !item.completed) : onStart()}
+              activeOpacity={0.82}
               style={[
                 styles.challengeDayCard,
                 item.is_rest && styles.challengeDayRest,
                 item.completed && styles.challengeDayDone,
                 challenge && index === dayIndex && styles.challengeDayToday,
               ]}
+              testID={`challenge-${type}-day-${index}`}
             >
+              <View style={[styles.challengeDayCheck, item.completed && styles.challengeDayCheckOn]}>
+                {item.completed ? <Ionicons name="checkmark" size={10} color="#102108" /> : null}
+              </View>
               <Text style={[styles.challengeDayText, item.completed && styles.challengeDayTextDone]}>J{index + 1}</Text>
               <Text style={[styles.challengeDayTarget, item.completed && styles.challengeDayTextDone]}>
                 {challengeTargetText(item)}
               </Text>
-            </View>
+            </TouchableOpacity>
           ))}
         </View>
       ) : null}
@@ -518,8 +623,11 @@ const styles = StyleSheet.create({
   challengeDayText: { color: colors.textMuted, fontSize: 9.5, fontWeight: "900" },
   challengeDayTarget: { color: colors.textMain, fontSize: 10.5, fontWeight: "900", marginTop: 1 },
   challengeDayTextDone: { color: "#102108" },
+  challengeDayCheck: { position: "absolute", top: 4, right: 4, width: 15, height: 15, borderRadius: 8, borderWidth: 1, borderColor: "rgba(255,255,255,0.35)", alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.14)" },
+  challengeDayCheckOn: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
   challengeActions: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   dailyChallengeButton: { flex: 1, minWidth: 120, paddingHorizontal: 10 },
+  restartAllBtn: { minHeight: 30, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 10, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.28)", backgroundColor: "rgba(182,255,63,0.08)" },
   restartBtn: { minHeight: 42, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: spacing.md, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.28)", backgroundColor: "rgba(182,255,63,0.08)" },
   restartText: { color: colors.primaryLight, fontSize: 11.5, fontWeight: "900" },
   totalXpCard: { flexDirection: "row", alignItems: "center", gap: spacing.sm, borderColor: colors.borderBright },

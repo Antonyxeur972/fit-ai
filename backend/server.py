@@ -263,6 +263,16 @@ class WorkoutUpdate(BaseModel):
     exercises: Optional[List[Dict[str, Any]]] = None
 
 
+class WorkoutCreateManual(BaseModel):
+    date: str
+    title: Optional[str] = "Séance ajoutée"
+    session_type: Optional[str] = "volume"
+    focus: Optional[str] = "Séance ajoutée"
+    duration_min: Optional[int] = 45
+    exercises: Optional[List[Dict[str, Any]]] = None
+    completed: bool = True
+
+
 class TransformationPhoto(BaseModel):
     id: str
     user_id: str
@@ -310,6 +320,12 @@ class ProgramCreateRequest(BaseModel):
 class ProgramDayUpdate(BaseModel):
     focus: Optional[str] = None
     exercises: List[Dict[str, Any]]
+
+
+class ProgramDayCreate(BaseModel):
+    focus: Optional[str] = None
+    exercises: Optional[List[Dict[str, Any]]] = None
+    session_type: Optional[str] = None
 
 
 class ProgramDayWorkoutRequest(BaseModel):
@@ -2609,6 +2625,20 @@ async def program_create(
     user = await get_current_user(authorization)
     weeks = max(4, min(int(body.weeks), 24))
     frequency = max(2, min(int(body.frequency), 7))
+    defaults_by_freq = {
+        2: [0, 3],
+        3: [0, 2, 4],
+        4: [0, 1, 3, 4],
+        5: [0, 1, 2, 3, 4],
+        6: [0, 1, 2, 3, 4, 5],
+        7: [0, 1, 2, 3, 4, 5, 6],
+    }
+    requested_days = [int(d) % 7 for d in (body.training_days or []) if isinstance(d, int) or str(d).isdigit()]
+    training_days = []
+    for d in requested_days + defaults_by_freq.get(frequency, [0, 2, 4]):
+        if d not in training_days:
+            training_days.append(d)
+    training_days = sorted(training_days[:frequency])
     raw_split = (body.split or "ppl").lower()
     split_aliases = {"halfbody": "upper_lower", "half_body": "upper_lower", "upperlower": "upper_lower"}
     split = split_aliases.get(raw_split, raw_split)
@@ -2647,7 +2677,7 @@ async def program_create(
         "goal": goal,
         "weeks_total": weeks,
         "frequency": frequency,
-        "training_days": body.training_days if body.training_days else None,
+        "training_days": training_days,
         "training_times": body.training_times if body.training_times else None,
         "split": split,
         "block_weeks": body.block_weeks or {"volume": 1, "puissance": 1, "force": 1},
@@ -2871,8 +2901,6 @@ async def challenge_check_day(
     if body.day_index < 0 or body.day_index >= len(days):
         raise HTTPException(400, "Invalid day_index")
     day = days[body.day_index]
-    if day.get("is_rest"):
-        return {"ok": True, "rest_day": True, "challenge": strip_id(ch)}
     if day.get("completed"):
         return {"ok": True, "already_done": True, "challenge": strip_id(ch)}
     day["completed"] = True
@@ -2951,6 +2979,43 @@ async def challenge_check_day(
     return {"ok": True, "challenge": refreshed}
 
 
+@api.post("/challenges/{challenge_id}/uncheck-day")
+async def challenge_uncheck_day(
+    challenge_id: str,
+    body: ChallengeCheckDayRequest,
+    authorization: Optional[str] = Header(default=None),
+):
+    user = await get_current_user(authorization)
+    ch = await db.challenges.find_one({"id": challenge_id, "user_id": user["user_id"]})
+    if not ch:
+        raise HTTPException(404, "Challenge not found")
+    days = ch.get("days", [])
+    if body.day_index < 0 or body.day_index >= len(days):
+        raise HTTPException(400, "Invalid day_index")
+    days[body.day_index]["completed"] = False
+    days[body.day_index].pop("completed_at", None)
+    completed_count = sum(1 for d in days if d.get("completed"))
+    streak = 0
+    for d in days:
+        if d.get("completed") or d.get("is_rest"):
+            streak += 1
+        else:
+            break
+    await db.challenges.update_one(
+        {"id": challenge_id, "user_id": user["user_id"]},
+        {"$set": {"days": days, "streak": streak, "completed_count": completed_count, "active": True}, "$unset": {"completed_at": ""}},
+    )
+    await db.workouts.delete_many({
+        "user_id": user["user_id"],
+        "challenge_id": challenge_id,
+        "challenge_day_index": body.day_index,
+        "source": {"$in": ["challenge", "challenge_plan"]},
+    })
+    await db.points_events.delete_many({"user_id": user["user_id"], "meta.key": f"ch_{challenge_id}_{body.day_index}"})
+    refreshed = await db.challenges.find_one({"id": challenge_id}, {"_id": 0})
+    return {"ok": True, "challenge": refreshed}
+
+
 @api.delete("/challenges/{challenge_id}")
 async def challenge_abandon(
     challenge_id: str, authorization: Optional[str] = Header(default=None)
@@ -3006,6 +3071,55 @@ async def program_update_day(
         {"$set": {"weeks": weeks}},
     )
     return target_d
+
+
+@api.post("/program/{program_id}/week/{week_index}/day")
+async def program_create_day(
+    program_id: str,
+    week_index: int,
+    body: ProgramDayCreate,
+    authorization: Optional[str] = Header(default=None),
+):
+    user = await get_current_user(authorization)
+    prog = await db.programs.find_one(
+        {"id": program_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not prog:
+        raise HTTPException(404, "Program not found")
+    weeks = prog.get("weeks") or []
+    target_w = next((w for w in weeks if int(w.get("week_index", -1)) == int(week_index)), None)
+    if not target_w:
+        raise HTTPException(404, "Week not found")
+    days = target_w.get("days") or []
+    next_day_index = max([int(d.get("day_index", -1)) for d in days] + [-1]) + 1
+    session_type = str(body.session_type or target_w.get("session_type") or "volume").lower()
+    if session_type not in SESSION_TYPES:
+        session_type = "volume"
+    new_exs: List[Dict[str, Any]] = []
+    for e in body.exercises or []:
+        name = str(e.get("name", "")).strip()
+        if not name:
+            continue
+        new_exs.append({
+            "name": name,
+            "sets": int(e.get("sets", 3)),
+            "reps": str(e.get("reps", "10")),
+            "rest_s": int(e.get("rest_s", 60)),
+            "checked": bool(e.get("checked", True)),
+            "category": str(e.get("category", "")),
+        })
+    new_day = {
+        "day_index": next_day_index,
+        "focus": (body.focus or f"Séance libre {next_day_index + 1}").strip(),
+        "exercises": new_exs,
+    }
+    days.append(new_day)
+    target_w["days"] = days
+    await db.programs.update_one(
+        {"id": program_id, "user_id": user["user_id"]},
+        {"$set": {"weeks": weeks}},
+    )
+    return new_day
 
 
 @api.post("/program/day-workout")
@@ -3413,6 +3527,9 @@ async def workouts_history(
             "date": w.get("date"),
             "title": w.get("title", ""),
             "focus": w.get("focus", ""),
+            "source": w.get("source", ""),
+            "challenge_id": w.get("challenge_id"),
+            "challenge_day_index": w.get("challenge_day_index"),
             "session_type": w.get("session_type", "volume"),
             "duration_min": w.get("duration_min", 45),
             "completed": True,
@@ -3421,6 +3538,53 @@ async def workouts_history(
             "performances": perfs,
         })
     return history
+
+
+@api.post("/workouts/manual")
+async def create_manual_workout(
+    body: WorkoutCreateManual, authorization: Optional[str] = Header(default=None)
+):
+    user = await get_current_user(authorization)
+    try:
+        dt_date.fromisoformat(body.date)
+    except Exception:
+        raise HTTPException(400, "Date invalide")
+    session_type = body.session_type if body.session_type in SESSION_TYPES else "volume"
+    exercises = []
+    for e in body.exercises or []:
+        name = str(e.get("name", "")).strip()
+        if not name:
+            continue
+        exercises.append({
+            "name": name,
+            "sets": int(e.get("sets", 3)),
+            "reps": str(e.get("reps", "10")),
+            "rest_s": int(e.get("rest_s", 60)),
+            "checked": bool(e.get("checked", True)),
+        })
+    now = now_utc()
+    doc = {
+        "id": new_id("wk"),
+        "user_id": user["user_id"],
+        "date": body.date,
+        "title": body.title or "Séance ajoutée",
+        "focus": body.focus or "Séance ajoutée",
+        "duration_min": max(1, int(body.duration_min or 45)),
+        "exercises": exercises,
+        "completed": bool(body.completed),
+        "completed_at": now if body.completed else None,
+        "session_type": session_type,
+        "source": "manual_history",
+        "created_at": now,
+    }
+    await db.workouts.insert_one(doc)
+    if doc["completed"]:
+        try:
+            await award_points(user["user_id"], "workout_completed", meta={"key": f"wk_{doc['id']}"})
+            await evaluate_daily_combos(user["user_id"])
+        except Exception as e:
+            log.warning(f"manual workout points: {e}")
+    return strip_id(doc)
 
 
 @api.delete("/workouts/all")
@@ -3451,8 +3615,24 @@ async def delete_workout(workout_id: str, authorization: Optional[str] = Header(
     workout = await db.workouts.find_one({"id": workout_id, "user_id": user["user_id"]}, {"_id": 0})
     deleted_workouts = 0
     if workout:
+        challenge_id = workout.get("challenge_id")
+        challenge_day_index = workout.get("challenge_day_index")
         res = await db.workouts.delete_one({"id": workout_id, "user_id": user["user_id"]})
         deleted_workouts = int(res.deleted_count)
+        if challenge_id is not None and challenge_day_index is not None:
+            ch = await db.challenges.find_one({"id": challenge_id, "user_id": user["user_id"]})
+            if ch:
+                days = ch.get("days", [])
+                idx = int(challenge_day_index)
+                if 0 <= idx < len(days):
+                    days[idx]["completed"] = False
+                    days[idx].pop("completed_at", None)
+                    completed_count = sum(1 for d in days if d.get("completed"))
+                    await db.challenges.update_one(
+                        {"id": challenge_id, "user_id": user["user_id"]},
+                        {"$set": {"days": days, "completed_count": completed_count, "active": True}, "$unset": {"completed_at": ""}},
+                    )
+                    await db.points_events.delete_many({"user_id": user["user_id"], "meta.key": f"ch_{challenge_id}_{idx}"})
     await db.exercise_perf.delete_many({"user_id": user["user_id"], "workout_id": workout_id})
     try:
         deleted_points = await cleanup_workout_points(user["user_id"], workout_id)
@@ -4163,7 +4343,7 @@ async def workout_today(authorization: Optional[str] = Header(default=None)):
             {"user_id": user["user_id"], "active": True}, {"_id": 0}, sort=[("created_at", -1)]
         )
         if prog:
-            w = _planned_program_workout_payload(prog, today_str()) or _fallback_program_workout_payload(prog, today_str())
+            w = _planned_program_workout_payload(prog, today_str())
     return w or {}
 
 
@@ -4303,7 +4483,7 @@ async def dashboard_day(
             {"user_id": user["user_id"], "active": True}, {"_id": 0}, sort=[("created_at", -1)]
         )
         if prog:
-            workout = _planned_program_workout_payload(prog, d) or _fallback_program_workout_payload(prog, d)
+            workout = _planned_program_workout_payload(prog, d)
 
     consumed = sum(m.get("calories", 0) for m in meals)
     protein = sum(m.get("protein_g", 0) for m in meals)

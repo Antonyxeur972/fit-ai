@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Modal, Platform, Alert, ImageBackground,
 } from "react-native";
@@ -6,7 +7,6 @@ import type { ImageSourcePropType } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
-import * as Haptics from "expo-haptics";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Sharing from "expo-sharing";
 import * as Calendar from "expo-calendar";
@@ -21,11 +21,13 @@ import { colors, spacing, typography, radius } from "@/src/theme";
 import { PROGRAM_PRESETS, phaseForWeek, presetByGoal } from "@/src/lib/programPresets";
 import { readDefaultTrainingTime } from "@/src/lib/trainingPreferences";
 import { getSimpleMode } from "@/src/lib/simpleMode";
+import { storage } from "@/src/utils/storage";
 
 type Exercise = { name: string; sets: number; reps: string; rest_s: number; checked?: boolean; is_recommended?: boolean };
 type Workout = {
   id: string; date: string; title: string; focus: string; duration_min: number;
-  exercises: Exercise[]; completed: boolean; session_type?: string; points_earned?: number;
+  exercises: Exercise[]; completed: boolean; session_type?: string; points_earned?: number; source?: string;
+  challenge_id?: string; challenge_day_index?: number;
 };
 type Activity = { date: string; steps: number; cardio_minutes: number; cardio_type?: string };
 type LibExercise = { id: string; name: string; category: string; equipment: string };
@@ -38,6 +40,7 @@ type SessionResult = { prs: number; volume: number; duration: number; calories: 
 const SESSION_KEYS = ["volume", "puissance", "force"] as const;
 type SessionKey = typeof SESSION_KEYS[number];
 type TrainingTab = "today" | "recommendation" | "calendar" | "history";
+const HIDDEN_HISTORY_KEY = "fitai_hidden_history_keys";
 
 // Color code per session_type (block periodization legend)
 const SESSION_COLOR: Record<string, { bg: string; fg: string; border: string }> = {
@@ -55,6 +58,28 @@ const SPLIT_LABELS: Record<string, string> = {
   upper_lower: "Upper / Lower",
   home: "Home",
 };
+
+function historyKeys(workout: Workout) {
+  return [
+    workout.id,
+    workout.challenge_id && workout.challenge_day_index != null ? `challenge:${workout.challenge_id}:${workout.challenge_day_index}` : "",
+    `${workout.date}:${workout.title}:${workout.focus}`,
+  ].filter(Boolean);
+}
+
+async function readHiddenHistoryKeys() {
+  try {
+    return JSON.parse((await storage.getItem(HIDDEN_HISTORY_KEY, "[]")) || "[]") as string[];
+  } catch {
+    return [];
+  }
+}
+
+async function addHiddenHistoryKeys(keys: string[]) {
+  const merged = Array.from(new Set([...(await readHiddenHistoryKeys()), ...keys]));
+  await storage.setItem(HIDDEN_HISTORY_KEY, JSON.stringify(merged));
+  return merged;
+}
 
 const STRUCTURE_OPTIONS = [
   {
@@ -216,6 +241,19 @@ function splitLabel(split?: string) {
 
 function toLocalIsoDate(date: Date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function relativeWorkoutLabel(dateIso: string, todayIso: string) {
+  const todayDate = new Date(`${todayIso}T12:00:00`);
+  const workoutDate = new Date(`${dateIso}T12:00:00`);
+  if (Number.isNaN(workoutDate.getTime())) return "Prochaine séance";
+  const delta = Math.round((workoutDate.getTime() - todayDate.getTime()) / 86400000);
+  if (delta === 0) return "Aujourd'hui";
+  if (delta === 1) return "Votre séance demain";
+  if (delta > 1) {
+    return `Votre séance ${workoutDate.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "short" })}`;
+  }
+  return "Séance programmée";
 }
 
 function weekdayFromIso(dateIso: string) {
@@ -431,6 +469,7 @@ export default function Training() {
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editWorkout, setEditWorkout] = useState<Workout | null>(null);
+  const [resumeRunnerAfterEdit, setResumeRunnerAfterEdit] = useState(false);
 
   const [perfOpen, setPerfOpen] = useState(false);
   const [perfEx, setPerfEx] = useState<{ workout: Workout; exercise: Exercise } | null>(null);
@@ -449,10 +488,7 @@ export default function Training() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyExpanded, setHistoryExpanded] = useState<string | null>(null);
 
-  // Rest timer state
-  const [restTotal, setRestTotal] = useState(0);
-  const [restRemaining, setRestRemaining] = useState(0);
-  const [restRunning, setRestRunning] = useState(false);
+  // Rest suggestion state: no live timer, only editable recovery duration.
   const [restPerExercise, setRestPerExercise] = useState<Record<string, number>>({});
 
   // Program state
@@ -583,29 +619,42 @@ export default function Training() {
     if (tab === "calendar") loadCalendar(calMonth);
   };
 
-  const deleteHistoryWorkout = (workout: Workout) => {
-    Alert.alert(
-      "Supprimer la séance",
-      "La séance, ses performances et ses points directs seront retirés de l'historique.",
-      [
-        { text: "Annuler", style: "cancel" },
-        {
-          text: "Supprimer",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await api(`/workouts/${workout.id}`, { method: "DELETE" });
-              setHistoryExpanded(null);
-              await load();
-              await loadHistory();
-              if (tab === "calendar") loadCalendar(calMonth);
-            } catch {
-              Alert.alert("Erreur", "Impossible de supprimer cette séance.");
-            }
-          },
+  const deleteHistoryWorkout = async (workout: Workout) => {
+    const hidden = await addHiddenHistoryKeys(historyKeys(workout));
+    setHistoryItems((current) => current.filter((item) => !historyKeys(item).some((key) => hidden.includes(key))));
+    setHistoryExpanded(null);
+    try {
+      await api(`/workouts/${workout.id}`, { method: "DELETE", retries: 0 });
+    } catch {}
+    try {
+      if (workout.challenge_id && workout.challenge_day_index != null) {
+        await api(`/challenges/${workout.challenge_id}/uncheck-day`, {
+          method: "POST",
+          body: { day_index: workout.challenge_day_index },
+          retries: 0,
+        });
+      }
+    } catch {}
+    if (tab === "calendar") loadCalendar(calMonth);
+  };
+
+  const clearHistory = () => {
+    Alert.alert("Effacer l'historique", "Es-tu sûr de vouloir supprimer l'historique des séances ?", [
+      { text: "Annuler", style: "cancel" },
+      {
+        text: "Oui",
+        style: "destructive",
+        onPress: async () => {
+          const keys = historyItems.flatMap(historyKeys);
+          await addHiddenHistoryKeys(keys);
+          setHistoryItems([]);
+          setHistoryExpanded(null);
+          try {
+            await Promise.all(historyItems.map((item) => api(`/workouts/${item.id}`, { method: "DELETE", retries: 0 }).catch(() => null)));
+          } catch {}
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const toggleWorkoutComplete = async (workout: Workout) => {
@@ -635,7 +684,8 @@ export default function Training() {
     setHistoryLoading(true);
     try {
       const items = await api<Workout[]>(`/workouts/history?limit=40`);
-      setHistoryItems(items);
+      const hidden = await readHiddenHistoryKeys();
+      setHistoryItems(items.filter((item) => !historyKeys(item).some((key) => hidden.includes(key))));
     } catch {
       setHistoryItems([]);
     } finally {
@@ -749,125 +799,7 @@ export default function Training() {
     }
   }, [program, week]);
 
-  // ---- Rest Timer ----
-  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const finishedRef = useRef(false);
-
-  const beep = useCallback(() => {
-    try {
-      if (Platform.OS === "ios" || Platform.OS === "android") {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy), 300);
-        setTimeout(() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy), 600);
-      } else if (Platform.OS === "web" && typeof window !== "undefined") {
-        // Web fallback : synthetize a short beep via Web Audio API
-        const AudioCtx = (window as any).AudioContext || (window as any).webkitAudioContext;
-        if (AudioCtx) {
-          const ctx = new AudioCtx();
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.type = "sine"; osc.frequency.value = 880;
-          gain.gain.value = 0.2;
-          osc.connect(gain); gain.connect(ctx.destination);
-          osc.start(); osc.stop(ctx.currentTime + 0.18);
-          setTimeout(() => ctx.close(), 300);
-        }
-      }
-    } catch {}
-  }, []);
-
-  const startRestTimer = useCallback((seconds: number) => {
-    if (seconds <= 0) return;
-    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-    finishedRef.current = false;
-    setRestTotal(seconds);
-    setRestRemaining(seconds);
-    setRestRunning(true);
-    timerIntervalRef.current = setInterval(() => {
-      setRestRemaining((prev) => {
-        if (prev <= 1) {
-          if (!finishedRef.current) {
-            finishedRef.current = true;
-            beep();
-          }
-          if (timerIntervalRef.current) {
-            clearInterval(timerIntervalRef.current);
-            timerIntervalRef.current = null;
-          }
-          setRestRunning(false);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, [beep]);
-
-  const stopRestTimer = useCallback(() => {
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current);
-      timerIntervalRef.current = null;
-    }
-    setRestRunning(false);
-    setRestRemaining(0);
-    setRestTotal(0);
-  }, []);
-
-  const pauseRestTimer = useCallback(() => {
-    if (timerIntervalRef.current) {
-      clearInterval(timerIntervalRef.current);
-      timerIntervalRef.current = null;
-    }
-    setRestRunning(false);
-  }, []);
-
-  const resumeRestTimer = useCallback(() => {
-    if (restRemaining <= 0 || timerIntervalRef.current) return;
-    finishedRef.current = false;
-    setRestRunning(true);
-    timerIntervalRef.current = setInterval(() => {
-      setRestRemaining((prev) => {
-        if (prev <= 1) {
-          if (!finishedRef.current) {
-            finishedRef.current = true;
-            beep();
-          }
-          if (timerIntervalRef.current) {
-            clearInterval(timerIntervalRef.current);
-            timerIntervalRef.current = null;
-          }
-          setRestRunning(false);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  }, [beep, restRemaining]);
-
-  const toggleRestTimer = useCallback(() => {
-    if (restRunning) pauseRestTimer();
-    else resumeRestTimer();
-  }, [pauseRestTimer, restRunning, resumeRestTimer]);
-
-  const adjustRest = useCallback((delta: number) => {
-    setRestRemaining((prev) => Math.max(0, prev + delta));
-    setRestTotal((prev) => Math.max(prev + delta, prev));
-  }, []);
-
-  const startOrToggleRestTimer = useCallback((seconds: number) => {
-    if (restRemaining > 0) {
-      toggleRestTimer();
-      return;
-    }
-    startRestTimer(seconds);
-  }, [restRemaining, startRestTimer, toggleRestTimer]);
-
-  useEffect(() => {
-    return () => {
-      if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
-    };
-  }, []);
-
-  // Auto rest duration for an exercise based on session type + manual override
+  // Rest duration for an exercise based on session type + manual override.
   const getRestForExercise = useCallback((exName: string, sessionType?: string) => {
     if (restPerExercise[exName]) return restPerExercise[exName];
     const st = (sessionType || "volume").toLowerCase();
@@ -911,12 +843,58 @@ export default function Training() {
     setEditorOpen(true);
   };
 
+  const openBlankProgramDayEditor = (prog: TrainingProgram, weekIndex: number) => {
+    const targetWeek = prog.weeks.find((item) => item.week_index === weekIndex) || prog.weeks[0];
+    setResumeRunnerAfterEdit(false);
+    setEditWorkout({
+      id: `prognew:${prog.id}:${weekIndex}`,
+      date: "",
+      title: `Sem. ${weekIndex} · Séance libre`,
+      focus: "Séance libre",
+      duration_min: 45,
+      exercises: [],
+      completed: false,
+      session_type: targetWeek?.session_type || "volume",
+    });
+    setEditorOpen(true);
+  };
+
+  const openManualHistoryEditor = () => {
+    setResumeRunnerAfterEdit(false);
+    setEditWorkout({
+      id: "manual:new",
+      date: today,
+      title: "Séance ajoutée",
+      focus: "Séance ajoutée",
+      duration_min: 45,
+      exercises: [],
+      completed: true,
+      session_type: "volume",
+    });
+    setEditorOpen(true);
+  };
+
+  const openRunnerEditor = () => {
+    if (!runnerWorkout) return;
+    setResumeRunnerAfterEdit(true);
+    setEditWorkout({
+      ...runnerWorkout,
+      exercises: runnerWorkout.exercises.map((exercise) => ({ ...exercise, checked: exercise.checked !== false })),
+    });
+    setSessionRunnerOpen(false);
+    setEditorOpen(true);
+  };
+
   const createProgram = async (overrides?: { goal_label?: string; frequency?: number; training_days?: number[]; split?: string; weeks?: number }) => {
     setCreatingProgram(true);
     try {
       const dayDefaults: Record<number, number[]> = { 2: [0, 3], 3: [0, 2, 4], 4: [0, 1, 3, 4], 5: [0, 1, 2, 3, 4], 6: [0, 1, 2, 3, 4, 5], 7: [0, 1, 2, 3, 4, 5, 6] };
       const freq = overrides?.frequency ?? setupFreq;
-      const selectedDays = overrides?.training_days ?? (setupDays.length === freq ? setupDays : dayDefaults[freq] ?? setupDays);
+      const baseDays = overrides?.training_days ?? setupDays;
+      const selectedDays = Array.from(new Set([
+        ...baseDays,
+        ...(dayDefaults[freq] || []),
+      ])).sort((a, b) => a - b).slice(0, freq);
       const trainingTimes = Object.fromEntries(
         selectedDays.map((day) => [
           String(day),
@@ -1066,6 +1044,48 @@ export default function Training() {
         method: "PUT",
         body: { focus: editWorkout.focus, exercises: filtered },
       });
+    } else if (editWorkout.id.startsWith("prognew:")) {
+      const [, programId, wIdx] = editWorkout.id.split(":");
+      await api(`/program/${programId}/week/${wIdx}/day`, {
+        method: "POST",
+        body: {
+          focus: editWorkout.focus,
+          exercises: filtered,
+          session_type: editWorkout.session_type,
+        },
+      });
+    } else if (editWorkout.id === "manual:new") {
+      const manualWorkout: Workout = {
+        ...editWorkout,
+        id: `local-manual-${Date.now()}`,
+        date: editWorkout.date || today,
+        title: editWorkout.title || "Séance ajoutée",
+        focus: editWorkout.focus || "Séance ajoutée",
+        duration_min: editWorkout.duration_min || 45,
+        session_type: editWorkout.session_type,
+        exercises: filtered,
+        completed: true,
+        points_earned: 100,
+        source: "manual_history",
+      };
+      try {
+        const saved = await api<Workout>("/workouts/manual", {
+          method: "POST",
+          body: {
+            date: manualWorkout.date,
+            title: manualWorkout.title,
+            focus: manualWorkout.focus,
+            duration_min: manualWorkout.duration_min,
+            session_type: manualWorkout.session_type,
+            exercises: filtered,
+            completed: true,
+          },
+          retries: 0,
+        });
+        setHistoryItems((current) => [{ ...manualWorkout, ...saved, points_earned: 100 }, ...current]);
+      } catch {
+        setHistoryItems((current) => [manualWorkout, ...current]);
+      }
     } else {
       await api(`/workouts/${editWorkout.id}`, {
         method: "PUT",
@@ -1076,9 +1096,34 @@ export default function Training() {
       });
     }
     setEditorOpen(false);
+    if (editWorkout.id !== "manual:new") {
+      await load();
+      if (tab === "history") await loadHistory();
+    }
+    if (resumeRunnerAfterEdit && runnerWorkout) {
+      const refreshedWeek = await api<Workout[]>("/workouts/week");
+      const updated = refreshedWeek.find((item) => item.id === runnerWorkout.id);
+      if (updated) {
+        const exercises = updated.exercises.filter((exercise) => exercise.checked !== false);
+        const drafts: Record<string, SessionDraft> = {};
+        exercises.forEach((ex) => {
+          drafts[ex.name] = runnerDrafts[ex.name] || {
+            sets: String(ex.sets || 3),
+            reps: String(ex.reps || "10"),
+            weight: "",
+            rest: String(getRestForExercise(ex.name, updated.session_type) || ex.rest_s || 60),
+            pr: false,
+            done: false,
+          };
+        });
+        setRunnerWorkout({ ...updated, exercises });
+        setRunnerDrafts(drafts);
+        setRunnerIndex(Math.min(runnerIndex, Math.max(0, exercises.length - 1)));
+        setSessionRunnerOpen(true);
+      }
+    }
+    setResumeRunnerAfterEdit(false);
     setEditWorkout(null);
-    await load();
-    if (tab === "history") await loadHistory();
   };
 
   const moveExerciseInEditor = (from: number, to: number) => {
@@ -1124,7 +1169,7 @@ export default function Training() {
           program_id: programId,
           week_index: parseInt(weekIndex || "1", 10),
           day_index: parseInt(dayIndex || "0", 10),
-          date: today,
+          date: workout.date || today,
         },
       });
       await load();
@@ -1155,7 +1200,7 @@ export default function Training() {
           program_id: programId,
           week_index: parseInt(weekIndex || "1", 10),
           day_index: parseInt(dayIndex || "0", 10),
-          date: today,
+          date: workout.date || today,
         },
       });
       await completeWorkout(materialized.id, { showShare: false });
@@ -1322,27 +1367,31 @@ export default function Training() {
     } catch {}
     setPerfWeight("");
     setPerfReps("");
-    // Auto start rest timer based on session type / saved override
     const restSec = getRestForExercise(perfEx.exercise.name, perfEx.workout.session_type);
-    startRestTimer(restSec);
+    setRestPerExercise((prev) => ({ ...prev, [perfEx.exercise.name]: restSec }));
   };
 
-  const todayWorkout = week.find((w) => w.date === today);
+  const todayWorkout = week.find((w) => w.date === today && !w.challenge_id && w.source !== "challenge_plan" && w.source !== "challenge");
+  const plannedProgramWorkouts = useMemo(() => plannedWorkoutsFromProgram(program), [program]);
+  const nextProgramWorkout = useMemo(
+    () => plannedProgramWorkouts.find((item) => item.date >= today) || null,
+    [plannedProgramWorkouts, today]
+  );
   const selectedProgramWeek = expandedWeek || program?.current_week || 1;
   const activeProgramWeek = program?.weeks.find((w) => w.week_index === selectedProgramWeek);
   const selectedDay = activeProgramWeek?.days.find((d) => {
     const fromWorkout = todayWorkout?.focus || todayWorkout?.title;
     return fromWorkout ? d.focus.toLowerCase().includes(fromWorkout.toLowerCase().split(" ")[0]) : false;
   }) || activeProgramWeek?.days[0];
-  const plannedTodayWorkout: Workout | null = todayWorkout || (program && activeProgramWeek && selectedDay ? {
-    id: `prog:${program.id}:${activeProgramWeek.week_index}:${selectedDay.day_index}`,
-    date: today,
-    title: `${program.split.toUpperCase()} ${sessionLabelForIndex(selectedDay.day_index, program.training_days)}`,
-    focus: selectedDay.focus,
-    duration_min: 45,
-    exercises: selectedDay.exercises.map((exercise) => ({ ...exercise, checked: exercise.checked !== false })),
+  const plannedTodayWorkout: Workout | null = todayWorkout || (nextProgramWorkout ? {
+    id: nextProgramWorkout.id,
+    date: nextProgramWorkout.date,
+    title: nextProgramWorkout.title,
+    focus: nextProgramWorkout.focus,
+    duration_min: nextProgramWorkout.duration_min,
+    exercises: nextProgramWorkout.exercises.map((exercise) => ({ ...exercise, checked: exercise.checked !== false })),
     completed: false,
-    session_type: activeProgramWeek.session_type,
+    session_type: nextProgramWorkout.session_type,
   } : {
     id: "draft:fullbody-j1",
     date: today,
@@ -1359,14 +1408,16 @@ export default function Training() {
   const runnerDraft = runnerExercise ? runnerDrafts[runnerExercise.name] : null;
   const runnerProgress = runnerExercises.length > 0 ? Math.round(((runnerIndex + 1) / runnerExercises.length) * 100) : 0;
   const runnerRestSeconds = runnerDraft
-    ? (restRemaining > 0 ? restRemaining : parseInt(runnerDraft.rest || "0", 10) || runnerExercise?.rest_s || 60)
-    : restRemaining;
+    ? parseInt(runnerDraft.rest || "0", 10) || runnerExercise?.rest_s || 60
+    : 0;
   const programProgress = program?.weeks_total
     ? Math.min(100, Math.round(((program.current_week + 1) / program.weeks_total) * 100))
     : 0;
-  const todayPlanLabel = program
+  const todayRelativeLabel = plannedTodayWorkout ? relativeWorkoutLabel(plannedTodayWorkout.date, today) : "Prochaine séance";
+  const isPlannedForToday = plannedTodayWorkout?.date === today;
+  const todayPlanLabel = plannedTodayWorkout?.title || (program
     ? `${(program.split || "fullbody").toUpperCase()} ${sessionLabelForIndex(selectedDay?.day_index ?? 0, program.training_days)}`
-    : plannedTodayWorkout?.title || "FULLBODY J1";
+    : "FULLBODY J1");
   // Library grouped by category, used in editor
   const libByCategory = useMemo(() => {
     const out: Record<string, LibExercise[]> = {};
@@ -1427,9 +1478,13 @@ export default function Training() {
           <Card testID="today-workout-card" style={styles.todayWorkoutCard}>
             <View style={styles.todayCardHeader}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.todayCardEyebrow}>Ma séance du jour</Text>
+                <Text style={styles.todayCardEyebrow}>{isPlannedForToday ? "Ma séance du jour" : "Prochaine séance"}</Text>
                 <Text style={styles.todayCardStatus}>
-                  {plannedTodayWorkout.completed ? "Terminée · touche la coche verte pour annuler" : "Programme prévu pour aujourd'hui"}
+                  {plannedTodayWorkout.completed
+                    ? "Terminée · touche la coche verte pour annuler"
+                    : isPlannedForToday
+                      ? "Programme prévu pour aujourd'hui"
+                      : todayRelativeLabel}
                 </Text>
               </View>
               <TouchableOpacity
@@ -1455,7 +1510,7 @@ export default function Training() {
               <View style={{ flex: 1 }}>
                 <View style={styles.todayMetaRow}>
                   <Ionicons name="barbell" size={14} color={colors.primaryLight} />
-                  <Text style={styles.todayMetaText}>Aujourd&apos;hui</Text>
+                  <Text style={styles.todayMetaText}>{todayRelativeLabel}</Text>
                   <Text style={styles.todayDot}>•</Text>
                   <Text style={styles.todayMetaText}>{plannedTodayWorkout.duration_min} min</Text>
                   <Text style={styles.todayDot}>•</Text>
@@ -1467,7 +1522,13 @@ export default function Training() {
                 </Text>
                 <View style={styles.todaySmallPill}>
                   <Ionicons name={plannedTodayWorkout.completed ? "checkmark-circle" : "radio-button-off"} size={12} color={colors.primaryLight} />
-                  <Text style={styles.todaySmallPillText}>{plannedTodayWorkout.completed ? "Validée aujourd'hui" : "À faire aujourd'hui"}</Text>
+                  <Text style={styles.todaySmallPillText}>
+                    {plannedTodayWorkout.completed
+                      ? "Validée"
+                      : isPlannedForToday
+                        ? "À faire aujourd'hui"
+                        : todayRelativeLabel}
+                  </Text>
                 </View>
               </View>
             </View>
@@ -1481,7 +1542,9 @@ export default function Training() {
                 testID="complete-workout-button"
               >
                 <Ionicons name="play-circle" size={18} color="#102108" />
-                <Text style={styles.startTodayText}>{startingToday ? "Préparation..." : "Commencer ma séance du jour"}</Text>
+                <Text style={styles.startTodayText}>
+                  {startingToday ? "Préparation..." : isPlannedForToday ? "Commencer ma séance du jour" : "Préparer cette séance"}
+                </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => plannedTodayWorkout.id.startsWith("draft:") ? setProgramSetupOpen(true) : openEditor(plannedTodayWorkout)}
@@ -1681,6 +1744,30 @@ export default function Training() {
                 ))}
               </View>
 
+              <Text style={[typography.caption, { marginTop: spacing.xs }]}>Jours précis ({setupDays.length}/{setupFreq})</Text>
+              <View style={styles.setupOptionRow}>
+                {WEEKDAY_SHORT.map((label, idx) => {
+                  const on = setupDays.includes(idx);
+                  return (
+                    <TouchableOpacity
+                      key={idx}
+                      onPress={() => {
+                        if (on) {
+                          setSetupDays(setupDays.filter((d) => d !== idx));
+                        } else if (setupDays.length < setupFreq) {
+                          setSetupDays([...setupDays, idx].sort((a, b) => a - b));
+                        }
+                        setSetupShowRecommendation(true);
+                      }}
+                      style={[styles.setupOption, on && styles.setupOptionOn, { minWidth: 44, paddingVertical: 8 }]}
+                      testID={`recommendation-day-${idx}`}
+                    >
+                      <Text style={[styles.setupOptionLabel, { fontSize: 12 }, on && styles.setupOptionLabelOn]}>{label}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
               <StructureRecommendationPanel
                 setupSplit={setupSplit}
                 setupFreq={setupFreq}
@@ -1748,7 +1835,21 @@ export default function Training() {
 
         {tab === "history" && (
           <>
-            <SectionTitle title="Historique des séances" />
+            <SectionTitle
+              title="Historique des séances"
+              action={
+                <View style={styles.historyHeaderActions}>
+                  <TouchableOpacity onPress={clearHistory} style={[styles.historyAddButton, styles.historyDeleteButton]} testID="history-clear">
+                    <Ionicons name="trash-outline" size={14} color={colors.alert} />
+                    <Text style={[styles.historyActionText, { color: colors.alert }]}>Effacer</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={openManualHistoryEditor} style={styles.historyAddButton} testID="history-add-session">
+                    <Ionicons name="add-circle-outline" size={14} color={colors.primaryLight} />
+                    <Text style={styles.historyActionText}>Ajouter</Text>
+                  </TouchableOpacity>
+                </View>
+              }
+            />
             {historyLoading ? (
               <Text style={typography.small}>Chargement...</Text>
             ) : historyItems.length === 0 ? (
@@ -1764,7 +1865,8 @@ export default function Training() {
               historyItems.map((w) => {
                 const isOpen = historyExpanded === w.id;
                 return (
-                  <Card key={w.id} testID={`history-${w.id}`} style={{ marginBottom: 0 }}>
+                  <SwipeHistoryCard key={w.id} onDelete={() => deleteHistoryWorkout(w)}>
+                  <Card testID={`history-${w.id}`} style={{ marginBottom: 0 }}>
                     <TouchableOpacity onPress={() => setHistoryExpanded(isOpen ? null : w.id)} activeOpacity={0.7}>
                       <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
                         <View style={[styles.histDot, { backgroundColor: SESSION_COLOR[w.session_type || "volume"]?.fg || colors.primary }]} />
@@ -1818,6 +1920,7 @@ export default function Training() {
                       </View>
                     )}
                   </Card>
+                  </SwipeHistoryCard>
                 );
               })
             )}
@@ -1825,48 +1928,6 @@ export default function Training() {
           </>
         )}
       </ScrollView>
-
-      {/* Rest Timer Overlay */}
-      {(restRunning || restRemaining > 0) && !sessionRunnerOpen && (
-        <View style={styles.timerOverlay} testID="rest-timer-overlay">
-          <View style={styles.timerCard}>
-            <Ionicons name="timer-outline" size={14} color={colors.primaryLight} />
-            <Text style={styles.timerBig}>{formatSecondsLabel(restRemaining)}</Text>
-            <View style={styles.timerProgressTrack}>
-              <View style={[styles.timerProgressFill, { width: `${restTotal > 0 ? Math.min(100, (1 - restRemaining / restTotal) * 100) : 0}%` }]} />
-            </View>
-            <View style={styles.timerMiniActions}>
-              <TouchableOpacity onPress={toggleRestTimer} style={styles.timerPlayBtn} testID="timer-play-toggle">
-                <Ionicons name={restRunning ? "pause" : "play"} size={13} color="#102108" />
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => adjustRest(-15)} style={styles.timerBtn} testID="timer-minus">
-                <Text style={styles.timerBtnTxt}>-15</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => adjustRest(15)} style={styles.timerBtn} testID="timer-plus">
-                <Text style={styles.timerBtnTxt}>+15</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={stopRestTimer} style={[styles.timerBtn, { backgroundColor: colors.alert }]} testID="timer-stop">
-                <Ionicons name="close" size={12} color="#fff" />
-              </TouchableOpacity>
-            </View>
-            {perfEx && (
-              <TouchableOpacity
-                onPress={() => {
-                  // memorize this custom duration for the current exercise
-                  setRestPerExercise((prev) => ({ ...prev, [perfEx.exercise.name]: restTotal }));
-                }}
-                style={styles.timerSaveCfg}
-                testID="timer-save-default"
-              >
-                <Ionicons name="bookmark-outline" size={12} color={colors.primary} />
-                <Text style={[typography.small, { color: colors.primary, fontWeight: "700", fontSize: 11 }]}>
-                  Mémoriser {Math.floor(restTotal/60)}:{String(restTotal % 60).padStart(2, "0")} pour {perfEx.exercise.name.slice(0, 20)}
-                </Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-      )}
 
       <Modal visible={sessionRunnerOpen && !!runnerWorkout && !!runnerExercise} transparent animationType="slide" onRequestClose={() => setSessionRunnerOpen(false)}>
         <View style={styles.modalBg}>
@@ -2037,16 +2098,9 @@ export default function Training() {
 	                            <TouchableOpacity onPress={() => adjustRunnerDraftNumber(runnerExercise.name, "rest", -15, 0)} style={styles.runnerRestButton}>
 	                              <Ionicons name="remove" size={12} color={colors.primaryLight} />
 	                            </TouchableOpacity>
-	                            <TouchableOpacity
-	                              onPress={() => startOrToggleRestTimer(parseInt(runnerDraft.rest || "0", 10) || runnerExercise.rest_s || 60)}
-	                              style={[styles.runnerRestPlayButton, restRemaining > 0 && styles.runnerRestPlayButtonActive]}
-	                              testID="runner-rest-play"
-	                            >
-	                              <Text style={styles.runnerRestPlayText}>{restRemaining > 0 ? formatSecondsLabel(restRemaining) : "Start"}</Text>
-	                            </TouchableOpacity>
-	                            <TouchableOpacity onPress={() => adjustRunnerDraftNumber(runnerExercise.name, "rest", 15, 0)} style={styles.runnerRestButton}>
-	                              <Ionicons name="add" size={12} color={colors.primaryLight} />
-	                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => adjustRunnerDraftNumber(runnerExercise.name, "rest", 15, 0)} style={styles.runnerRestButton}>
+                              <Ionicons name="add" size={12} color={colors.primaryLight} />
+                            </TouchableOpacity>
                           </View>
                         </View>
                         <Text style={styles.runnerRestHint}>Repos recommandé : {runnerExercise.rest_s || getRestForExercise(runnerExercise.name, runnerWorkout?.session_type)} sec</Text>
@@ -2074,6 +2128,14 @@ export default function Training() {
                     </View>
 
                     <View style={styles.runnerBottomAction}>
+                      <TouchableOpacity
+                        onPress={openRunnerEditor}
+                        style={styles.runnerAddExerciseButton}
+                        testID="runner-add-exercise"
+                      >
+                        <Ionicons name="add-circle-outline" size={15} color={colors.primaryLight} />
+                        <Text style={styles.runnerAddExerciseText}>Ajouter un exercice</Text>
+                      </TouchableOpacity>
                       <Button
                         title={runnerDraft.done ? "Exercice validé" : "Terminer / valider l'exercice"}
                         onPress={validateRunnerExercise}
@@ -2482,6 +2544,30 @@ export default function Training() {
             </View>
             <Text style={[typography.small, { marginTop: 2 }]}>{editWorkout?.focus}</Text>
 
+            <Text style={[typography.caption, { marginTop: spacing.md }]}>Nom / focus de la séance</Text>
+            <TextInput
+              value={editWorkout?.focus || ""}
+              onChangeText={(text) => setEditWorkout((current) => (current ? { ...current, focus: text } : current))}
+              placeholder="Ex: Haut du corps, séance libre, full body..."
+              placeholderTextColor={colors.textMuted}
+              style={styles.input}
+              testID="editor-focus-input"
+            />
+
+            {editWorkout?.id === "manual:new" ? (
+              <>
+                <Text style={[typography.caption, { marginTop: spacing.md }]}>Date de la séance</Text>
+                <TextInput
+                  value={editWorkout.date || today}
+                  onChangeText={(text) => setEditWorkout((current) => (current ? { ...current, date: text.replace(/[^0-9-]/g, "").slice(0, 10) } : current))}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={colors.textMuted}
+                  style={styles.input}
+                  testID="editor-manual-date"
+                />
+              </>
+            ) : null}
+
             <Text style={[typography.caption, { marginTop: spacing.md }]}>Type de séance</Text>
             <View style={styles.typeRow}>
               {SESSION_KEYS.map((k) => (
@@ -2699,6 +2785,33 @@ export default function Training() {
   );
 }
 
+function SwipeHistoryCard({ children, onDelete }: { children: ReactNode; onDelete: () => void }) {
+  const startX = useRef(0);
+  const [dx, setDx] = useState(0);
+  const clamp = (value: number) => Math.max(-120, Math.min(120, value));
+  return (
+    <View style={styles.historySwipeShell}>
+      <View style={styles.historySwipeDelete}>
+        <Ionicons name="trash-outline" size={18} color={colors.alert} />
+        <Text style={[styles.historyActionText, { color: colors.alert }]}>Supprimer</Text>
+      </View>
+      <View
+        style={{ transform: [{ translateX: dx }], opacity: Math.max(0.6, 1 - Math.abs(dx) / 220) }}
+        onTouchStart={(e) => { startX.current = e.nativeEvent.pageX; }}
+        onMoveShouldSetResponder={(e) => Math.abs(e.nativeEvent.pageX - startX.current) > 18}
+        onResponderMove={(e) => setDx(clamp(e.nativeEvent.pageX - startX.current))}
+        onResponderRelease={() => {
+          if (Math.abs(dx) > 78) onDelete();
+          setDx(0);
+        }}
+        onResponderTerminate={() => setDx(0)}
+      >
+        {children}
+      </View>
+    </View>
+  );
+}
+
 function TypeChip({ type, compact }: { type: SessionKey; compact?: boolean }) {
   const palette: Record<SessionKey, { bg: string; fg: string; label: string }> = {
     volume: { bg: "#E8F5E9", fg: "#2D7C3E", label: "Volume" },
@@ -2897,8 +3010,8 @@ const styles = StyleSheet.create({
   weekRow: { flexDirection: "row", alignItems: "center", backgroundColor: GLASS, padding: spacing.md, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER },
   weekRowToday: { borderColor: colors.primaryLight, backgroundColor: "rgba(74,222,128,0.15)" },
   statusDot: { width: 12, height: 12, borderRadius: radius.full },
-  modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.65)", justifyContent: "flex-end" },
-  modalCard: { backgroundColor: SHEET, borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, borderWidth: 1, borderColor: GLASS_BORDER },
+  modalBg: { flex: 1, backgroundColor: "rgba(0,0,0,0.38)", justifyContent: "flex-end" },
+  modalCard: { backgroundColor: "rgba(8,22,15,0.86)", borderTopLeftRadius: radius.lg, borderTopRightRadius: radius.lg, padding: spacing.lg, borderWidth: 1, borderColor: GLASS_BORDER },
   modalHandle: { width: 40, height: 4, backgroundColor: "rgba(255,255,255,0.2)", borderRadius: 4, alignSelf: "center", marginBottom: spacing.md },
   modalTitle: { fontSize: 22, fontWeight: "700", color: "#FFFFFF" },
   input: { backgroundColor: "rgba(255,255,255,0.08)", borderWidth: 1, borderColor: GLASS_BORDER, borderRadius: radius.md, padding: spacing.md, fontSize: 16, color: "#FFFFFF", marginTop: 6 },
@@ -2936,7 +3049,11 @@ const styles = StyleSheet.create({
   historyUncompleteText: { color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
   historyPointsPill: { minHeight: 28, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.08)" },
   historyPointsText: { color: colors.primaryLight, fontSize: 10.5, fontWeight: "900" },
+  historySwipeShell: { borderRadius: radius.md, overflow: "hidden" },
+  historySwipeDelete: { ...StyleSheet.absoluteFillObject, borderRadius: radius.md, backgroundColor: "rgba(255,94,94,0.12)", flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6, paddingRight: spacing.lg },
   historyActionRow: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: spacing.sm },
+  historyHeaderActions: { flexDirection: "row", gap: 6 },
+  historyAddButton: { minHeight: 32, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.25)", backgroundColor: "rgba(182,255,63,0.08)", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 10 },
   historyActionButton: { flex: 1, minWidth: 96, minHeight: 38, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.25)", backgroundColor: "rgba(182,255,63,0.08)", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 10 },
   historyActionText: { color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
   historyDeleteButton: { borderColor: "rgba(255,94,94,0.35)", backgroundColor: "rgba(255,94,94,0.08)" },
@@ -3046,6 +3163,19 @@ const styles = StyleSheet.create({
   runnerAiAdviceBox: { flexDirection: "row", gap: 5, padding: 7, borderRadius: radius.sm, backgroundColor: "rgba(255,179,63,0.10)", borderWidth: 1, borderColor: "rgba(255,179,63,0.18)" },
   runnerAiAdviceText: { flex: 1, color: colors.textSecondary, fontSize: 10.5, lineHeight: 14, fontWeight: "700" },
   runnerBottomAction: { gap: spacing.sm },
+  runnerAddExerciseButton: {
+    minHeight: 40,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: "rgba(182,255,63,0.24)",
+    backgroundColor: "rgba(182,255,63,0.08)",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: spacing.md,
+  },
+  runnerAddExerciseText: { color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
   runnerNextTextButton: { alignSelf: "center", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, paddingVertical: 4 },
   runnerNextText: { color: colors.primaryLight, fontSize: 11.5, fontWeight: "900" },
   runnerNavRow: { flexDirection: "row", gap: spacing.sm },

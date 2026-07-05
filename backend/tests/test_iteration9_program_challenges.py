@@ -24,7 +24,7 @@ def _clean_module(mongo_db):
     """Clean programs and challenges for the test user before & after this module."""
     mongo_db.programs.delete_many({"user_id": TEST_USER_ID})
     mongo_db.challenges.delete_many({"user_id": TEST_USER_ID})
-    mongo_db.workouts.delete_many({"user_id": TEST_USER_ID, "source": "challenge"})
+    mongo_db.workouts.delete_many({"user_id": TEST_USER_ID, "source": {"$in": ["challenge", "challenge_plan"]}})
     # Make sure profile exists with activity_level=moderate (level 2)
     mongo_db.profiles.update_one(
         {"user_id": TEST_USER_ID},
@@ -38,7 +38,7 @@ def _clean_module(mongo_db):
     yield
     mongo_db.programs.delete_many({"user_id": TEST_USER_ID})
     mongo_db.challenges.delete_many({"user_id": TEST_USER_ID})
-    mongo_db.workouts.delete_many({"user_id": TEST_USER_ID, "source": "challenge"})
+    mongo_db.workouts.delete_many({"user_id": TEST_USER_ID, "source": {"$in": ["challenge", "challenge_plan"]}})
 
 
 def _create_program(payload):
@@ -253,12 +253,12 @@ class TestTravelMode:
 # --------- 5/6/7. Challenges: start + active + blueprints ---------
 
 class TestChallengeStart:
-    def test_blueprints_returns_three(self):
+    def test_blueprints_returns_all_supported_types(self):
         r = requests.get(f"{API}/challenges/blueprints", headers=HDRS, timeout=10)
         assert r.status_code == 200
         items = r.json()["items"]
         types = {b["type"] for b in items}
-        assert types == {"pushups", "abs", "squats"}
+        assert types == {"pushups", "abs", "squats", "plank", "steps10k", "running"}
         for b in items:
             for k in ("type", "name", "muscle", "icon", "exercise"):
                 assert k in b
@@ -315,6 +315,16 @@ class TestChallengeStart:
         r = requests.post(f"{API}/challenges/start", json={"type": "burpees"}, headers=HDRS, timeout=10)
         assert r.status_code == 400
 
+    @pytest.mark.parametrize("challenge_type", ["plank", "steps10k", "running"])
+    def test_start_extra_challenge_types(self, challenge_type, mongo_db):
+        mongo_db.challenges.delete_many({"user_id": TEST_USER_ID, "type": challenge_type})
+        r = requests.post(f"{API}/challenges/start", json={"type": challenge_type}, headers=HDRS, timeout=10)
+        assert r.status_code == 200, r.text
+        ch = r.json()
+        assert ch["type"] == challenge_type
+        assert ch["active"] is True
+        assert len(ch["days"]) == 30
+
 
 # --------- 8/9/10. check-day, abandon, get ---------
 
@@ -322,7 +332,7 @@ class TestChallengeCheckDay:
     @pytest.fixture
     def challenge_id(self, mongo_db):
         mongo_db.challenges.delete_many({"user_id": TEST_USER_ID})
-        mongo_db.workouts.delete_many({"user_id": TEST_USER_ID, "source": "challenge"})
+        mongo_db.workouts.delete_many({"user_id": TEST_USER_ID, "source": {"$in": ["challenge", "challenge_plan"]}})
         r = requests.post(f"{API}/challenges/start", json={"type": "squats"}, headers=HDRS, timeout=10)
         return r.json()["id"]
 
@@ -337,9 +347,9 @@ class TestChallengeCheckDay:
         assert ch["streak"] >= 1
         assert ch["completed_count"] == 1
 
-        # Workout inserted with source=challenge
+        # Workout inserted with source=challenge_plan
         wk = mongo_db.workouts.find_one({
-            "user_id": TEST_USER_ID, "source": "challenge", "challenge_id": challenge_id,
+            "user_id": TEST_USER_ID, "source": "challenge_plan", "challenge_id": challenge_id,
         })
         assert wk is not None
         assert wk["completed"] is True
@@ -359,14 +369,14 @@ class TestChallengeCheckDay:
         rest_day_idx = next(d["day_index"] for d in ch["days"] if d["is_rest"])
         # Count workouts before
         before = mongo_db.workouts.count_documents(
-            {"user_id": TEST_USER_ID, "source": "challenge", "challenge_id": challenge_id}
+            {"user_id": TEST_USER_ID, "source": "challenge_plan", "challenge_id": challenge_id}
         )
         r = requests.post(f"{API}/challenges/{challenge_id}/check-day",
                           json={"day_index": rest_day_idx}, headers=HDRS, timeout=10)
         # Should succeed but NOT insert a workout
         assert r.status_code == 200
         after = mongo_db.workouts.count_documents(
-            {"user_id": TEST_USER_ID, "source": "challenge", "challenge_id": challenge_id}
+            {"user_id": TEST_USER_ID, "source": "challenge_plan", "challenge_id": challenge_id}
         )
         assert after == before, "Rest day must not create a workout entry"
 
