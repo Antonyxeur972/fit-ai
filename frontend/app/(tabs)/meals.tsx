@@ -70,6 +70,23 @@ function autoMealTypeFromHour(): string {
   return "dinner";
 }
 
+function toLocalISO(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function parseLocalISO(iso: string) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+
+function formatMealDate(iso?: string, options?: Intl.DateTimeFormatOptions) {
+  return iso ? parseLocalISO(iso).toLocaleDateString("fr-FR", options) : "";
+}
+
+function isValidISODate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(parseLocalISO(value).getTime());
+}
+
 type Tab = "today" | "history" | "calendar";
 
 type AiSuggestion = {
@@ -172,7 +189,7 @@ export default function Meals() {
   const [selectedDayMeals, setSelectedDayMeals] = useState<Meal[]>([]);
   const [loadingDay, setLoadingDay] = useState(false);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = toLocalISO();
 
   const load = useCallback(async () => {
     try {
@@ -253,7 +270,7 @@ export default function Meals() {
     for (let i = 1; i <= 13; i++) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const iso = d.toISOString().slice(0, 10);
+      const iso = toLocalISO(d);
       const label = i === 1
         ? "Hier"
         : d.toLocaleDateString("fr-FR", { weekday: "short", day: "numeric" });
@@ -338,17 +355,18 @@ export default function Meals() {
   const loadCalendarMonth = useCallback(async (anchor: Date) => {
     const month = anchor.getMonth();
     const year = anchor.getFullYear();
-    const todayISO = new Date().toISOString().slice(0, 10);
+    const todayISO = toLocalISO();
     const start = new Date(year, month, 1);
     const end = new Date(year, month + 1, 0);
     const out: Record<string, number> = {};
     // Walk from start to min(end, today)
-    const last = end.getTime() < new Date(todayISO).getTime() ? end : new Date(todayISO);
+    const todayDate = parseLocalISO(todayISO);
+    const last = end.getTime() < todayDate.getTime() ? end : todayDate;
     const promises: Promise<void>[] = [];
     for (let d = new Date(start); d <= last; d.setDate(d.getDate() + 1)) {
-      const iso = d.toISOString().slice(0, 10);
+      const iso = toLocalISO(d);
       // 14-day window: only fetch days within last 14 days
-      const diffDays = Math.floor((new Date(todayISO).getTime() - new Date(iso).getTime()) / 86400000);
+      const diffDays = Math.floor((todayDate.getTime() - parseLocalISO(iso).getTime()) / 86400000);
       if (diffDays > 14) continue;
       promises.push(
         api<Meal[]>(`/meals?date=${iso}&include_archived=true`)
@@ -385,6 +403,19 @@ export default function Meals() {
     } catch {}
   };
 
+  const updateMealDate = async (meal: Meal, date: string) => {
+    const cleanDate = date.trim();
+    if (!isValidISODate(cleanDate) || cleanDate === meal.date) return;
+    try {
+      await api<Meal>(`/meals/${meal.id}`, { method: "PATCH", body: { date: cleanDate } });
+      await load();
+      if (selectedDay) await openDay(selectedDay);
+      if (tab === "calendar") await loadCalendarMonth(calMonth);
+    } catch (e: any) {
+      setError(e?.message || "Date impossible à modifier");
+    }
+  };
+
   // --- Duplicate helpers ---
   const openDuplicateMeal = (mealId: string, label: string) => {
     setDuplicatePayload({ kind: "meal", mealId, label });
@@ -403,14 +434,14 @@ export default function Meals() {
       if (duplicatePayload.kind === "meal" && duplicatePayload.mealId) {
         await api(`/meals/${duplicatePayload.mealId}/duplicate`, {
           method: "POST",
-          body: { target_date: duplicateTargetDate || new Date().toISOString().slice(0, 10) },
+          body: { target_date: duplicateTargetDate || today },
         });
       } else if (duplicatePayload.kind === "day" && duplicatePayload.sourceDate) {
         await api(`/meals/duplicate-day`, {
           method: "POST",
           body: {
             source_date: duplicatePayload.sourceDate,
-            target_date: duplicateTargetDate || new Date().toISOString().slice(0, 10),
+            target_date: duplicateTargetDate || today,
           },
         });
       }
@@ -631,10 +662,10 @@ export default function Meals() {
   const historyBuckets = useMemo(() => {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    const yStr = yesterday.toISOString().slice(0, 10);
+    const yStr = toLocalISO(yesterday);
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
-    const weekStr = weekAgo.toISOString().slice(0, 10);
+    const weekStr = toLocalISO(weekAgo);
     const buckets: { label: string; days: HistoryDay[] }[] = [
       { label: "Hier", days: [] },
       { label: "Cette semaine", days: [] },
@@ -727,7 +758,7 @@ export default function Meals() {
                 onPress={() => {
                   const y = new Date();
                   y.setDate(y.getDate() - 1);
-                  openManual(y.toISOString().slice(0, 10));
+                  openManual(toLocalISO(y));
                 }}
                 style={styles.secondaryAction}
                 testID="meals-past-button"
@@ -788,7 +819,15 @@ export default function Meals() {
                       {todayGrouped[t].reduce((s, m) => s + m.calories, 0)} kcal
                     </Text>
                   </View>
-                  {todayGrouped[t].map((m) => <MealCard key={m.id} meal={m} onDelete={() => remove(m.id)} onDuplicate={() => openDuplicateMeal(m.id, m.name)} />)}
+                  {todayGrouped[t].map((m) => (
+                    <MealCard
+                      key={m.id}
+                      meal={m}
+                      onDelete={() => remove(m.id)}
+                      onDuplicate={() => openDuplicateMeal(m.id, m.name)}
+                      onDateChange={(date) => updateMealDate(m, date)}
+                    />
+                  ))}
                 </View>
               ))
             )}
@@ -828,7 +867,8 @@ export default function Meals() {
                       key={d.date}
                       day={d}
                       onDeleteMeal={remove}
-                      onDuplicateDay={d.meals && d.meals.length > 0 ? () => openDuplicateDay(d.date, `${d.compliance.meals_count} repas du ${new Date(d.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`) : undefined}
+                      onUpdateMealDate={updateMealDate}
+                      onDuplicateDay={d.meals && d.meals.length > 0 ? () => openDuplicateDay(d.date, `${d.compliance.meals_count} repas du ${formatMealDate(d.date, { day: "numeric", month: "short" })}`) : undefined}
                     />
                   ))}
                 </View>
@@ -896,7 +936,7 @@ export default function Meals() {
               <View>
                 <Text style={styles.modalTitle}>
                   {selectedDay
-                    ? new Date(selectedDay).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })
+                    ? formatMealDate(selectedDay, { weekday: "long", day: "numeric", month: "long" })
                     : ""}
                 </Text>
                 <Text style={[typography.small, { textTransform: "capitalize" }]}>
@@ -920,7 +960,10 @@ export default function Meals() {
                 {selectedDayMeals.map((m) => (
                   <View key={m.id} style={{ paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: colors.border, flexDirection: "row", alignItems: "center" }}>
                     <View style={{ flex: 1 }}>
-                      <Text style={[typography.body, { fontWeight: "700" }]}>{m.name}</Text>
+                      <View style={localStyles.mealTitleRow}>
+                        <Text style={[typography.body, { fontWeight: "700", flex: 1 }]} numberOfLines={1}>{m.name}</Text>
+                        <MealDateInput date={m.date} onChange={(date) => updateMealDate(m, date)} testID={`day-meal-date-${m.id}`} />
+                      </View>
                       <Text style={typography.small}>
                         {m.meal_type ? `${MEAL_TYPE_LABEL[m.meal_type]} · ` : ""}{m.calories} kcal · P {m.protein_g}g · G {m.carbs_g}g · L {m.fat_g}g
                       </Text>
@@ -954,7 +997,7 @@ export default function Meals() {
                   icon={<Ionicons name="copy-outline" size={16} color={colors.primary} />}
                   onPress={() => {
                     if (selectedDay) {
-                      const label = `${selectedDayMeals.length} repas du ${new Date(selectedDay).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`;
+                      const label = `${selectedDayMeals.length} repas du ${formatMealDate(selectedDay, { day: "numeric", month: "short" })}`;
                       setSelectedDay(null);
                       openDuplicateDay(selectedDay, label);
                     }
@@ -1131,7 +1174,7 @@ export default function Meals() {
               testID="duplicate-date-chips"
             >
               {dateChips.map((d) => {
-                const value = d.value || new Date().toISOString().slice(0, 10);
+                const value = d.value || today;
                 const isOn = duplicateTargetDate === value || (!duplicateTargetDate && d.value === "");
                 const isToday = d.value === "";
                 const parts = d.label.split(" ");
@@ -1169,7 +1212,7 @@ export default function Meals() {
             <View style={styles.modalHandle} />
             <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
               <Text style={styles.modalTitle}>
-                {manualDate && manualDate !== today ? `Ajout pour ${new Date(manualDate).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "short" })}` : "Ajouter un aliment"}
+                {manualDate && manualDate !== today ? `Ajout pour ${formatMealDate(manualDate, { weekday: "short", day: "2-digit", month: "short" })}` : "Ajouter un aliment"}
               </Text>
               <TouchableOpacity onPress={() => setManualOpen(false)} testID="manual-close">
                 <Ionicons name="close" size={24} color={colors.textSecondary} />
@@ -1540,7 +1583,29 @@ function quickQtyOptions(f: Food): number[] {
   return [1, 2, 3, 5];
 }
 
-function MealCard({ meal, onDelete, onDuplicate }: { meal: Meal; onDelete: () => void; onDuplicate?: () => void }) {
+function MealDateInput({ date, onChange, testID }: { date: string; onChange: (date: string) => void; testID?: string }) {
+  const [value, setValue] = useState(date || "");
+  useEffect(() => setValue(date || ""), [date]);
+  const submit = () => {
+    const clean = value.trim();
+    if (isValidISODate(clean)) onChange(clean);
+    else setValue(date || "");
+  };
+  return (
+    <TextInput
+      value={value}
+      onChangeText={setValue}
+      onEndEditing={submit}
+      onSubmitEditing={submit}
+      placeholder="YYYY-MM-DD"
+      placeholderTextColor={colors.textMuted}
+      style={localStyles.mealDateInput}
+      testID={testID}
+    />
+  );
+}
+
+function MealCard({ meal, onDelete, onDuplicate, onDateChange }: { meal: Meal; onDelete: () => void; onDuplicate?: () => void; onDateChange: (date: string) => void }) {
   return (
     <Card style={{ marginBottom: 0 }} testID={`meal-card-${meal.id}`}>
       <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
@@ -1548,7 +1613,10 @@ function MealCard({ meal, onDelete, onDuplicate }: { meal: Meal; onDelete: () =>
           <Ionicons name="leaf" size={20} color={colors.primary} />
         </View>
         <View style={{ flex: 1 }}>
-          <Text style={[typography.body, { fontWeight: "600" }]}>{meal.name}</Text>
+          <View style={localStyles.mealTitleRow}>
+            <Text style={[typography.body, { fontWeight: "600", flex: 1 }]} numberOfLines={1}>{meal.name}</Text>
+            <MealDateInput date={meal.date} onChange={onDateChange} testID={`meal-date-${meal.id}`} />
+          </View>
           <Text style={[typography.small, { marginTop: 2 }]}>P {meal.protein_g}g · G {meal.carbs_g}g · L {meal.fat_g}g</Text>
         </View>
         <View style={{ alignItems: "flex-end" }}>
@@ -1569,11 +1637,21 @@ function MealCard({ meal, onDelete, onDuplicate }: { meal: Meal; onDelete: () =>
   );
 }
 
-function HistoryDayCard({ day, onDeleteMeal, onDuplicateDay }: { day: HistoryDay; onDeleteMeal: (id: string) => void; onDuplicateDay?: () => void }) {
+function HistoryDayCard({
+  day,
+  onDeleteMeal,
+  onUpdateMealDate,
+  onDuplicateDay,
+}: {
+  day: HistoryDay;
+  onDeleteMeal: (id: string) => void;
+  onUpdateMealDate: (meal: Meal, date: string) => void;
+  onDuplicateDay?: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const pct = day.compliance.compliance_pct || 0;
   const pctColor = pct >= 80 ? colors.primary : pct >= 50 ? "#F59E0B" : colors.alert;
-  const labelDate = new Date(day.date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "short" });
+  const labelDate = formatMealDate(day.date, { weekday: "long", day: "numeric", month: "short" });
   return (
     <Card testID={`history-day-${day.date}`}>
       <TouchableOpacity onPress={() => setExpanded((v) => !v)} activeOpacity={0.7} style={{ flexDirection: "row", alignItems: "center" }}>
@@ -1598,7 +1676,12 @@ function HistoryDayCard({ day, onDeleteMeal, onDuplicateDay }: { day: HistoryDay
               <Text style={[typography.small, { color: colors.textSecondary, width: 70 }]}>
                 {m.meal_type ? MEAL_TYPE_LABEL[m.meal_type] : ""}
               </Text>
-              <Text style={[typography.body, { flex: 1 }]} numberOfLines={1}>{m.name}</Text>
+              <View style={{ flex: 1 }}>
+                <View style={localStyles.mealTitleRow}>
+                  <Text style={[typography.body, { flex: 1 }]} numberOfLines={1}>{m.name}</Text>
+                  <MealDateInput date={m.date} onChange={(date) => onUpdateMealDate(m, date)} testID={`history-meal-date-${m.id}`} />
+                </View>
+              </View>
               <Text style={[typography.small, { fontWeight: "700" }]}>{m.calories} kcal</Text>
               <TouchableOpacity onPress={() => onDeleteMeal(m.id)} style={{ marginLeft: 8 }} testID={`history-delete-${m.id}`}>
                 <Ionicons name="trash-outline" size={14} color={colors.textMuted} />
@@ -1634,6 +1717,8 @@ function ModalStat({ label, value, unit }: { label: string; value: string; unit:
 
 const localStyles = StyleSheet.create({
   mealIcon: { width: 40, height: 40, borderRadius: radius.full, backgroundColor: colors.primaryPale, alignItems: "center", justifyContent: "center", marginRight: spacing.md },
+  mealTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
+  mealDateInput: { minWidth: 84, height: 24, paddingHorizontal: 7, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(255,255,255,0.16)", color: colors.textMuted, fontSize: 10, fontWeight: "800", backgroundColor: "rgba(255,255,255,0.06)" },
   pctBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.full },
   histMealRow: { flexDirection: "row", alignItems: "center", paddingVertical: 6, borderTopWidth: 1, borderTopColor: colors.border },
   dupDayBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 8, marginTop: 6, borderTopWidth: 1, borderTopColor: colors.border },
@@ -1689,7 +1774,7 @@ function CalendarMonthView({
   for (let d = 1; d <= totalDays; d++) cells.push(d);
   while (cells.length % 7 !== 0) cells.push(null);
 
-  const todayISO = new Date().toISOString().slice(0, 10);
+  const todayISO = toLocalISO();
   const isFutureMonth = addMonths(monthDate, 1) > new Date();
 
   return (
@@ -1724,8 +1809,8 @@ function CalendarMonthView({
           const cnt = calDays[iso] || 0;
           const isToday = iso === todayISO;
           const isSel = iso === selectedDay;
-          const isFuture = new Date(iso) > new Date(todayISO);
-          const diffDays = Math.floor((new Date(todayISO).getTime() - new Date(iso).getTime()) / 86400000);
+          const isFuture = parseLocalISO(iso) > parseLocalISO(todayISO);
+          const diffDays = Math.floor((parseLocalISO(todayISO).getTime() - parseLocalISO(iso).getTime()) / 86400000);
           const isOutOfWindow = diffDays > 14;
           const disabled = isFuture || isOutOfWindow;
           const hasMeals = cnt > 0;

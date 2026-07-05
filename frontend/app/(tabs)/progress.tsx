@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, Dimensions, Animated, PanResponder, Platform } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, Image, ActivityIndicator, TouchableOpacity, Alert, Dimensions, Animated, PanResponder, Platform, TextInput } from "react-native";
 import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { HydrationCard } from "@/src/components/HydrationCard";
@@ -56,6 +56,16 @@ type MuscleVolumeItem = {
 };
 type MuscleVolumePayload = { weeks: string[]; items: MuscleVolumeItem[] };
 type Profile = { weight_kg?: number; goal?: string };
+type WeightLog = { id: string; date: string; weight_kg: number; created_at: string };
+
+function toLocalISO(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function parseLocalISO(iso: string) {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
 
 export default function Progress() {
   const [transfos, setTransfos] = useState<Transfo[]>([]);
@@ -65,6 +75,7 @@ export default function Progress() {
   const [history, setHistory] = useState<Workout[]>([]);
   const [muscleVolume, setMuscleVolume] = useState<MuscleVolumePayload | null>(null);
   const [profile, setProfile] = useState<Profile>({});
+  const [weightLogs, setWeightLogs] = useState<WeightLog[]>([]);
   const [sleepByDate, setSleepByDate] = useState<Record<string, number>>({});
   const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -74,7 +85,7 @@ export default function Progress() {
 
   const load = useCallback(async () => {
     try {
-      const [list, w, p, wk, hist, mv, pr] = await Promise.all([
+      const [list, w, p, wk, hist, mv, pr, weights] = await Promise.all([
         api<Transfo[]>("/transformations"),
         api<Week>("/dashboard/week"),
         api<PerfPayload>("/perf/recent?limit=200"),
@@ -82,6 +93,7 @@ export default function Progress() {
         api<Workout[]>("/workouts/history?limit=40").catch(() => []),
         api<MuscleVolumePayload>("/perf/muscle-volume?weeks=8").catch(() => null),
         api<Profile>("/profile").catch(() => ({})),
+        api<WeightLog[]>("/weight-logs").catch(() => []),
       ]);
       setTransfos(list);
       setWeek(w);
@@ -90,6 +102,7 @@ export default function Progress() {
       setHistory(hist || []);
       setMuscleVolume(mv);
       setProfile(pr || {});
+      setWeightLogs(weights || []);
       if (!selectedExercise && p.personal_bests.length > 0) {
         const counts: Record<string, number> = {};
         p.items.forEach((it) => { counts[it.exercise_name] = (counts[it.exercise_name] || 0) + 1; });
@@ -107,7 +120,7 @@ export default function Progress() {
     for (let offset = 0; offset < 84; offset += 1) {
       const date = new Date(today);
       date.setDate(today.getDate() - offset);
-      const iso = date.toISOString().slice(0, 10);
+      const iso = toLocalISO(date);
       entries.push([iso, await readSleepHoursForDate(date)]);
     }
     setSleepByDate(Object.fromEntries(entries));
@@ -218,7 +231,7 @@ export default function Progress() {
           sleepLow={lowWeekSleep}
         />
 
-        <BodyCompositionCard profile={profile} transfos={transfos} />
+        <BodyCompositionCard profile={profile} transfos={transfos} weightLogs={weightLogs} onSaved={load} />
 
         <PerformanceExplorerCard
           muscleVolume={muscleVolume}
@@ -376,16 +389,38 @@ function WeeklyFollowRecap({
   );
 }
 
-function BodyCompositionCard({ profile, transfos }: { profile: Profile; transfos: Transfo[] }) {
-  const weights = transfos
+function BodyCompositionCard({
+  profile,
+  transfos,
+  weightLogs,
+  onSaved,
+}: {
+  profile: Profile;
+  transfos: Transfo[];
+  weightLogs: WeightLog[];
+  onSaved: () => void | Promise<void>;
+}) {
+  const [weightInput, setWeightInput] = useState("");
+  const [weightDate, setWeightDate] = useState(new Date());
+  const [showWeightDate, setShowWeightDate] = useState(false);
+  const [savingWeight, setSavingWeight] = useState(false);
+
+  useEffect(() => {
+    if (profile.weight_kg) setWeightInput(String(profile.weight_kg).replace(".", ","));
+  }, [profile.weight_kg]);
+
+  const weightsMap = new Map<string, { date: string; weight: number; time: number }>();
+  transfos
     .filter((item) => typeof item.weight_kg === "number")
-    .map((item) => ({
-      date: item.date || item.created_at,
-      weight: Number(item.weight_kg),
-      time: new Date(item.date || item.created_at).getTime(),
-    }))
-    .sort((a, b) => a.time - b.time);
-  const currentWeight = Number(profile.weight_kg || weights[weights.length - 1]?.weight || 0);
+    .forEach((item) => {
+      const date = (item.date || item.created_at || toLocalISO()).slice(0, 10);
+      weightsMap.set(date, { date, weight: Number(item.weight_kg), time: parseLocalISO(date).getTime() });
+    });
+  weightLogs.forEach((item) => {
+    weightsMap.set(item.date, { date: item.date, weight: Number(item.weight_kg), time: parseLocalISO(item.date).getTime() });
+  });
+  const weights = Array.from(weightsMap.values()).sort((a, b) => a.time - b.time);
+  const currentWeight = Number(weights[weights.length - 1]?.weight || profile.weight_kg || 0);
   const startWeight = weights[0]?.weight || currentWeight;
   const delta = currentWeight && startWeight ? currentWeight - startWeight : 0;
   const fatLost = Math.max(0, profile.goal === "lose" ? -delta : Math.min(2.5, Math.max(0, -delta * 0.75)));
@@ -393,11 +428,26 @@ function BodyCompositionCard({ profile, transfos }: { profile: Profile; transfos
   const displayWeights = weights.length
     ? weights.slice(-8)
     : currentWeight
-      ? [{ date: new Date().toISOString(), weight: currentWeight, time: Date.now() }]
+      ? [{ date: toLocalISO(), weight: currentWeight, time: Date.now() }]
       : [];
   const min = Math.min(...displayWeights.map((p) => p.weight), currentWeight || 999);
   const max = Math.max(...displayWeights.map((p) => p.weight), currentWeight || 0);
   const span = Math.max(1, max - min);
+
+  const saveWeight = async () => {
+    const weight = parseFloat(weightInput.replace(",", "."));
+    if (!weight || weight < 20 || weight > 400) return;
+    setSavingWeight(true);
+    try {
+      await api("/weight-logs", {
+        method: "POST",
+        body: { weight_kg: weight, date: toLocalISO(weightDate) },
+      });
+      await onSaved();
+    } finally {
+      setSavingWeight(false);
+    }
+  };
 
   return (
     <Card testID="body-composition-card" style={{ gap: spacing.md }}>
@@ -428,6 +478,36 @@ function BodyCompositionCard({ profile, transfos }: { profile: Profile; transfos
             </View>
           ))}
         </View>
+        <View style={styles.weightAddRow}>
+          <TextInput
+            value={weightInput}
+            onChangeText={setWeightInput}
+            keyboardType="decimal-pad"
+            placeholder="Poids"
+            placeholderTextColor={colors.textMuted}
+            style={styles.weightInput}
+            testID="weight-log-input"
+          />
+          <TouchableOpacity onPress={() => setShowWeightDate(true)} style={styles.weightDateBtn} testID="weight-log-date">
+            <Ionicons name="calendar-outline" size={14} color={colors.primaryLight} />
+            <Text style={styles.weightDateText}>{toLocalISO(weightDate)}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={saveWeight} disabled={savingWeight} style={styles.weightSaveBtn} testID="weight-log-save">
+            {savingWeight ? <ActivityIndicator size="small" color="#102108" /> : <Text style={styles.weightSaveText}>Ajouter</Text>}
+          </TouchableOpacity>
+        </View>
+        {showWeightDate && (
+          <DateTimePicker
+            value={weightDate}
+            mode="date"
+            maximumDate={new Date()}
+            display={Platform.OS === "ios" ? "spinner" : "default"}
+            onChange={(_, selected) => {
+              if (Platform.OS !== "ios") setShowWeightDate(false);
+              if (selected) setWeightDate(selected);
+            }}
+          />
+        )}
       </View>
     </Card>
   );
@@ -700,10 +780,10 @@ function HistoryWeeksCard({ weeks }: { weeks: HistoryWeek[] }) {
 function buildHistoryWeeks(items: Workout[], sleepByDate: Record<string, number>) {
   const groups = new Map<string, HistoryWeek & { key: string }>();
   items.forEach((item) => {
-    const d = new Date(item.date);
+    const d = parseLocalISO(item.date);
     const monday = new Date(d);
     monday.setDate(d.getDate() - ((d.getDay() + 6) % 7));
-    const key = monday.toISOString().slice(0, 10);
+    const key = toLocalISO(monday);
     const label = `Semaine du ${monday.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}`;
     const current = groups.get(key) || { key, label, sessions: 0, duration: 0, time: monday.getTime(), sleepAvg: 0, sleepLow: false };
     current.sessions += item.completed ? 1 : 0;
@@ -712,12 +792,12 @@ function buildHistoryWeeks(items: Workout[], sleepByDate: Record<string, number>
   });
   return Array.from(groups.values())
     .map((item) => {
-      const monday = new Date(item.key);
+      const monday = parseLocalISO(item.key);
       const sleepValues: number[] = [];
       for (let offset = 0; offset < 7; offset += 1) {
         const d = new Date(monday);
         d.setDate(monday.getDate() + offset);
-        const hours = sleepByDate[d.toISOString().slice(0, 10)] || 0;
+        const hours = sleepByDate[toLocalISO(d)] || 0;
         if (hours > 0) sleepValues.push(hours);
       }
       const sleepAvg = sleepValues.length ? sleepValues.reduce((sum, hours) => sum + hours, 0) / sleepValues.length : 0;
@@ -1047,6 +1127,12 @@ const styles = StyleSheet.create({
   weightBarCol: { flex: 1, height: "100%", justifyContent: "flex-end" },
   weightBarTrack: { height: "100%", borderRadius: 8, overflow: "hidden", justifyContent: "flex-end", backgroundColor: "rgba(255,255,255,0.08)" },
   weightBarFill: { width: "100%", borderRadius: 8, backgroundColor: "rgba(88,183,255,0.82)" },
+  weightAddRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+  weightInput: { flex: 0.8, minHeight: 38, borderRadius: radius.full, borderWidth: 1, borderColor: colors.border, backgroundColor: "rgba(255,255,255,0.07)", paddingHorizontal: 12, color: colors.textMain, fontSize: 13, fontWeight: "900" },
+  weightDateBtn: { flex: 1.2, minHeight: 38, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.08)" },
+  weightDateText: { color: colors.primaryLight, fontSize: 11, fontWeight: "900" },
+  weightSaveBtn: { minHeight: 38, paddingHorizontal: 12, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryLight },
+  weightSaveText: { color: "#102108", fontSize: 12, fontWeight: "900" },
   performanceHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
   performanceSwitch: { flexDirection: "row", padding: 3, borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: colors.border },
   performanceSwitchBtn: { minHeight: 30, paddingHorizontal: 10, borderRadius: radius.full, alignItems: "center", justifyContent: "center" },

@@ -155,6 +155,10 @@ export default function ProfileTab() {
     workout: { hour: 19, minute: 0, label: null },
     protein: { hour: 21, minute: 30, label: null },
     meal: { hour: 12, minute: 30, label: "Repas" },
+    hydration: { hour: 16, minute: 0, label: "Hydratation" },
+    morning: { hour: 8, minute: 0, label: "Bonjour" },
+    weekly: { hour: 18, minute: 0, label: "Bilan semaine" },
+    level: { hour: 20, minute: 0, label: "Niveau" },
     custom: { hour: 9, minute: 0, label: "Mon rappel" },
   };
 
