@@ -4,7 +4,7 @@
     "slug": "fit-ai",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/fitai-app-icon.png",
     "scheme": "fitai",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
@@ -24,8 +24,8 @@
       "package": "com.globalaistudio.fitai",
       "versionCode": 1,
       "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#FAFAF8"
+        "foregroundImage": "./assets/images/fitai-app-icon.png",
+        "backgroundColor": "#04170D"
       },
       "edgeToEdgeEnabled": true,
       "permissions": [
@@ -49,10 +49,10 @@
       [
         "expo-splash-screen",
         {
-          "image": "./assets/images/splash-icon.png",
+          "image": "./assets/images/fitai-app-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#FAFAF8"
+          "backgroundColor": "#04170D"
         }
       ],
       "expo-font",
