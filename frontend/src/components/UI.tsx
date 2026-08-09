@@ -322,6 +322,11 @@ export function LineChart1RM({
 }
 
 // --- Bar chart (week consumed vs target) ---
+function parseChartDate(iso: string) {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(year || 1970, (month || 1) - 1, day || 1);
+}
+
 export function WeekBars({
   days,
   target,
@@ -331,15 +336,16 @@ export function WeekBars({
   target: number;
   testID?: string;
 }) {
-  const max = Math.max(target, ...days.map((d) => d.consumed), 1);
+  const orderedDays = days.slice().sort((a, b) => parseChartDate(a.date).getTime() - parseChartDate(b.date).getTime());
+  const max = Math.max(target, ...orderedDays.map((d) => d.consumed), 1);
   return (
     <View testID={testID} style={{ flexDirection: "row", alignItems: "flex-end", height: 140, gap: 8 }}>
-      {days.map((d) => {
+      {orderedDays.map((d) => {
         const h = (d.consumed / max) * 110;
         const ratio = target > 0 ? d.consumed / target : 0;
         const over = ratio > 1.05;
         const bg = d.consumed === 0 ? "rgba(255,255,255,0.15)" : over ? colors.alert : colors.primary;
-        const day = new Date(d.date).toLocaleDateString("fr-FR", { weekday: "short" });
+        const day = parseChartDate(d.date).toLocaleDateString("fr-FR", { weekday: "short" });
         return (
           <View key={d.date} style={{ flex: 1, alignItems: "center" }}>
             <View style={{ flex: 1, justifyContent: "flex-end" }}>

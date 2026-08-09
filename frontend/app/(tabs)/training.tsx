@@ -256,6 +256,13 @@ function relativeWorkoutLabel(dateIso: string, todayIso: string) {
   return "Séance programmée";
 }
 
+function scheduledWorkoutButtonLabel(dateIso: string) {
+  const d = new Date(`${dateIso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return "Au planning";
+  const day = d.toLocaleDateString("fr-FR", { weekday: "long" });
+  return `À ${day}`;
+}
+
 function weekdayFromIso(dateIso: string) {
   const d = new Date(`${dateIso}T12:00:00`);
   return (d.getDay() + 6) % 7;
@@ -296,7 +303,7 @@ function plannedWorkoutsFromProgram(program: TrainingProgram | null): CalendarSy
     const day = week?.days[daySlot] || week?.days[0];
     if (!week || !day) continue;
     events.push({
-      id: `program-${program.id}-${weekIndex}-${day.day_index}`,
+      id: `prog:${program.id}:${weekIndex}:${day.day_index}`,
       date: toLocalIsoDate(date),
       title: `${splitLabel(program.split)} ${sessionLabelForIndex(day.day_index, trainingDays)}`,
       focus: day.focus || program.goal_label || "Séance FIT AI",
@@ -469,7 +476,6 @@ export default function Training() {
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editWorkout, setEditWorkout] = useState<Workout | null>(null);
-  const [resumeRunnerAfterEdit, setResumeRunnerAfterEdit] = useState(false);
 
   const [perfOpen, setPerfOpen] = useState(false);
   const [perfEx, setPerfEx] = useState<{ workout: Workout; exercise: Exercise } | null>(null);
@@ -845,7 +851,6 @@ export default function Training() {
 
   const openBlankProgramDayEditor = (prog: TrainingProgram, weekIndex: number) => {
     const targetWeek = prog.weeks.find((item) => item.week_index === weekIndex) || prog.weeks[0];
-    setResumeRunnerAfterEdit(false);
     setEditWorkout({
       id: `prognew:${prog.id}:${weekIndex}`,
       date: "",
@@ -860,7 +865,6 @@ export default function Training() {
   };
 
   const openManualHistoryEditor = () => {
-    setResumeRunnerAfterEdit(false);
     setEditWorkout({
       id: "manual:new",
       date: today,
@@ -876,7 +880,6 @@ export default function Training() {
 
   const openRunnerEditor = () => {
     if (!runnerWorkout) return;
-    setResumeRunnerAfterEdit(true);
     setEditWorkout({
       ...runnerWorkout,
       exercises: runnerWorkout.exercises.map((exercise) => ({ ...exercise, checked: exercise.checked !== false })),
@@ -1100,29 +1103,6 @@ export default function Training() {
       await load();
       if (tab === "history") await loadHistory();
     }
-    if (resumeRunnerAfterEdit && runnerWorkout) {
-      const refreshedWeek = await api<Workout[]>("/workouts/week");
-      const updated = refreshedWeek.find((item) => item.id === runnerWorkout.id);
-      if (updated) {
-        const exercises = updated.exercises.filter((exercise) => exercise.checked !== false);
-        const drafts: Record<string, SessionDraft> = {};
-        exercises.forEach((ex) => {
-          drafts[ex.name] = runnerDrafts[ex.name] || {
-            sets: String(ex.sets || 3),
-            reps: String(ex.reps || "10"),
-            weight: "",
-            rest: String(getRestForExercise(ex.name, updated.session_type) || ex.rest_s || 60),
-            pr: false,
-            done: false,
-          };
-        });
-        setRunnerWorkout({ ...updated, exercises });
-        setRunnerDrafts(drafts);
-        setRunnerIndex(Math.min(runnerIndex, Math.max(0, exercises.length - 1)));
-        setSessionRunnerOpen(true);
-      }
-    }
-    setResumeRunnerAfterEdit(false);
     setEditWorkout(null);
   };
 
@@ -1154,10 +1134,10 @@ export default function Training() {
     setSessionRunnerOpen(true);
   };
 
-  const startTodayWorkout = async (workout: Workout) => {
+  const startTodayWorkout = async (workout: Workout, options: { forceToday?: boolean } = {}) => {
     if (startingToday) return;
     if (!workout.id.startsWith("prog:")) {
-      startGuidedSession(workout);
+      startGuidedSession(options.forceToday ? { ...workout, date: today } : workout);
       return;
     }
     setStartingToday(true);
@@ -1169,7 +1149,7 @@ export default function Training() {
           program_id: programId,
           week_index: parseInt(weekIndex || "1", 10),
           day_index: parseInt(dayIndex || "0", 10),
-          date: workout.date || today,
+          date: options.forceToday ? today : workout.date || today,
         },
       });
       await load();
@@ -1410,11 +1390,9 @@ export default function Training() {
   const runnerRestSeconds = runnerDraft
     ? parseInt(runnerDraft.rest || "0", 10) || runnerExercise?.rest_s || 60
     : 0;
-  const programProgress = program?.weeks_total
-    ? Math.min(100, Math.round(((program.current_week + 1) / program.weeks_total) * 100))
-    : 0;
   const todayRelativeLabel = plannedTodayWorkout ? relativeWorkoutLabel(plannedTodayWorkout.date, today) : "Prochaine séance";
   const isPlannedForToday = plannedTodayWorkout?.date === today;
+  const scheduledCtaLabel = plannedTodayWorkout ? scheduledWorkoutButtonLabel(plannedTodayWorkout.date) : "Au planning";
   const todayPlanLabel = plannedTodayWorkout?.title || (program
     ? `${(program.split || "fullbody").toUpperCase()} ${sessionLabelForIndex(selectedDay?.day_index ?? 0, program.training_days)}`
     : "FULLBODY J1");
@@ -1430,22 +1408,13 @@ export default function Training() {
 
   return (
     <ScreenBackground bg="training">
-      <ImageBackground
-        source={require("../../assets/images/fitai-hero-program-hd.png")}
-        style={styles.trainingHero}
-        imageStyle={styles.trainingHeroImage}
-        resizeMode="cover"
-      >
+      <View style={styles.trainingHero}>
         <View style={styles.trainingHeroShade} />
         <View style={styles.header}>
           <View style={{ flex: 1 }}>
             <Text style={styles.heroCaption}>Ton parcours</Text>
             <Text style={styles.title}>Transforme-toi</Text>
             <MotivationalScript style={styles.heroScript}>libère ton esprit.</MotivationalScript>
-          </View>
-          <View style={styles.heroProgress}>
-            <Text style={styles.heroProgressValue}>{programProgress}%</Text>
-            <Text style={styles.heroProgressLabel}>terminé</Text>
           </View>
         </View>
 
@@ -1469,7 +1438,7 @@ export default function Training() {
           </TouchableOpacity>
         </View>
         )}
-      </ImageBackground>
+      </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {tab === "today" && (
@@ -1484,18 +1453,25 @@ export default function Training() {
                     ? "Terminée · touche la coche verte pour annuler"
                     : isPlannedForToday
                       ? "Programme prévu pour aujourd'hui"
-                      : todayRelativeLabel}
+                      : "Séance prévue dans ton programme"}
                 </Text>
               </View>
-              <TouchableOpacity
-                onPress={() => toggleTodayWorkoutCheck(plannedTodayWorkout)}
-                activeOpacity={0.84}
-                disabled={startingToday}
-                style={[styles.todayCheckButton, plannedTodayWorkout.completed && styles.todayCheckButtonDone, startingToday && { opacity: 0.55 }]}
-                testID="today-workout-toggle"
-              >
-                <Ionicons name={plannedTodayWorkout.completed ? "checkmark" : "ellipse-outline"} size={18} color={plannedTodayWorkout.completed ? "#102108" : colors.primaryLight} />
-              </TouchableOpacity>
+              {isPlannedForToday ? (
+                <TouchableOpacity
+                  onPress={() => toggleTodayWorkoutCheck(plannedTodayWorkout)}
+                  activeOpacity={0.84}
+                  disabled={startingToday}
+                  style={[styles.todayCheckButton, plannedTodayWorkout.completed && styles.todayCheckButtonDone, startingToday && { opacity: 0.55 }]}
+                  testID="today-workout-toggle"
+                >
+                  <Ionicons name={plannedTodayWorkout.completed ? "checkmark" : "ellipse-outline"} size={18} color={plannedTodayWorkout.completed ? "#102108" : colors.primaryLight} />
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.futureDayChip} testID="today-workout-scheduled-chip">
+                  <Ionicons name="calendar-outline" size={13} color={colors.primaryLight} />
+                  <Text style={styles.futureDayChipText}>{scheduledCtaLabel}</Text>
+                </View>
+              )}
             </View>
 
             <View style={styles.todayMainRow}>
@@ -1534,25 +1510,53 @@ export default function Training() {
             </View>
 
             <View style={styles.todayActionRow}>
-              <TouchableOpacity
-                onPress={() => startTodayWorkout(plannedTodayWorkout)}
-                activeOpacity={0.86}
-                disabled={startingToday}
-                style={[styles.startTodayButton, startingToday && { opacity: 0.7 }]}
-                testID="complete-workout-button"
-              >
-                <Ionicons name="play-circle" size={18} color="#102108" />
-                <Text style={styles.startTodayText}>
-                  {startingToday ? "Préparation..." : isPlannedForToday ? "Commencer ma séance du jour" : "Préparer cette séance"}
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => plannedTodayWorkout.id.startsWith("draft:") ? setProgramSetupOpen(true) : openEditor(plannedTodayWorkout)}
-                style={styles.todayEditIconButton}
-                testID="edit-today-workout"
-              >
-                <Ionicons name="create-outline" size={18} color={colors.primaryLight} />
-              </TouchableOpacity>
+              {isPlannedForToday ? (
+                <>
+                  <TouchableOpacity
+                    onPress={() => startTodayWorkout(plannedTodayWorkout)}
+                    activeOpacity={0.86}
+                    disabled={startingToday}
+                    style={[styles.startTodayButton, startingToday && { opacity: 0.7 }]}
+                    testID="complete-workout-button"
+                  >
+                    <Ionicons name="play-circle" size={18} color="#102108" />
+                    <Text style={styles.startTodayText}>
+                      {startingToday ? "Préparation..." : "Commencer ma séance du jour"}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => plannedTodayWorkout.id.startsWith("draft:") ? setProgramSetupOpen(true) : openEditor(plannedTodayWorkout)}
+                    style={styles.todayEditIconButton}
+                    testID="edit-today-workout"
+                  >
+                    <Ionicons name="create-outline" size={18} color={colors.primaryLight} />
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <View style={styles.futureActionStack}>
+                  <TouchableOpacity
+                    onPress={() => router.push("/(tabs)/dashboard")}
+                    activeOpacity={0.86}
+                    style={[styles.startTodayButton, styles.futureReturnButton]}
+                    testID="scheduled-return-home"
+                  >
+                    <Ionicons name="calendar-outline" size={17} color="#102108" />
+                    <Text style={styles.startTodayText}>{scheduledCtaLabel}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={() => startTodayWorkout(plannedTodayWorkout, { forceToday: true })}
+                    activeOpacity={0.86}
+                    disabled={startingToday}
+                    style={[styles.advanceTodayButton, startingToday && { opacity: 0.7 }]}
+                    testID="advance-workout-today"
+                  >
+                    <Ionicons name="play-skip-forward-outline" size={17} color={colors.primaryLight} />
+                    <Text style={styles.advanceTodayText}>
+                      {startingToday ? "Préparation..." : "Faire la séance aujourd'hui finalement"}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
 
             <View style={styles.plannedExerciseList}>
@@ -2988,7 +2992,6 @@ const SHEET = "rgba(6,16,10,0.97)";
 
 const styles = StyleSheet.create({
   trainingHero: { minHeight: 242, justifyContent: "flex-end", paddingTop: spacing.lg },
-  trainingHeroImage: { opacity: 0.96 },
   trainingHeroShade: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(1,11,8,0.40)" },
   header: { minHeight: 150, paddingHorizontal: spacing.lg, paddingBottom: spacing.md, flexDirection: "row", alignItems: "flex-end", gap: spacing.md },
   heroEyebrow: { ...typography.caption, color: "rgba(255,255,255,0.9)", fontWeight: "700" },
@@ -2997,9 +3000,6 @@ const styles = StyleSheet.create({
   title: { fontSize: 34, lineHeight: 38, fontWeight: "900", color: "#FFFFFF", letterSpacing: 0 },
   heroProgram: { ...typography.small, color: "rgba(255,255,255,0.78)", marginTop: spacing.sm, maxWidth: 210 },
   heroScript: { fontSize: 29, lineHeight: 33, marginTop: 2 },
-  heroProgress: { width: 78, height: 78, borderRadius: 39, borderWidth: 7, borderColor: colors.primaryLight, backgroundColor: "rgba(2,18,12,0.58)", alignItems: "center", justifyContent: "center", marginBottom: 4 },
-  heroProgressValue: { fontSize: 20, fontWeight: "900", color: "#FFFFFF" },
-  heroProgressLabel: { fontSize: 9, color: "rgba(255,255,255,0.72)", marginTop: -2 },
   content: { paddingHorizontal: spacing.lg, gap: spacing.md, paddingBottom: 130, marginTop: -6 },
   focusBadge: { width: 44, height: 44, borderRadius: radius.full, backgroundColor: "rgba(74,222,128,0.18)", alignItems: "center", justifyContent: "center", marginRight: spacing.md },
   exerciseRow: { flexDirection: "row", alignItems: "center", paddingVertical: spacing.sm, borderBottomWidth: 1, borderBottomColor: "rgba(255,255,255,0.1)" },
@@ -3072,7 +3072,7 @@ const styles = StyleSheet.create({
   runnerHeroImage: { opacity: 0.92 },
   runnerHeroShade: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(1,10,6,0.52)" },
   runnerHeroTop: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
-  runnerIconButton: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.28)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
+  runnerIconButton: { width: 38, height: 38, borderRadius: 19, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.28)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)", marginTop: 8 },
   runnerExerciseName: { color: colors.textMain, fontSize: 19, fontWeight: "900", textAlign: "center" },
   runnerExerciseCount: { color: colors.textSecondary, fontSize: 11, fontWeight: "800", marginTop: 2 },
   runnerPrPill: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 9, paddingVertical: 7, borderRadius: radius.full, borderWidth: 1, borderColor: colors.borderBright, backgroundColor: "rgba(182,255,63,0.10)" },
@@ -3416,6 +3416,8 @@ const styles = StyleSheet.create({
   todayCardSub: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, fontWeight: "700", marginTop: 4 },
   todaySmallPill: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 5, marginTop: 9, paddingHorizontal: 9, paddingVertical: 5, borderRadius: radius.full, backgroundColor: "rgba(182,255,63,0.10)", borderWidth: 1, borderColor: "rgba(182,255,63,0.22)" },
   todaySmallPillText: { color: colors.primaryLight, fontSize: 10.5, fontWeight: "900" },
+  futureDayChip: { minHeight: 34, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 10, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.24)", backgroundColor: "rgba(182,255,63,0.10)" },
+  futureDayChipText: { color: colors.primaryLight, fontSize: 10.5, fontWeight: "900", textTransform: "capitalize" },
   profileCompanionRow: { flexDirection: "row", gap: spacing.sm },
   companionTile: { flex: 1, minHeight: 76, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.055)", padding: spacing.sm },
   companionVisual: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", overflow: "hidden", backgroundColor: "rgba(182,255,63,0.09)", borderWidth: 1, borderColor: "rgba(182,255,63,0.20)" },
@@ -3432,6 +3434,10 @@ const styles = StyleSheet.create({
   todayActionRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   startTodayButton: { flex: 1, minHeight: 44, borderRadius: radius.full, backgroundColor: colors.primary, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 7, shadowColor: colors.primaryLight, shadowOpacity: 0.28, shadowRadius: 14, shadowOffset: { width: 0, height: 5 }, elevation: 4 },
   startTodayText: { color: "#102108", fontSize: 13, fontWeight: "900" },
+  futureActionStack: { flex: 1, gap: 8 },
+  futureReturnButton: { flex: 0, width: "100%" },
+  advanceTodayButton: { minHeight: 44, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.28)", backgroundColor: "rgba(182,255,63,0.08)", alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 7 },
+  advanceTodayText: { color: colors.primaryLight, fontSize: 12.5, fontWeight: "900" },
   todayEditIconButton: { width: 48, height: 48, borderRadius: 24, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: GLASS_BORDER, backgroundColor: "rgba(255,255,255,0.06)" },
   plannedExerciseList: { gap: 7, paddingTop: spacing.xs },
   plannedExerciseHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.md },

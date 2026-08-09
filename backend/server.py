@@ -4547,6 +4547,31 @@ async def list_weight_logs(authorization: Optional[str] = Header(default=None)):
     ).sort("date", 1).to_list(240)
 
 
+@api.delete("/weight-logs/{weight_log_id}")
+async def delete_weight_log(weight_log_id: str, authorization: Optional[str] = Header(default=None)):
+    user = await get_current_user(authorization)
+    existing = await db.weight_logs.find_one(
+        {"id": weight_log_id, "user_id": user["user_id"]}, {"_id": 0}
+    )
+    if not existing:
+        raise HTTPException(404, "Poids introuvable")
+    await db.weight_logs.delete_one({"id": weight_log_id, "user_id": user["user_id"]})
+    latest = await db.weight_logs.find(
+        {"user_id": user["user_id"]}, {"_id": 0}
+    ).sort("date", -1).to_list(1)
+    if latest:
+        await db.profiles.update_one(
+            {"user_id": user["user_id"]},
+            {"$set": {"weight_kg": latest[0]["weight_kg"], "updated_at": now_utc()}},
+        )
+    else:
+        await db.profiles.update_one(
+            {"user_id": user["user_id"]},
+            {"$unset": {"weight_kg": ""}, "$set": {"updated_at": now_utc()}},
+        )
+    return {"ok": True}
+
+
 @api.delete("/transformations/{transfo_id}")
 async def delete_transformation(transfo_id: str, authorization: Optional[str] = Header(default=None)):
     user = await get_current_user(authorization)

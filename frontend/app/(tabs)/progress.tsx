@@ -57,6 +57,7 @@ type MuscleVolumeItem = {
 type MuscleVolumePayload = { weeks: string[]; items: MuscleVolumeItem[] };
 type Profile = { weight_kg?: number; goal?: string };
 type WeightLog = { id: string; date: string; weight_kg: number; created_at: string };
+type WeightPoint = { id?: string; date: string; weight: number; time: number; source: "log" | "photo" };
 
 function toLocalISO(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -404,20 +405,21 @@ function BodyCompositionCard({
   const [weightDate, setWeightDate] = useState(new Date());
   const [showWeightDate, setShowWeightDate] = useState(false);
   const [savingWeight, setSavingWeight] = useState(false);
+  const [deletingWeightId, setDeletingWeightId] = useState<string | null>(null);
 
   useEffect(() => {
     if (profile.weight_kg) setWeightInput(String(profile.weight_kg).replace(".", ","));
   }, [profile.weight_kg]);
 
-  const weightsMap = new Map<string, { date: string; weight: number; time: number }>();
+  const weightsMap = new Map<string, WeightPoint>();
   transfos
     .filter((item) => typeof item.weight_kg === "number")
     .forEach((item) => {
       const date = (item.date || item.created_at || toLocalISO()).slice(0, 10);
-      weightsMap.set(date, { date, weight: Number(item.weight_kg), time: parseLocalISO(date).getTime() });
+      weightsMap.set(date, { date, weight: Number(item.weight_kg), time: parseLocalISO(date).getTime(), source: "photo" });
     });
   weightLogs.forEach((item) => {
-    weightsMap.set(item.date, { date: item.date, weight: Number(item.weight_kg), time: parseLocalISO(item.date).getTime() });
+    weightsMap.set(item.date, { id: item.id, date: item.date, weight: Number(item.weight_kg), time: parseLocalISO(item.date).getTime(), source: "log" });
   });
   const weights = Array.from(weightsMap.values()).sort((a, b) => a.time - b.time);
   const currentWeight = Number(weights[weights.length - 1]?.weight || profile.weight_kg || 0);
@@ -443,10 +445,34 @@ function BodyCompositionCard({
         method: "POST",
         body: { weight_kg: weight, date: toLocalISO(weightDate) },
       });
+      setShowWeightDate(false);
       await onSaved();
     } finally {
       setSavingWeight(false);
     }
+  };
+
+  const deleteWeight = async (point: WeightPoint) => {
+    if (!point.id || point.source !== "log") return;
+    setDeletingWeightId(point.id);
+    try {
+      await api(`/weight-logs/${point.id}`, { method: "DELETE" });
+      await onSaved();
+    } finally {
+      setDeletingWeightId(null);
+    }
+  };
+
+  const confirmDeleteWeight = (point: WeightPoint) => {
+    if (!point.id || point.source !== "log") return;
+    Alert.alert(
+      "Supprimer cette pesée ?",
+      `${point.weight.toFixed(1)} kg · ${point.date}`,
+      [
+        { text: "Annuler", style: "cancel" },
+        { text: "Supprimer", style: "destructive", onPress: () => deleteWeight(point) },
+      ]
+    );
   };
 
   return (
@@ -472,9 +498,11 @@ function BodyCompositionCard({
         <View style={styles.weightBars}>
           {displayWeights.map((point, index) => (
             <View key={`${point.date}-${index}`} style={styles.weightBarCol}>
+              <Text style={styles.weightBarValue}>{point.weight.toFixed(1)}</Text>
               <View style={styles.weightBarTrack}>
                 <View style={[styles.weightBarFill, { height: `${Math.max(10, ((point.weight - min) / span) * 80 + 12)}%` }]} />
               </View>
+              <Text style={styles.weightBarDate}>{parseLocalISO(point.date).toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })}</Text>
             </View>
           ))}
         </View>
@@ -497,17 +525,52 @@ function BodyCompositionCard({
           </TouchableOpacity>
         </View>
         {showWeightDate && (
-          <DateTimePicker
-            value={weightDate}
-            mode="date"
-            maximumDate={new Date()}
-            display={Platform.OS === "ios" ? "spinner" : "default"}
-            onChange={(_, selected) => {
-              if (Platform.OS !== "ios") setShowWeightDate(false);
-              if (selected) setWeightDate(selected);
-            }}
-          />
+          <>
+            <DateTimePicker
+              value={weightDate}
+              mode="date"
+              maximumDate={new Date()}
+              display={Platform.OS === "ios" ? "spinner" : "default"}
+              onChange={(_, selected) => {
+                if (Platform.OS !== "ios") setShowWeightDate(false);
+                if (selected) setWeightDate(selected);
+              }}
+            />
+            <TouchableOpacity onPress={() => setShowWeightDate(false)} style={styles.weightDoneBtn} testID="weight-log-date-done">
+              <Text style={styles.weightDoneText}>Terminer</Text>
+            </TouchableOpacity>
+          </>
         )}
+        {weights.length > 0 ? (
+          <View style={styles.weightHistoryList} testID="weight-history-list">
+            <Text style={styles.weightHistoryTitle}>Pesées enregistrées</Text>
+            {weights.slice().reverse().slice(0, 5).map((point) => (
+              <View key={`${point.source}-${point.id || point.date}`} style={styles.weightHistoryRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.weightHistoryValue}>{point.weight.toFixed(1)} kg</Text>
+                  <Text style={styles.weightHistoryDate}>
+                    {parseLocalISO(point.date).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" })}
+                    {point.source === "photo" ? " · photo" : ""}
+                  </Text>
+                </View>
+                {point.source === "log" && point.id ? (
+                  <TouchableOpacity
+                    onPress={() => confirmDeleteWeight(point)}
+                    disabled={deletingWeightId === point.id}
+                    style={styles.weightDeleteBtn}
+                    testID={`weight-delete-${point.id}`}
+                  >
+                    {deletingWeightId === point.id ? (
+                      <ActivityIndicator size="small" color={colors.alert} />
+                    ) : (
+                      <Ionicons name="trash-outline" size={15} color={colors.alert} />
+                    )}
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
       </View>
     </Card>
   );
@@ -1123,16 +1186,26 @@ const styles = StyleSheet.create({
   weightCurveTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
   weightCurveTitle: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
   weightCurveValue: { color: colors.primaryLight, fontSize: 13, fontWeight: "900" },
-  weightBars: { height: 82, flexDirection: "row", alignItems: "flex-end", gap: 7 },
-  weightBarCol: { flex: 1, height: "100%", justifyContent: "flex-end" },
-  weightBarTrack: { height: "100%", borderRadius: 8, overflow: "hidden", justifyContent: "flex-end", backgroundColor: "rgba(255,255,255,0.08)" },
+  weightBars: { height: 112, flexDirection: "row", alignItems: "flex-end", gap: 7 },
+  weightBarCol: { flex: 1, height: "100%", justifyContent: "flex-end", alignItems: "center", gap: 4 },
+  weightBarValue: { color: colors.textMain, fontSize: 9.5, fontWeight: "900" },
+  weightBarTrack: { width: "100%", flex: 1, borderRadius: 8, overflow: "hidden", justifyContent: "flex-end", backgroundColor: "rgba(255,255,255,0.08)" },
   weightBarFill: { width: "100%", borderRadius: 8, backgroundColor: "rgba(88,183,255,0.82)" },
+  weightBarDate: { color: colors.textMuted, fontSize: 8.5, fontWeight: "800" },
   weightAddRow: { flexDirection: "row", alignItems: "center", gap: 7 },
   weightInput: { flex: 0.8, minHeight: 38, borderRadius: radius.full, borderWidth: 1, borderColor: colors.border, backgroundColor: "rgba(255,255,255,0.07)", paddingHorizontal: 12, color: colors.textMain, fontSize: 13, fontWeight: "900" },
   weightDateBtn: { flex: 1.2, minHeight: 38, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.08)" },
   weightDateText: { color: colors.primaryLight, fontSize: 11, fontWeight: "900" },
   weightSaveBtn: { minHeight: 38, paddingHorizontal: 12, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryLight },
   weightSaveText: { color: "#102108", fontSize: 12, fontWeight: "900" },
+  weightDoneBtn: { minHeight: 40, borderRadius: radius.full, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(182,255,63,0.24)", backgroundColor: "rgba(182,255,63,0.08)" },
+  weightDoneText: { color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
+  weightHistoryList: { gap: 6, paddingTop: 3 },
+  weightHistoryTitle: { color: colors.textMuted, fontSize: 11, fontWeight: "900", textTransform: "uppercase" },
+  weightHistoryRow: { minHeight: 42, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.045)" },
+  weightHistoryValue: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
+  weightHistoryDate: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700", marginTop: 1, textTransform: "capitalize" },
+  weightDeleteBtn: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,94,94,0.28)", backgroundColor: "rgba(255,94,94,0.08)" },
   performanceHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
   performanceSwitch: { flexDirection: "row", padding: 3, borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: colors.border },
   performanceSwitchBtn: { minHeight: 30, paddingHorizontal: 10, borderRadius: radius.full, alignItems: "center", justifyContent: "center" },

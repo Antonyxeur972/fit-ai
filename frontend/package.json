@@ -14,8 +14,7 @@
     "build:android": "eas build -p android --profile production",
     "submit:ios": "eas submit -p ios --profile production",
     "submit:android": "eas submit -p android --profile production",
-    "update:production": "eas update --channel production",
-    "postinstall": "node ./scripts/apply-codex-fix.js"
+    "update:production": "eas update --channel production"
   },
   "dependencies": {
     "@expo/metro-runtime": "6.1.2",

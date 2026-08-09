@@ -412,7 +412,7 @@ export default function ProfileTab() {
         </Card>
 
         <Button
-          title="Modifier mon profil"
+          title="Modifier mes objectifs"
           variant="secondary"
           onPress={() => router.push("/onboarding")}
           testID="edit-profile-button"

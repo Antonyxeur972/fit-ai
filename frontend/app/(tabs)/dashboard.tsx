@@ -192,7 +192,7 @@ export default function Dashboard() {
           date: data.date,
           steps: data.activity.steps,
           cardio_minutes: n,
-          cardio_type: "Minutes actives",
+          cardio_type: "Running",
         },
       });
       setActiveModal(false);
@@ -260,18 +260,6 @@ export default function Dashboard() {
             )}
           </View>
 
-          <Card style={styles.simpleMainCard} testID="dashboard-simple-calories">
-            <Text style={styles.simpleLabel}>Calories à viser</Text>
-            <Text style={styles.simpleCalories}>{data.target_calories.toLocaleString("fr-FR")}</Text>
-            <Text style={styles.simpleSub}>
-              {`${Math.max(0, data.remaining_calories).toLocaleString("fr-FR")} kcal restantes aujourd'hui`}
-            </Text>
-            <TouchableOpacity onPress={() => router.push("/(tabs)/meals")} style={styles.simplePrimaryButton} testID="dashboard-simple-add-meal">
-              <Ionicons name="restaurant-outline" size={20} color="#102108" />
-              <Text style={styles.simplePrimaryText}>Ajouter un repas</Text>
-            </TouchableOpacity>
-          </Card>
-
           <Card style={styles.simpleWorkoutCard} testID="dashboard-simple-workout">
             <Text style={styles.simpleLabel}>Programme</Text>
             <Text style={styles.simpleWorkoutTitle}>{workoutLabel}</Text>
@@ -281,6 +269,18 @@ export default function Dashboard() {
             <TouchableOpacity onPress={() => router.push("/(tabs)/training")} style={styles.simplePrimaryButton} testID="dashboard-simple-start-workout">
               <Ionicons name="play-circle" size={21} color="#102108" />
               <Text style={styles.simplePrimaryText}>{workoutActionText}</Text>
+            </TouchableOpacity>
+          </Card>
+
+          <Card style={styles.simpleMainCard} testID="dashboard-simple-calories">
+            <Text style={styles.simpleLabel}>Calories à viser</Text>
+            <Text style={styles.simpleCalories}>{data.target_calories.toLocaleString("fr-FR")}</Text>
+            <Text style={styles.simpleSub}>
+              {`${Math.max(0, data.remaining_calories).toLocaleString("fr-FR")} kcal restantes aujourd'hui`}
+            </Text>
+            <TouchableOpacity onPress={() => router.push("/(tabs)/meals")} style={styles.simplePrimaryButton} testID="dashboard-simple-add-meal">
+              <Ionicons name="restaurant-outline" size={20} color="#102108" />
+              <Text style={styles.simplePrimaryText}>Ajouter un repas</Text>
             </TouchableOpacity>
           </Card>
 
@@ -356,9 +356,9 @@ export default function Dashboard() {
 
           <Card style={styles.heroCard} testID="dashboard-hero-card">
             <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
-              <ProgressRing progress={workoutDone ? 1 : Math.max(0.12, activeMinutesProgress)} size={74} stroke={7}>
-                <Text style={styles.heroRingValue}>{workoutDone ? "100%" : `${Math.round(Math.max(activeMinutesProgress, 0.12) * 100)}%`}</Text>
-              </ProgressRing>
+              <View style={[styles.heroWorkoutIcon, workoutDone && styles.heroWorkoutIconDone]}>
+                <Ionicons name={workoutDone ? "checkmark-circle" : "play-circle"} size={32} color={workoutDone ? "#102108" : colors.primaryLight} />
+              </View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.objectiveLabel}>{workoutSectionLabel}</Text>
                 <Text style={styles.objectiveTitle}>{workoutLabel}</Text>
@@ -430,7 +430,7 @@ export default function Dashboard() {
           />
           <TodayMetricCard
             icon="pulse"
-            label="Minutes actives"
+            label="Running"
             value={data.activity.cardio_minutes}
             unit={`/ ${ACTIVE_MINUTES_GOAL} min`}
             progress={activeMinutesProgress}
@@ -528,8 +528,8 @@ export default function Dashboard() {
         <View style={styles.modalBg}>
           <KeyboardAwareScrollView contentContainerStyle={styles.modalCard} keyboardShouldPersistTaps="handled" bottomOffset={20}>
             <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Minutes actives</Text>
-            <Text style={[typography.small, { marginTop: 4 }]}>Course, vélo, marche rapide ou cardio ajouté manuellement.</Text>
+            <Text style={styles.modalTitle}>Running</Text>
+            <Text style={[typography.small, { marginTop: 4 }]}>Course, marche rapide, vélo ou cardio ajouté manuellement.</Text>
             <TextInput
               value={activeInput}
               onChangeText={(t) => setActiveInput(t.replace(/[^0-9]/g, ""))}
@@ -792,6 +792,8 @@ const styles = StyleSheet.create({
   heroScript: { fontSize: 25, lineHeight: 29, marginTop: spacing.sm, maxWidth: 245 },
   heroPointsPill: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5, marginTop: spacing.md, paddingHorizontal: 10, paddingVertical: 7, borderRadius: radius.full, backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: "rgba(255,255,255,0.32)" },
   heroPointsText: { color: "#102108", fontSize: 11.5, fontWeight: "900" },
+  heroWorkoutIcon: { width: 74, height: 74, borderRadius: 37, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(182,255,63,0.26)", backgroundColor: "rgba(182,255,63,0.10)" },
+  heroWorkoutIconDone: { borderColor: colors.primaryLight, backgroundColor: colors.primaryLight },
   heroRingValue: { color: colors.textMain, fontSize: 15, fontWeight: "900" },
   objectiveLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "800" },
   objectiveTitle: { color: colors.textMain, fontSize: 16, fontWeight: "900", marginTop: 1 },

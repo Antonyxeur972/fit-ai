@@ -15,18 +15,6 @@ type PointsSummary = {
   streak_days: number;
 };
 
-type Workout = {
-  id: string;
-  focus: string;
-  title: string;
-  completed: boolean;
-  duration_min: number;
-};
-
-type Week = {
-  days: { date: string; consumed: number; target: number; steps: number; cardio_minutes: number }[];
-};
-
 type ChallengeDay = {
   day_index?: number;
   label: string;
@@ -129,24 +117,17 @@ function localChallenge(type: ChallengeType): ActiveChallenge {
 
 export default function ChallengesTab() {
   const [points, setPoints] = useState<PointsSummary | null>(null);
-  const [week, setWeek] = useState<Week | null>(null);
-  const [workouts, setWorkouts] = useState<Workout[]>([]);
   const [activeChallenges, setActiveChallenges] = useState<ActiveChallenge[]>([]);
   const [challengeBusy, setChallengeBusy] = useState<string | null>(null);
-  const [participating, setParticipating] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const hiddenTypes = await readHiddenChallengeTypes();
-      const [ps, w, wk, active] = await Promise.all([
+      const [ps, active] = await Promise.all([
         api<PointsSummary>("/points/summary").catch(() => null),
-        api<Week>("/dashboard/week").catch(() => null),
-        api<Workout[]>("/workouts/week").catch(() => []),
         api<{ items: ActiveChallenge[] }>("/challenges/active").catch(() => ({ items: [] })),
       ]);
       setPoints(ps);
-      setWeek(w);
-      setWorkouts(wk || []);
       const remoteItems = (active.items || []).map((item) => ({
         ...item,
         type: normalizeChallengeType(item.type) || item.type,
@@ -167,12 +148,6 @@ export default function ChallengesTab() {
 
   const streak = points?.streak_days || 0;
   const totalXp = points?.points_total || 0;
-  const sessionsDone = workouts.filter((w) => w.completed).length;
-  const weeklySteps = week?.days.reduce((sum, d) => sum + (d.steps || 0), 0) || 0;
-  const cardioMinutes = week?.days.reduce((sum, d) => sum + (d.cardio_minutes || 0), 0) || 0;
-  const fullBodyDone = workouts.some((w) => w.completed && `${w.focus} ${w.title}`.toLowerCase().includes("full"));
-  const missionCount = [sessionsDone >= 3, weeklySteps >= 20000, cardioMinutes >= 45, fullBodyDone].filter(Boolean).length;
-  const chestReady = missionCount >= 3;
   const focusedChallenges = CHALLENGE_TYPES.map((type) => ({
     type,
     challenge: activeChallenges.find((item) => normalizeChallengeType(item.type) === type),
@@ -333,38 +308,6 @@ export default function ChallengesTab() {
           ))}
         </Card>
 
-        <Card testID="weekly-explorer-card" style={styles.weeklyCard}>
-          <View style={styles.weeklyTop}>
-            <View style={styles.weeklyIcon}>
-              <Ionicons name="compass" size={20} color={colors.amber} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.weeklyEyebrow}>Défi de la semaine</Text>
-              <Text style={styles.weeklyTitle}>Explorateur</Text>
-              <Text style={styles.weeklyText}>Bouge chaque jour et repousse tes limites.</Text>
-            </View>
-            <View style={styles.chestBox}>
-              <Ionicons name={chestReady ? "gift" : "lock-closed"} size={22} color={chestReady ? "#1C2308" : colors.amber} />
-              <Text style={[styles.chestText, chestReady && { color: "#1C2308" }]}>+250 XP</Text>
-            </View>
-          </View>
-
-          <View style={styles.missionList}>
-            <MissionRow done={sessionsDone >= 3} label="Faire 3 séances" value={`${sessionsDone}/3`} />
-            <MissionRow done={weeklySteps >= 20000} label="Atteindre 20 000 pas" value={`${weeklySteps.toLocaleString("fr-FR")}/20 000`} />
-            <MissionRow done={cardioMinutes >= 45} label="Bonus cardio" value={`${cardioMinutes}/45 min`} />
-            <MissionRow done={fullBodyDone} label="Séance bonus Full Body" value={fullBodyDone ? "validée" : "optionnel"} />
-          </View>
-
-          <Button
-            title={participating ? (chestReady ? "Coffre prêt" : "Défi en cours") : "Participer"}
-            onPress={() => setParticipating(true)}
-            variant={participating && !chestReady ? "secondary" : "primary"}
-            icon={<Ionicons name={chestReady ? "gift" : "flag"} size={16} color={participating && !chestReady ? colors.primaryLight : "#102108"} />}
-            testID="weekly-join"
-          />
-        </Card>
-
         <Card testID="total-xp-card" style={styles.totalXpCard}>
           <Ionicons name="sparkles" size={18} color={colors.primaryLight} />
           <Text style={styles.totalXpText}>Total XP</Text>
@@ -389,18 +332,6 @@ function BadgeArt({ tier, target, locked }: { tier: 1 | 2 | 3 | 4; target: numbe
   return (
     <View style={[styles.badgeArtWrap, locked && styles.artLocked]}>
       <Image source={BADGE_IMAGES[target]} resizeMode="contain" style={styles.rewardImage} />
-    </View>
-  );
-}
-
-function MissionRow({ done, label, value }: { done: boolean; label: string; value: string }) {
-  return (
-    <View style={styles.missionRow}>
-      <View style={[styles.missionCheck, done && styles.missionCheckOn]}>
-        <Ionicons name={done ? "checkmark" : "ellipse-outline"} size={14} color={done ? "#102108" : colors.primaryLight} />
-      </View>
-      <Text style={styles.missionLabel}>{label}</Text>
-      <Text style={styles.missionValue}>{value}</Text>
     </View>
   );
 }
@@ -593,20 +524,6 @@ const styles = StyleSheet.create({
   pathDot: { width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: colors.borderBright, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.18)" },
   pathDotOn: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
   pathLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "800", marginTop: 5 },
-  weeklyCard: { gap: spacing.md, borderColor: "rgba(255,179,63,0.34)", backgroundColor: "rgba(28,22,8,0.50)" },
-  weeklyTop: { flexDirection: "row", alignItems: "center", gap: spacing.md },
-  weeklyIcon: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,179,63,0.13)", borderWidth: 1, borderColor: "rgba(255,179,63,0.28)" },
-  weeklyEyebrow: { color: colors.amber, fontSize: 10.5, fontWeight: "900", textTransform: "uppercase" },
-  weeklyTitle: { color: colors.textMain, fontSize: 23, fontWeight: "900", marginTop: 2 },
-  weeklyText: { color: colors.textSecondary, fontSize: 12.5, fontWeight: "700", marginTop: 2 },
-  chestBox: { width: 78, height: 70, borderRadius: radius.md, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,179,63,0.13)", borderWidth: 1, borderColor: "rgba(255,179,63,0.30)" },
-  chestText: { color: colors.amber, fontSize: 11, fontWeight: "900", marginTop: 3 },
-  missionList: { gap: spacing.sm },
-  missionRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 40, paddingHorizontal: spacing.sm, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.055)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
-  missionCheck: { width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.borderBright },
-  missionCheckOn: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
-  missionLabel: { color: colors.textMain, fontSize: 12.5, fontWeight: "800", flex: 1 },
-  missionValue: { color: colors.textMuted, fontSize: 11, fontWeight: "800" },
   dailyChallenge: { minHeight: 86, gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", backgroundColor: "rgba(255,255,255,0.055)" },
   dailyChallengeHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   dailyChallengeIcon: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(182,255,63,0.10)", borderWidth: 1, borderColor: "rgba(182,255,63,0.22)" },
