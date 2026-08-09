@@ -1,0 +1,72 @@
+ <View style={styles.modalBg}>
+           <KeyboardAwareScrollView contentContainerStyle={styles.modalCard} keyboardShouldPersistTaps="handled" bottomOffset={20}>
+             <View style={styles.modalHandle} />
+-            <Text style={styles.modalTitle}>Minutes actives</Text>
+-            <Text style={[typography.small, { marginTop: 4 }]}>Course, vélo, marche rapide ou cardio ajouté manuellement.</Text>
++            <Text style={styles.modalTitle}>Running</Text>
++            <Text style={[typography.small, { marginTop: 4 }]}>Course, marche rapide, vélo ou cardio ajouté manuellement.</Text>
+             <TextInput
+               value={activeInput}
+               onChangeText={(t) => setActiveInput(t.replace(/[^0-9]/g, ""))}
+@@ -792,6 +792,8 @@ const styles = StyleSheet.create({
+   heroScript: { fontSize: 25, lineHeight: 29, marginTop: spacing.sm, maxWidth: 245 },
+   heroPointsPill: { alignSelf: "flex-start", flexDirection: "row", alignItems: "center", gap: 5, marginTop: spacing.md, paddingHorizontal: 10, paddingVertical: 7, borderRadius: radius.full, backgroundColor: colors.primaryLight, borderWidth: 1, borderColor: "rgba(255,255,255,0.32)" },
+   heroPointsText: { color: "#102108", fontSize: 11.5, fontWeight: "900" },
++  heroWorkoutIcon: { width: 74, height: 74, borderRadius: 37, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(182,255,63,0.26)", backgroundColor: "rgba(182,255,63,0.10)" },
++  heroWorkoutIconDone: { borderColor: colors.primaryLight, backgroundColor: colors.primaryLight },
+   heroRingValue: { color: colors.textMain, fontSize: 15, fontWeight: "900" },
+   objectiveLabel: { color: colors.textMuted, fontSize: 11, fontWeight: "800" },
+   objectiveTitle: { color: colors.textMain, fontSize: 16, fontWeight: "900", marginTop: 1 },
+diff --git a/frontend/app/(tabs)/profile.tsx b/frontend/app/(tabs)/profile.tsx
+index e006cde..5d80f2b 100644
+--- a/frontend/app/(tabs)/profile.tsx
++++ b/frontend/app/(tabs)/profile.tsx
+@@ -412,7 +412,7 @@ export default function ProfileTab() {
+         </Card>
+ 
+         <Button
+-          title="Modifier mon profil"
++          title="Modifier mes objectifs"
+           variant="secondary"
+           onPress={() => router.push("/onboarding")}
+           testID="edit-profile-button"
+diff --git a/frontend/app/(tabs)/progress.tsx b/frontend/app/(tabs)/progress.tsx
+index 2b5b317..f4888aa 100644
+--- a/frontend/app/(tabs)/progress.tsx
++++ b/frontend/app/(tabs)/progress.tsx
+@@ -57,6 +57,7 @@ type MuscleVolumeItem = {
+ type MuscleVolumePayload = { weeks: string[]; items: MuscleVolumeItem[] };
+ type Profile = { weight_kg?: number; goal?: string };
+ type WeightLog = { id: string; date: string; weight_kg: number; created_at: string };
++type WeightPoint = { id?: string; date: string; weight: number; time: number; source: "log" | "photo" };
+ 
+ function toLocalISO(date = new Date()) {
+   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+@@ -404,20 +405,21 @@ function BodyCompositionCard({
+   const [weightDate, setWeightDate] = useState(new Date());
+   const [showWeightDate, setShowWeightDate] = useState(false);
+   const [savingWeight, setSavingWeight] = useState(false);
++  const [deletingWeightId, setDeletingWeightId] = useState<string | null>(null);
+ 
+   useEffect(() => {
+     if (profile.weight_kg) setWeightInput(String(profile.weight_kg).replace(".", ","));
+   }, [profile.weight_kg]);
+ 
+-  const weightsMap = new Map<string, { date: string; weight: number; time: number }>();
++  const weightsMap = new Map<string, WeightPoint>();
+   transfos
+     .filter((item) => typeof item.weight_kg === "number")
+     .forEach((item) => {
+       const date = (item.date || item.created_at || toLocalISO()).slice(0, 10);
+-      weightsMap.set(date, { date, weight: Number(item.weight_kg), time: parseLocalISO(date).getTime() });
++      weightsMap.set(date, { date, weight: Number(item.weight_kg), time: parseLocalISO(date).getTime(), source: "photo" });
+     });
+   weightLogs.forEach((item) => {
+-    weightsMap.set(item.date, { date: item.date, weight: Number(item.weight_kg), time: parseLocalISO(item.date).getTime() });
++    weightsMap.set(item.date, { id: item.id, date: item.date, weight: Number(item.weight_kg), time: parseLocalISO(item.date).getTime(), source: "log" });
+   });
+   const weights = Array.from(weightsMap.values()).sort((a, b) => a.time - b.time);
+   const currentWeight = Number(weights[weights.length - 1]?.weight || profile.weight_kg || 0);
+@@ -443,12 +445,36 @@ function BodyCompositionCard({
+         method: "POST",
+        

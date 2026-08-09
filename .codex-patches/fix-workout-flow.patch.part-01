@@ -1,0 +1,112 @@
+ 
+-function MissionRow({ done, label, value }: { done: boolean; label: string; value: string }) {
+-  return (
+-    <View style={styles.missionRow}>
+-      <View style={[styles.missionCheck, done && styles.missionCheckOn]}>
+-        <Ionicons name={done ? "checkmark" : "ellipse-outline"} size={14} color={done ? "#102108" : colors.primaryLight} />
+-      </View>
+-      <Text style={styles.missionLabel}>{label}</Text>
+-      <Text style={styles.missionValue}>{value}</Text>
+-    </View>
+-  );
+-}
+-
+ function todayChallengeIndex(challenge: ActiveChallenge) {
+   const start = new Date(challenge.started_at);
+   const today = new Date();
+@@ -593,20 +524,6 @@ const styles = StyleSheet.create({
+   pathDot: { width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: colors.borderBright, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(0,0,0,0.18)" },
+   pathDotOn: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
+   pathLabel: { color: colors.textMuted, fontSize: 10.5, fontWeight: "800", marginTop: 5 },
+-  weeklyCard: { gap: spacing.md, borderColor: "rgba(255,179,63,0.34)", backgroundColor: "rgba(28,22,8,0.50)" },
+-  weeklyTop: { flexDirection: "row", alignItems: "center", gap: spacing.md },
+-  weeklyIcon: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,179,63,0.13)", borderWidth: 1, borderColor: "rgba(255,179,63,0.28)" },
+-  weeklyEyebrow: { color: colors.amber, fontSize: 10.5, fontWeight: "900", textTransform: "uppercase" },
+-  weeklyTitle: { color: colors.textMain, fontSize: 23, fontWeight: "900", marginTop: 2 },
+-  weeklyText: { color: colors.textSecondary, fontSize: 12.5, fontWeight: "700", marginTop: 2 },
+-  chestBox: { width: 78, height: 70, borderRadius: radius.md, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(255,179,63,0.13)", borderWidth: 1, borderColor: "rgba(255,179,63,0.30)" },
+-  chestText: { color: colors.amber, fontSize: 11, fontWeight: "900", marginTop: 3 },
+-  missionList: { gap: spacing.sm },
+-  missionRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm, minHeight: 40, paddingHorizontal: spacing.sm, borderRadius: radius.md, backgroundColor: "rgba(255,255,255,0.055)", borderWidth: 1, borderColor: "rgba(255,255,255,0.10)" },
+-  missionCheck: { width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: colors.borderBright },
+-  missionCheckOn: { backgroundColor: colors.primaryLight, borderColor: colors.primaryLight },
+-  missionLabel: { color: colors.textMain, fontSize: 12.5, fontWeight: "800", flex: 1 },
+-  missionValue: { color: colors.textMuted, fontSize: 11, fontWeight: "800" },
+   dailyChallenge: { minHeight: 86, gap: spacing.sm, padding: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.12)", backgroundColor: "rgba(255,255,255,0.055)" },
+   dailyChallengeHead: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+   dailyChallengeIcon: { width: 42, height: 42, borderRadius: 21, alignItems: "center", justifyContent: "center", backgroundColor: "rgba(182,255,63,0.10)", borderWidth: 1, borderColor: "rgba(182,255,63,0.22)" },
+diff --git a/frontend/app/(tabs)/dashboard.tsx b/frontend/app/(tabs)/dashboard.tsx
+index 590947a..c22cef6 100644
+--- a/frontend/app/(tabs)/dashboard.tsx
++++ b/frontend/app/(tabs)/dashboard.tsx
+@@ -192,7 +192,7 @@ export default function Dashboard() {
+           date: data.date,
+           steps: data.activity.steps,
+           cardio_minutes: n,
+-          cardio_type: "Minutes actives",
++          cardio_type: "Running",
+         },
+       });
+       setActiveModal(false);
+@@ -260,18 +260,6 @@ export default function Dashboard() {
+             )}
+           </View>
+ 
+-          <Card style={styles.simpleMainCard} testID="dashboard-simple-calories">
+-            <Text style={styles.simpleLabel}>Calories à viser</Text>
+-            <Text style={styles.simpleCalories}>{data.target_calories.toLocaleString("fr-FR")}</Text>
+-            <Text style={styles.simpleSub}>
+-              {`${Math.max(0, data.remaining_calories).toLocaleString("fr-FR")} kcal restantes aujourd'hui`}
+-            </Text>
+-            <TouchableOpacity onPress={() => router.push("/(tabs)/meals")} style={styles.simplePrimaryButton} testID="dashboard-simple-add-meal">
+-              <Ionicons name="restaurant-outline" size={20} color="#102108" />
+-              <Text style={styles.simplePrimaryText}>Ajouter un repas</Text>
+-            </TouchableOpacity>
+-          </Card>
+-
+           <Card style={styles.simpleWorkoutCard} testID="dashboard-simple-workout">
+             <Text style={styles.simpleLabel}>Programme</Text>
+             <Text style={styles.simpleWorkoutTitle}>{workoutLabel}</Text>
+@@ -284,6 +272,18 @@ export default function Dashboard() {
+             </TouchableOpacity>
+           </Card>
+ 
++          <Card style={styles.simpleMainCard} testID="dashboard-simple-calories">
++            <Text style={styles.simpleLabel}>Calories à viser</Text>
++            <Text style={styles.simpleCalories}>{data.target_calories.toLocaleString("fr-FR")}</Text>
++            <Text style={styles.simpleSub}>
++              {`${Math.max(0, data.remaining_calories).toLocaleString("fr-FR")} kcal restantes aujourd'hui`}
++            </Text>
++            <TouchableOpacity onPress={() => router.push("/(tabs)/meals")} style={styles.simplePrimaryButton} testID="dashboard-simple-add-meal">
++              <Ionicons name="restaurant-outline" size={20} color="#102108" />
++              <Text style={styles.simplePrimaryText}>Ajouter un repas</Text>
++            </TouchableOpacity>
++          </Card>
++
+           <View style={styles.simpleCheckRow}>
+             <SimpleCross label="Repas" done={data.meals_count > 0} />
+             <SimpleCross label="Entraînement" done={workoutDone} />
+@@ -356,9 +356,9 @@ export default function Dashboard() {
+ 
+           <Card style={styles.heroCard} testID="dashboard-hero-card">
+             <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
+-              <ProgressRing progress={workoutDone ? 1 : Math.max(0.12, activeMinutesProgress)} size={74} stroke={7}>
+-                <Text style={styles.heroRingValue}>{workoutDone ? "100%" : `${Math.round(Math.max(activeMinutesProgress, 0.12) * 100)}%`}</Text>
+-              </ProgressRing>
++              <View style={[styles.heroWorkoutIcon, workoutDone && styles.heroWorkoutIconDone]}>
++                <Ionicons name={workoutDone ? "checkmark-circle" : "play-circle"} size={32} color={workoutDone ? "#102108" : colors.primaryLight} />
++              </View>
+               <View style={{ flex: 1 }}>
+                 <Text style={styles.objectiveLabel}>{workoutSectionLabel}</Text>
+                 <Text style={styles.objectiveTitle}>{workoutLabel}</Text>
+@@ -430,7 +430,7 @@ export default function Dashboard() {
+           />
+           <TodayMetricCard
+             icon="pulse"
+-            label="Minutes actives"
++            label="Running"
+             value={data.activity.cardio_minutes}
+             unit={`/ ${ACTIVE_MINUTES_GOAL} min`}
+             progress={activeMinutesProgress}
+@@ -528,8 +528,8 @@ export default function Dashboard() {
+        

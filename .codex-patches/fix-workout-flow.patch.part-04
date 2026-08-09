@@ -1,0 +1,126 @@
+ weightCurveValue: { color: colors.primaryLight, fontSize: 13, fontWeight: "900" },
+-  weightBars: { height: 82, flexDirection: "row", alignItems: "flex-end", gap: 7 },
+-  weightBarCol: { flex: 1, height: "100%", justifyContent: "flex-end" },
+-  weightBarTrack: { height: "100%", borderRadius: 8, overflow: "hidden", justifyContent: "flex-end", backgroundColor: "rgba(255,255,255,0.08)" },
++  weightBars: { height: 112, flexDirection: "row", alignItems: "flex-end", gap: 7 },
++  weightBarCol: { flex: 1, height: "100%", justifyContent: "flex-end", alignItems: "center", gap: 4 },
++  weightBarValue: { color: colors.textMain, fontSize: 9.5, fontWeight: "900" },
++  weightBarTrack: { width: "100%", flex: 1, borderRadius: 8, overflow: "hidden", justifyContent: "flex-end", backgroundColor: "rgba(255,255,255,0.08)" },
+   weightBarFill: { width: "100%", borderRadius: 8, backgroundColor: "rgba(88,183,255,0.82)" },
++  weightBarDate: { color: colors.textMuted, fontSize: 8.5, fontWeight: "800" },
+   weightAddRow: { flexDirection: "row", alignItems: "center", gap: 7 },
+   weightInput: { flex: 0.8, minHeight: 38, borderRadius: radius.full, borderWidth: 1, borderColor: colors.border, backgroundColor: "rgba(255,255,255,0.07)", paddingHorizontal: 12, color: colors.textMain, fontSize: 13, fontWeight: "900" },
+   weightDateBtn: { flex: 1.2, minHeight: 38, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, borderRadius: radius.full, borderWidth: 1, borderColor: "rgba(182,255,63,0.22)", backgroundColor: "rgba(182,255,63,0.08)" },
+   weightDateText: { color: colors.primaryLight, fontSize: 11, fontWeight: "900" },
+   weightSaveBtn: { minHeight: 38, paddingHorizontal: 12, borderRadius: radius.full, alignItems: "center", justifyContent: "center", backgroundColor: colors.primaryLight },
+   weightSaveText: { color: "#102108", fontSize: 12, fontWeight: "900" },
++  weightDoneBtn: { minHeight: 40, borderRadius: radius.full, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(182,255,63,0.24)", backgroundColor: "rgba(182,255,63,0.08)" },
++  weightDoneText: { color: colors.primaryLight, fontSize: 12, fontWeight: "900" },
++  weightHistoryList: { gap: 6, paddingTop: 3 },
++  weightHistoryTitle: { color: colors.textMuted, fontSize: 11, fontWeight: "900", textTransform: "uppercase" },
++  weightHistoryRow: { minHeight: 42, flexDirection: "row", alignItems: "center", gap: spacing.sm, paddingHorizontal: spacing.sm, borderRadius: radius.md, borderWidth: 1, borderColor: "rgba(255,255,255,0.10)", backgroundColor: "rgba(255,255,255,0.045)" },
++  weightHistoryValue: { color: colors.textMain, fontSize: 13, fontWeight: "900" },
++  weightHistoryDate: { color: colors.textMuted, fontSize: 10.5, fontWeight: "700", marginTop: 1, textTransform: "capitalize" },
++  weightDeleteBtn: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,94,94,0.28)", backgroundColor: "rgba(255,94,94,0.08)" },
+   performanceHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: spacing.sm },
+   performanceSwitch: { flexDirection: "row", padding: 3, borderRadius: radius.full, backgroundColor: "rgba(255,255,255,0.07)", borderWidth: 1, borderColor: colors.border },
+   performanceSwitchBtn: { minHeight: 30, paddingHorizontal: 10, borderRadius: radius.full, alignItems: "center", justifyContent: "center" },
+diff --git a/frontend/app/(tabs)/training.tsx b/frontend/app/(tabs)/training.tsx
+index 5f8b836..f06ad41 100644
+--- a/frontend/app/(tabs)/training.tsx
++++ b/frontend/app/(tabs)/training.tsx
+@@ -256,6 +256,13 @@ function relativeWorkoutLabel(dateIso: string, todayIso: string) {
+   return "Séance programmée";
+ }
+ 
++function scheduledWorkoutButtonLabel(dateIso: string) {
++  const d = new Date(`${dateIso}T12:00:00`);
++  if (Number.isNaN(d.getTime())) return "Au planning";
++  const day = d.toLocaleDateString("fr-FR", { weekday: "long" });
++  return `À ${day}`;
++}
++
+ function weekdayFromIso(dateIso: string) {
+   const d = new Date(`${dateIso}T12:00:00`);
+   return (d.getDay() + 6) % 7;
+@@ -296,7 +303,7 @@ function plannedWorkoutsFromProgram(program: TrainingProgram | null): CalendarSy
+     const day = week?.days[daySlot] || week?.days[0];
+     if (!week || !day) continue;
+     events.push({
+-      id: `program-${program.id}-${weekIndex}-${day.day_index}`,
++      id: `prog:${program.id}:${weekIndex}:${day.day_index}`,
+       date: toLocalIsoDate(date),
+       title: `${splitLabel(program.split)} ${sessionLabelForIndex(day.day_index, trainingDays)}`,
+       focus: day.focus || program.goal_label || "Séance FIT AI",
+@@ -469,7 +476,6 @@ export default function Training() {
+ 
+   const [editorOpen, setEditorOpen] = useState(false);
+   const [editWorkout, setEditWorkout] = useState<Workout | null>(null);
+-  const [resumeRunnerAfterEdit, setResumeRunnerAfterEdit] = useState(false);
+ 
+   const [perfOpen, setPerfOpen] = useState(false);
+   const [perfEx, setPerfEx] = useState<{ workout: Workout; exercise: Exercise } | null>(null);
+@@ -845,7 +851,6 @@ export default function Training() {
+ 
+   const openBlankProgramDayEditor = (prog: TrainingProgram, weekIndex: number) => {
+     const targetWeek = prog.weeks.find((item) => item.week_index === weekIndex) || prog.weeks[0];
+-    setResumeRunnerAfterEdit(false);
+     setEditWorkout({
+       id: `prognew:${prog.id}:${weekIndex}`,
+       date: "",
+@@ -860,7 +865,6 @@ export default function Training() {
+   };
+ 
+   const openManualHistoryEditor = () => {
+-    setResumeRunnerAfterEdit(false);
+     setEditWorkout({
+       id: "manual:new",
+       date: today,
+@@ -876,7 +880,6 @@ export default function Training() {
+ 
+   const openRunnerEditor = () => {
+     if (!runnerWorkout) return;
+-    setResumeRunnerAfterEdit(true);
+     setEditWorkout({
+       ...runnerWorkout,
+       exercises: runnerWorkout.exercises.map((exercise) => ({ ...exercise, checked: exercise.checked !== false })),
+@@ -1100,29 +1103,6 @@ export default function Training() {
+       await load();
+       if (tab === "history") await loadHistory();
+     }
+-    if (resumeRunnerAfterEdit && runnerWorkout) {
+-      const refreshedWeek = await api<Workout[]>("/workouts/week");
+-      const updated = refreshedWeek.find((item) => item.id === runnerWorkout.id);
+-      if (updated) {
+-        const exercises = updated.exercises.filter((exercise) => exercise.checked !== false);
+-        const drafts: Record<string, SessionDraft> = {};
+-        exercises.forEach((ex) => {
+-          drafts[ex.name] = runnerDrafts[ex.name] || {
+-            sets: String(ex.sets || 3),
+-            reps: String(ex.reps || "10"),
+-            weight: "",
+-            rest: String(getRestForExercise(ex.name, updated.session_type) || ex.rest_s || 60),
+-            pr: false,
+-            done: false,
+-          };
+-        });
+-        setRunnerWorkout({ ...updated, exercises });
+-        setRunnerDrafts(drafts);
+-        setRunnerIndex(Math.min(runnerIndex, Math.max(0, exercises.length - 1)));
+-        setSessionRunnerOpen(true);
+-      }
+-    }
+-    setResumeRunnerAfterEdit(false);
+     setEditWorkout(null);
+   };
+ 
+@@ -1154,10 +1134,10 @@ export default function Training() {
+     setSessionRunnerOpen(true);
+   };
+ 
+-  const startTodayWorkout = async (workout: Workout) => {
++  const startTodayWorkout = async (workout: Workout, options: { forceToday?: boolean } = {}) => {
+     if (startingToday) return;
+     if (!workout.id.startsWith("prog:")) {
+-      startGuidedSession(workout);
+    
