@@ -6,6 +6,7 @@ import os
 import uuid
 import json
 import re
+import hashlib
 import logging
 import unicodedata
 from pathlib import Path
@@ -18,7 +19,7 @@ except Exception:
 
 import httpx
 from fastapi import FastAPI, APIRouter, HTTPException, Header, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -28,6 +29,14 @@ from anthropic import AsyncAnthropic
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
+
+from legal_pages import (
+    delete_account_html,
+    legal_home_html,
+    privacy_html,
+    privacy_request_html,
+    terms_html,
+)
 
 # --- Config ---
 MONGO_URL = os.environ["MONGO_URL"]
@@ -39,6 +48,11 @@ AI_DAILY_LIMIT = int(os.environ.get("FITAI_AI_DAILY_LIMIT", "20"))
 AI_MONTHLY_LIMIT = int(os.environ.get("FITAI_AI_MONTHLY_LIMIT", "300"))
 AI_ESTIMATED_CENTS_PER_CALL = float(os.environ.get("FITAI_AI_ESTIMATED_CENTS_PER_CALL", "3"))
 ALGORITHM_ONLY_AI = os.environ.get("FITAI_ALGORITHM_ONLY", "").lower() in {"1", "true", "yes", "on"}
+CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.environ.get("FITAI_CORS_ORIGINS", "*").split(",")
+    if origin.strip()
+] or ["*"]
 
 import certifi
 client = AsyncIOMotorClient(MONGO_URL, tlsCAFile=certifi.where())
@@ -46,9 +60,59 @@ db = client[DB_NAME]
 
 app = FastAPI(title="Performance Fitness API")
 
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if request.url.path.startswith("/api/") and request.url.path != "/api/health":
+        response.headers["Cache-Control"] = "no-store"
+    if request.url.path in {"/legal", "/privacy", "/terms", "/delete-account", "/privacy-request"}:
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+            "script-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; "
+            "base-uri 'self'; form-action 'self'"
+        )
+    if request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
 @app.get("/api/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.get("/legal", response_class=HTMLResponse)
+async def legal_home():
+    return HTMLResponse(legal_home_html())
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy_policy():
+    return HTMLResponse(privacy_html())
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def terms_of_use():
+    return HTMLResponse(terms_html())
+
+
+@app.get("/delete-account", response_class=HTMLResponse)
+async def delete_account_page():
+    return HTMLResponse(delete_account_html())
+
+
+@app.get("/privacy-request", response_class=HTMLResponse)
+async def privacy_request_page(type: str = "other"):
+    return HTMLResponse(privacy_request_html(type))
+
+
+@app.get("/legal-background", response_class=FileResponse)
+async def legal_background():
+    return FileResponse(ROOT_DIR / "static" / "legal-background.jpg", media_type="image/jpeg")
 
 api = APIRouter(prefix="/api")
 
@@ -169,19 +233,29 @@ class AuthMeResponse(BaseModel):
 
 
 class ProfileIn(BaseModel):
-    weight_kg: float
-    height_cm: float
-    age: int
+    weight_kg: float = Field(ge=30, le=350)
+    height_cm: float = Field(ge=120, le=230)
+    age: int = Field(ge=18, le=100)
     gender: str  # "male" | "female"
     goal: str  # "lose" | "gain" | "maintain"
     activity_level: str = "moderate"  # sedentary | light | moderate | active | very_active
     waist_cm: Optional[float] = None
     neck_cm: Optional[float] = None
     hips_cm: Optional[float] = None
+    health_data_consent: Optional[bool] = None
+    legal_version: Optional[str] = None
 
 
 class UserUpdate(BaseModel):
     name: Optional[str] = None
+
+
+class PrivacyRequestIn(BaseModel):
+    email: str = Field(min_length=5, max_length=254)
+    request_type: str = Field(default="other", max_length=32)
+    message: Optional[str] = Field(default=None, max_length=1500)
+    confirmation: bool = False
+    website: Optional[str] = Field(default=None, max_length=200)
 
 
 class FavoriteIn(BaseModel):
@@ -1628,6 +1702,48 @@ async def analyze_transformation_with_claude(image_base64: str, prev_image_base6
 
 
 # --- AUTH ---
+@api.post("/privacy-requests", status_code=202)
+async def create_privacy_request(body: PrivacyRequestIn):
+    """Create a privacy-rights request without revealing account existence."""
+    if body.website:
+        return {"ok": True, "request_id": new_id("privacy")}
+    if not body.confirmation:
+        raise HTTPException(400, "La confirmation est requise.")
+
+    email = body.email.strip().lower()
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+        raise HTTPException(400, "Adresse e-mail invalide.")
+    allowed_types = {"access", "rectification", "portability", "objection", "deletion", "other"}
+    request_type = body.request_type if body.request_type in allowed_types else "other"
+    email_hash = hashlib.sha256(email.encode("utf-8")).hexdigest()
+
+    recent = await db.privacy_requests.find_one(
+        {
+            "email_hash": email_hash,
+            "request_type": request_type,
+            "created_at": {"$gte": now_utc() - timedelta(hours=24)},
+        },
+        {"_id": 0, "id": 1},
+    )
+    if recent:
+        return {"ok": True, "request_id": recent["id"]}
+
+    request_id = new_id("privacy")
+    await db.privacy_requests.insert_one(
+        {
+            "id": request_id,
+            "email": email,
+            "email_hash": email_hash,
+            "request_type": request_type,
+            "message": (body.message or "").strip()[:1500],
+            "status": "pending_verification",
+            "created_at": now_utc(),
+            "expires_at": now_utc() + timedelta(days=180),
+        }
+    )
+    return {"ok": True, "request_id": request_id}
+
+
 @api.post("/auth/session")
 async def auth_session(body: SessionLoginRequest):
     """Exchange session_id from Emergent Auth for an app session (one-shot call)."""
@@ -2273,6 +2389,79 @@ async def auth_logout(authorization: Optional[str] = Header(default=None)):
     return {"ok": True}
 
 
+@api.delete("/auth/account")
+async def delete_account(authorization: Optional[str] = Header(default=None)):
+    """Permanently delete the authenticated account and user-owned data."""
+    user = await get_current_user(authorization)
+    user_id = user["user_id"]
+    email = str(user.get("email", "")).strip().lower()
+
+    direct_collections = [
+        "activity",
+        "ai_usage",
+        "challenges",
+        "daily_compliance",
+        "exercise_perf",
+        "favorites",
+        "meals",
+        "points_events",
+        "profiles",
+        "programs",
+        "sleep",
+        "transformations",
+        "user_exercises",
+        "weight_logs",
+        "workouts",
+    ]
+    deleted: Dict[str, int] = {}
+    for collection_name in direct_collections:
+        result = await db[collection_name].delete_many({"user_id": user_id})
+        deleted[collection_name] = result.deleted_count
+
+    owned_affiliates = await db.affiliates.find(
+        {"owner_user_id": user_id}, {"_id": 0, "code": 1}
+    ).to_list(200)
+    owned_codes = [item["code"] for item in owned_affiliates if item.get("code")]
+    affiliate_filter: Dict[str, Any] = {
+        "$or": [{"user_id": user_id}, {"owner_user_id": user_id}]
+    }
+    if owned_codes:
+        affiliate_filter["$or"].append({"code": {"$in": owned_codes}})
+    deleted["affiliate_events"] = (
+        await db.affiliate_events.delete_many(affiliate_filter)
+    ).deleted_count
+    deleted["affiliates"] = (
+        await db.affiliates.delete_many({"owner_user_id": user_id})
+    ).deleted_count
+    await db.users.update_many(
+        {"referral.owner_user_id": user_id}, {"$unset": {"referral": ""}}
+    )
+
+    deleted["user_sessions"] = (
+        await db.user_sessions.delete_many({"user_id": user_id})
+    ).deleted_count
+    deleted["users"] = (
+        await db.users.delete_one({"user_id": user_id})
+    ).deleted_count
+
+    if email:
+        email_hash = hashlib.sha256(email.encode("utf-8")).hexdigest()
+        await db.privacy_requests.update_many(
+            {"email_hash": email_hash},
+            {
+                "$set": {
+                    "status": "fulfilled_in_app",
+                    "fulfilled_at": now_utc(),
+                    "email": None,
+                    "message": "",
+                    "expires_at": now_utc() + timedelta(days=180),
+                }
+            },
+        )
+
+    return {"ok": True, "deleted_records": sum(deleted.values())}
+
+
 # --- PROFILE ---
 @api.get("/profile")
 async def get_profile(authorization: Optional[str] = Header(default=None)):
@@ -2290,12 +2479,16 @@ async def get_profile(authorization: Optional[str] = Header(default=None)):
 async def upsert_profile(body: ProfileIn, authorization: Optional[str] = Header(default=None)):
     user = await get_current_user(authorization)
     targets = compute_targets(body)
+    profile_values = body.model_dump(exclude_none=True)
     doc = {
         "user_id": user["user_id"],
-        **body.dict(),
+        **profile_values,
         **targets,
         "updated_at": now_utc(),
     }
+    if body.health_data_consent:
+        doc["health_data_consent_at"] = now_utc()
+        doc["legal_version"] = body.legal_version or "2026-08-10"
     await db.profiles.update_one({"user_id": user["user_id"]}, {"$set": doc}, upsert=True)
     await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"onboarded": True}})
     response = strip_id(doc)
@@ -4477,28 +4670,12 @@ async def uncomplete_workout(workout_id: str, authorization: Optional[str] = Hea
 
 # --- TRANSFORMATIONS ---
 @api.post("/transformations")
-async def add_transformation(body: TransformationIn, authorization: Optional[str] = Header(default=None)):
-    user = await get_current_user(authorization)
-    # PHASE 4: no AI analysis on body photos. Private gallery only.
-    # PHASE 5: user can choose taken_at date.
-    chosen_date = today_str()
-    if body.taken_at:
-        try:
-            datetime.strptime(body.taken_at, "%Y-%m-%d")
-            chosen_date = body.taken_at
-        except ValueError:
-            pass
-    doc = {
-        "id": new_id("transfo"),
-        "user_id": user["user_id"],
-        "date": chosen_date,
-        "created_at": now_utc(),
-        "image_base64": body.image_base64[:300000],
-        "weight_kg": body.weight_kg,
-        "view": (body.view or "front").lower(),
-    }
-    await db.transformations.insert_one(doc)
-    return strip_id(doc)
+async def add_transformation(authorization: Optional[str] = Header(default=None)):
+    await get_current_user(authorization)
+    raise HTTPException(
+        status_code=410,
+        detail="La galerie de photos corporelles n'est plus proposée. Utilise le suivi du poids.",
+    )
 
 
 @api.get("/transformations")
@@ -4740,6 +4917,10 @@ async def startup_event():
     await db.user_exercises.create_index([("user_id", 1), ("created_at", -1)])
     await db.ai_usage.create_index([("user_id", 1), ("date", 1)])
     await db.ai_usage.create_index([("user_id", 1), ("month", 1)])
+    await db.ai_usage.create_index("created_at", expireAfterSeconds=365 * 24 * 60 * 60)
+    await db.privacy_requests.create_index("id", unique=True)
+    await db.privacy_requests.create_index([("email_hash", 1), ("created_at", -1)])
+    await db.privacy_requests.create_index("expires_at", expireAfterSeconds=0)
     await db.affiliates.create_index("code", unique=True)
     await db.affiliates.create_index("owner_user_id")
     await db.affiliate_events.create_index([("code", 1), ("created_at", -1)])
@@ -4756,8 +4937,8 @@ app.include_router(api)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=["*"],
+    allow_credentials=False,
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

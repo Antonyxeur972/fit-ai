@@ -38,6 +38,12 @@ export async function ensureNotifPermission(): Promise<boolean> {
   return !!req.granted;
 }
 
+async function hasNotifPermission(): Promise<boolean> {
+  if (Platform.OS === "web") return false;
+  const current = await Notifications.getPermissionsAsync();
+  return !!current.granted;
+}
+
 export async function cancelAll(): Promise<void> {
   if (Platform.OS === "web") return;
   try {
@@ -178,7 +184,7 @@ export type AutoReminderOptions = {
 
 export async function scheduleAutomaticFitAiReminders(options: AutoReminderOptions = {}): Promise<number> {
   if (Platform.OS === "web") return 0;
-  const ok = await ensureNotifPermission();
+  const ok = await hasNotifPermission();
   if (!ok) return 0;
   await cancelStoredNotifications(AUTO_NOTIFICATION_IDS_KEY);
 
@@ -273,7 +279,7 @@ export async function scheduleAutomaticFitAiReminders(options: AutoReminderOptio
 
 export async function schedulePreSubscriptionNudges(offerExpiresAt?: string, offerRevealedAt?: string): Promise<number> {
   if (Platform.OS === "web") return 0;
-  const ok = await ensureNotifPermission();
+  const ok = await hasNotifPermission();
   if (!ok) return 0;
 
   await cancelPreSubscriptionNudges();

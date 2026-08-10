@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Image, View, Text, StyleSheet } from "react-native";
+import { Animated, Easing, Image, Linking, TouchableOpacity, View, Text, StyleSheet } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/src/auth";
+import { BACKEND_URL } from "@/src/api";
 import { Button } from "@/src/components/UI";
 import { hasSignedCommitment } from "@/src/lib/commitment";
 import { getSubscriptionState } from "@/src/lib/subscription";
@@ -104,9 +105,16 @@ export default function Login() {
           testID="login-google-button"
           icon={<Ionicons name="logo-google" size={18} color="#fff" />}
         />
-        <Text style={styles.terms}>
-          {"En continuant, tu acceptes nos conditions d'utilisation. Tes données restent privées."}
-        </Text>
+        <Text style={styles.terms}>En continuant, tu acceptes nos conditions et notre politique de confidentialité.</Text>
+        <View style={styles.legalLinks}>
+          <TouchableOpacity onPress={() => Linking.openURL(`${BACKEND_URL}/terms`)} accessibilityRole="link">
+            <Text style={styles.legalLink}>{"Conditions d'utilisation"}</Text>
+          </TouchableOpacity>
+          <Text style={styles.legalDot}>·</Text>
+          <TouchableOpacity onPress={() => Linking.openURL(`${BACKEND_URL}/privacy`)} accessibilityRole="link">
+            <Text style={styles.legalLink}>Confidentialité</Text>
+          </TouchableOpacity>
+        </View>
       </View>
       </SafeAreaView>
     </View>
@@ -176,4 +184,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   terms: { ...typography.small, color: colors.textMuted, textAlign: "center", marginTop: spacing.md, paddingHorizontal: spacing.md },
+  legalLinks: { flexDirection: "row", justifyContent: "center", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 6 },
+  legalLink: { color: colors.primaryLight, fontSize: 12, lineHeight: 18, fontWeight: "700", textDecorationLine: "underline" },
+  legalDot: { color: "rgba(255,255,255,0.45)" },
 });

@@ -731,6 +731,20 @@ export default function Training() {
   }, [calMonth, loadCalendar]);
 
   const syncPlanningToPhoneAgenda = useCallback(async () => {
+    if (Platform.OS !== "web") {
+      const accepted = await new Promise<boolean>((resolve) => {
+        Alert.alert(
+          "Synchroniser l'agenda",
+          "FIT AI va consulter la liste des calendriers uniquement pour trouver ou créer un calendrier FIT AI, puis y ajouter les séances choisies. Le contenu de tes autres événements n'est ni envoyé ni enregistré par FIT AI.",
+          [
+            { text: "Annuler", style: "cancel", onPress: () => resolve(false) },
+            { text: "Autoriser", onPress: () => resolve(true) },
+          ],
+          { cancelable: true, onDismiss: () => resolve(false) },
+        );
+      });
+      if (!accepted) return;
+    }
     setSyncingAgenda(true);
     try {
       const planned = plannedWorkoutsFromProgram(program);

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
-  Modal, RefreshControl, TextInput,
+  Alert, Modal, RefreshControl, TextInput,
 } from "react-native";
 import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { MotivationalScript } from "@/src/components/MotivationalScript";
@@ -511,12 +511,24 @@ export default function Meals() {
 
   const pickImage = async (fromCamera: boolean) => {
     setError(null);
-    const permission = fromCamera
-      ? await ImagePicker.requestCameraPermissionsAsync()
-      : await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      setError("Permission refusée. Autorise l'accès dans les réglages.");
-      return;
+    const accepted = await new Promise<boolean>((resolve) => {
+      Alert.alert(
+        "Analyse IA du repas",
+        "La photo choisie sera envoyée de manière sécurisée à FIT AI et à notre prestataire d'IA Anthropic pour estimer le repas. Elle restera dans ton journal jusqu'à sa suppression.",
+        [
+          { text: "Annuler", style: "cancel", onPress: () => resolve(false) },
+          { text: "Choisir la photo", onPress: () => resolve(true) },
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) },
+      );
+    });
+    if (!accepted) return;
+    if (fromCamera) {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        setError("Permission refusée. Autorise la caméra dans les réglages.");
+        return;
+      }
     }
     const result = fromCamera
       ? await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.6, base64: true })

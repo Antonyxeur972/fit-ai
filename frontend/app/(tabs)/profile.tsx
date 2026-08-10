@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, TextInput, Modal, Switch, Platform } from "react-native";
+import { Alert, View, Text, StyleSheet, ScrollView, Image, Linking, TouchableOpacity, TextInput, Modal, Switch, Platform } from "react-native";
 import { ScreenBackground } from "@/src/components/ScreenBackground";
 import { MotivationalScript } from "@/src/components/MotivationalScript";
 import { useFocusEffect, useRouter } from "expo-router";
@@ -7,13 +7,13 @@ import { Ionicons } from "@expo/vector-icons";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useAuth } from "@/src/auth";
-import { api } from "@/src/api";
+import { api, BACKEND_URL } from "@/src/api";
 import { Card, SectionTitle, Stat, Button } from "@/src/components/UI";
 import { MascotAnimal, MASCOT_LABELS } from "@/src/components/Mascot";
 import { MascotPortrait } from "@/src/components/MascotPortrait";
 import { MascotPicker } from "@/src/components/MascotPicker";
 import { StrengthSymbol } from "@/src/components/StrengthSymbol";
-import { scheduleReminders, Reminder, ReminderKind } from "@/src/lib/notifications";
+import { cancelAll, scheduleReminders, Reminder, ReminderKind } from "@/src/lib/notifications";
 import { colors, spacing, typography, radius } from "@/src/theme";
 
 type Profile = {
@@ -39,6 +39,7 @@ export default function ProfileTab() {
   const { user, signOut, refreshUser } = useAuth();
   const [profile, setProfile] = useState<Profile>({});
   const [composition, setComposition] = useState<BodyComp | null>(null);
+  const [deletingAccount, setDeletingAccount] = useState(false);
 
   const [nameModal, setNameModal] = useState(false);
   const [nameInput, setNameInput] = useState("");
@@ -231,6 +232,58 @@ export default function ProfileTab() {
     }
   };
 
+  const openLegalPage = (path: string) => {
+    Linking.openURL(`${BACKEND_URL}${path}`).catch(() => {
+      Alert.alert("Lien indisponible", "Impossible d'ouvrir cette page pour le moment.");
+    });
+  };
+
+  const openSubscriptionSettings = () => {
+    const url = Platform.OS === "ios"
+      ? "https://apps.apple.com/account/subscriptions"
+      : "https://play.google.com/store/account/subscriptions?package=com.globalaistudio.fitai";
+    Linking.openURL(url).catch(() => {
+      Alert.alert("Abonnement", "Ouvre les réglages d'abonnement de ta boutique pour gérer ou résilier FIT AI.");
+    });
+  };
+
+  const performAccountDeletion = async () => {
+    if (deletingAccount) return;
+    setDeletingAccount(true);
+    try {
+      await api("/auth/account", { method: "DELETE" });
+      await cancelAll();
+      await signOut();
+      router.replace("/login");
+    } catch (error: any) {
+      Alert.alert("Suppression impossible", error?.message || "Réessaie dans quelques instants.");
+    } finally {
+      setDeletingAccount(false);
+    }
+  };
+
+  const confirmAccountDeletion = () => {
+    Alert.alert(
+      "Supprimer ton compte ?",
+      "Ton profil, tes photos de repas, repas, séances, performances, pas et programmes seront supprimés définitivement. Ton abonnement doit être résilié séparément dans la boutique.",
+      [
+        { text: "Annuler", style: "cancel" },
+        {
+          text: "Continuer",
+          style: "destructive",
+          onPress: () => Alert.alert(
+            "Dernière confirmation",
+            "Cette action est irréversible.",
+            [
+              { text: "Garder mon compte", style: "cancel" },
+              { text: "Supprimer définitivement", style: "destructive", onPress: performAccountDeletion },
+            ],
+          ),
+        },
+      ],
+    );
+  };
+
   return (
     <ScreenBackground bg="profile">
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
@@ -418,6 +471,29 @@ export default function ProfileTab() {
           testID="edit-profile-button"
           icon={<Ionicons name="create-outline" size={18} color={colors.primary} />}
         />
+
+        <Card testID="profile-privacy-card">
+          <SectionTitle title="Confidentialité et compte" />
+          <View style={styles.healthNotice}>
+            <Ionicons name="medical-outline" size={18} color={colors.primary} />
+            <Text style={styles.healthNoticeText}>
+              Les conseils FIT AI sont destinés au fitness et au bien-être. Ils ne remplacent pas un avis médical.
+            </Text>
+          </View>
+          <View style={styles.legalRows}>
+            <LegalRow icon="card-outline" label="Gérer mon abonnement" onPress={openSubscriptionSettings} />
+            <LegalRow icon="shield-checkmark-outline" label="Politique de confidentialité" onPress={() => openLegalPage("/privacy")} />
+            <LegalRow icon="document-text-outline" label="Conditions d'utilisation" onPress={() => openLegalPage("/terms")} />
+            <LegalRow icon="help-circle-outline" label="Exercer mes droits" onPress={() => openLegalPage("/privacy-request")} />
+            <LegalRow
+              icon="trash-outline"
+              label={deletingAccount ? "Suppression en cours…" : "Supprimer mon compte et mes données"}
+              onPress={confirmAccountDeletion}
+              danger
+              disabled={deletingAccount}
+            />
+          </View>
+        </Card>
 
         <TouchableOpacity onPress={signOut} style={styles.logout} testID="logout-button">
           <Ionicons name="log-out-outline" size={18} color={colors.alert} />
@@ -634,6 +710,35 @@ export default function ProfileTab() {
   );
 }
 
+function LegalRow({
+  icon,
+  label,
+  onPress,
+  danger = false,
+  disabled = false,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  onPress: () => void;
+  danger?: boolean;
+  disabled?: boolean;
+}) {
+  const color = danger ? colors.alert : colors.textMain;
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      disabled={disabled}
+      activeOpacity={0.76}
+      style={[styles.legalRow, disabled && styles.legalRowDisabled]}
+      accessibilityRole="button"
+    >
+      <Ionicons name={icon} size={19} color={color} />
+      <Text style={[styles.legalRowLabel, danger && styles.legalRowDanger]}>{label}</Text>
+      <Ionicons name="chevron-forward" size={17} color={danger ? colors.alert : colors.textMuted} />
+    </TouchableOpacity>
+  );
+}
+
 function ForceLiftRow({
   label, wKey, rKey, setW, setR, testID,
 }: { label: string; wKey: string; rKey: string; setW: (v: string) => void; setR: (v: string) => void; testID: string }) {
@@ -686,6 +791,13 @@ const styles = StyleSheet.create({
   avatar: { width: 72, height: 72, borderRadius: radius.full, borderWidth: 2, borderColor: "rgba(255,255,255,0.72)" },
   profileScript: { fontSize: 20, lineHeight: 24, marginTop: 5 },
   logout: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: spacing.md, marginTop: spacing.md },
+  healthNotice: { flexDirection: "row", alignItems: "flex-start", gap: spacing.sm, padding: spacing.md, marginTop: spacing.sm, borderRadius: radius.md, backgroundColor: colors.primaryPale },
+  healthNoticeText: { ...typography.small, color: colors.textSecondary, flex: 1, lineHeight: 19 },
+  legalRows: { marginTop: spacing.sm },
+  legalRow: { minHeight: 54, flexDirection: "row", alignItems: "center", gap: spacing.sm, borderBottomWidth: 1, borderBottomColor: colors.border },
+  legalRowDisabled: { opacity: 0.55 },
+  legalRowLabel: { ...typography.body, color: colors.textMain, flex: 1, fontWeight: "600" },
+  legalRowDanger: { color: colors.alert },
   tierBadge: { paddingHorizontal: 14, paddingVertical: 8, backgroundColor: colors.primary, borderRadius: radius.full },
   tierText: { color: "#fff", fontWeight: "800", fontSize: 13, letterSpacing: 0.5 },
   scoreRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 },

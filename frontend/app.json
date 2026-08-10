@@ -14,8 +14,8 @@
       "supportsTablet": true,
       "usesAppleSignIn": true,
       "infoPlist": {
-        "NSCameraUsageDescription": "Prendre des photos de tes repas et progressions",
-        "NSPhotoLibraryUsageDescription": "Sélectionner photos de repas et transformations",
+        "NSCameraUsageDescription": "Prendre une photo de repas ou personnaliser une carte de partage",
+        "NSPhotoLibraryUsageDescription": "Sélectionner une photo de repas ou un fond de partage",
         "NSPhotoLibraryAddUsageDescription": "Enregistrer ta story de performance dans tes photos",
         "NSMotionUsageDescription": "Synchroniser tes pas depuis le podomètre du téléphone"
       }
@@ -23,6 +23,7 @@
     "android": {
       "package": "com.globalaistudio.fitai",
       "versionCode": 1,
+      "allowBackup": false,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/fitai-app-icon.png",
         "backgroundColor": "#04170D"
@@ -30,13 +31,17 @@
       "edgeToEdgeEnabled": true,
       "permissions": [
         "android.permission.CAMERA",
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.ACTIVITY_RECOGNITION",
         "android.permission.POST_NOTIFICATIONS"
       ],
       "blockedPermissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_MEDIA_VIDEO",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
       ]
     },
     "web": {
@@ -60,7 +65,8 @@
         "expo-image-picker",
         {
           "photosPermission": "L'app accède à tes photos pour analyser tes repas.",
-          "cameraPermission": "L'app utilise la caméra pour photographier tes repas."
+          "cameraPermission": "L'app utilise la caméra pour photographier tes repas.",
+          "microphonePermission": false
         }
       ],
       [

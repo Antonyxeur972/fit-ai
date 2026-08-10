@@ -45,11 +45,6 @@ export function ShareCardModal({
 
   const pickBackground = async () => {
     try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert("Galerie", "Autorise l'accès à la galerie pour personnaliser le fond.");
-        return;
-      }
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         quality: 0.6,
@@ -118,7 +113,7 @@ export function ShareCardModal({
         Alert.alert("Image générée", "L'aperçu est ouvert dans un nouvel onglet.");
         return;
       }
-      const perm = await MediaLibrary.requestPermissionsAsync();
+      const perm = await MediaLibrary.requestPermissionsAsync(true, ["photo"]);
       if (!perm.granted) {
         Alert.alert("Photos", "Autorise l'accès à tes photos pour enregistrer la story.");
         return;

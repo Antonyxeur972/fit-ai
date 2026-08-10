@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { Animated, Easing, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
+import { Alert, Animated, Easing, Image, Linking, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 import type { StyleProp, ViewStyle } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -8,7 +8,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useAuth } from "@/src/auth";
-import { api } from "@/src/api";
+import { api, BACKEND_URL } from "@/src/api";
 import { MascotAnimal } from "@/src/components/Mascot";
 import { MascotPortrait } from "@/src/components/MascotPortrait";
 import { getOrStartPaywallOffer } from "@/src/lib/subscription";
@@ -54,6 +54,7 @@ export default function Onboarding() {
   const [activity] = useState<ActivityLevel>("moderate");
   const [mascot, setMascot] = useState<MascotAnimal>((user?.mascot?.animal as MascotAnimal | undefined) || "lion");
   const [submitting, setSubmitting] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
   const thinkingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isLastStep = step === STEPS_COUNT - 1;
@@ -69,6 +70,7 @@ export default function Onboarding() {
   };
 
   const next = () => {
+    if (step === 1 && !validateMeasures()) return;
     const target = Math.min(STEPS_COUNT - 1, step + 1) as Step;
     if (target === step) return;
     setThinking(true);
@@ -80,7 +82,46 @@ export default function Onboarding() {
   };
   const prev = () => setStep((current) => Math.max(0, current - 1) as Step);
 
+  const validateMeasures = () => {
+    const parsedAge = Number(age);
+    const parsedWeight = Number(weight);
+    const parsedHeight = Number(height);
+    if (!Number.isFinite(parsedAge) || parsedAge < 18 || parsedAge > 100) {
+      setFormError("FIT AI est réservée aux personnes de 18 ans ou plus.");
+      return false;
+    }
+    if (!Number.isFinite(parsedWeight) || parsedWeight < 30 || parsedWeight > 350) {
+      setFormError("Indique un poids compris entre 30 et 350 kg.");
+      return false;
+    }
+    if (!Number.isFinite(parsedHeight) || parsedHeight < 120 || parsedHeight > 230) {
+      setFormError("Indique une taille comprise entre 120 et 230 cm.");
+      return false;
+    }
+    setFormError(null);
+    return true;
+  };
+
+  const askForWellnessPermissions = async (): Promise<boolean> => {
+    if (Platform.OS === "web") return false;
+    return new Promise((resolve) => {
+      Alert.alert(
+        "Rappels et pas du téléphone",
+        "FIT AI souhaite envoyer des rappels locaux de séances, motivation et offres, puis lire le nombre de pas depuis le capteur d'activité. Aucune localisation n'est collectée. Tu peux refuser et continuer.",
+        [
+          { text: "Plus tard", style: "cancel", onPress: () => resolve(false) },
+          { text: "Continuer", onPress: () => resolve(true) },
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) },
+      );
+    });
+  };
+
   const submit = async () => {
+    if (!validateMeasures()) {
+      setStep(1);
+      return;
+    }
     setSubmitting(true);
     try {
       await api("/profile", {
@@ -92,6 +133,8 @@ export default function Onboarding() {
           gender,
           goal,
           activity_level: activity,
+          health_data_consent: true,
+          legal_version: "2026-08-10",
         },
       });
 
@@ -112,12 +155,17 @@ export default function Onboarding() {
 
       await refreshUser();
 
-      try {
-        await ensureNotifPermission();
-        await prepareMotionAccess();
-        const offer = await getOrStartPaywallOffer();
-        await schedulePreSubscriptionNudges(offer.expiresAt, offer.revealedAt);
-      } catch {}
+      const allowWellnessPermissions = await askForWellnessPermissions();
+      if (allowWellnessPermissions) {
+        try {
+          const notificationsAllowed = await ensureNotifPermission();
+          await prepareMotionAccess();
+          if (notificationsAllowed) {
+            const offer = await getOrStartPaywallOffer();
+            await schedulePreSubscriptionNudges(offer.expiresAt, offer.revealedAt);
+          }
+        } catch {}
+      }
 
       router.replace("/commitment");
     } catch (error) {
@@ -190,7 +238,7 @@ export default function Onboarding() {
                 Tes <Text style={styles.accentText}>mesures</Text>
               </Text>
               <Text style={styles.screenSubtitle}>Sois précis. Les calculs en dépendent.</Text>
-              <View style={styles.measureStack}>
+                <View style={styles.measureStack}>
                 <NumericCard
                   icon="calendar-outline"
                   label="Âge"
@@ -215,7 +263,8 @@ export default function Onboarding() {
                   unit="cm"
                   testID="onboarding-height"
                 />
-              </View>
+                </View>
+                {formError ? <Text style={styles.formError}>{formError}</Text> : null}
             </View>
           )}
 
@@ -308,6 +357,13 @@ export default function Onboarding() {
                     );
                   })}
                 </ScrollView>
+                <Text style={styles.legalConsent}>
+                  {"En terminant, j'accepte les "}
+                  <Text style={styles.legalLink} onPress={() => Linking.openURL(`${BACKEND_URL}/terms`)}>CGU</Text>
+                  {" "}et la{" "}
+                  <Text style={styles.legalLink} onPress={() => Linking.openURL(`${BACKEND_URL}/privacy`)}>politique de confidentialité</Text>
+                  {", et je consens à l'analyse de mes données de forme pour personnaliser mon programme."}
+                </Text>
               </GlassPanel>
             </View>
           )}
@@ -331,7 +387,7 @@ export default function Onboarding() {
             style={[styles.nextButton, step === 0 && styles.nextButtonFull, (submitting || thinking) && styles.buttonDisabled]}
             testID="onboarding-next"
           >
-            <Text style={styles.nextButtonText}>{step === 0 ? "Commencer" : isLastStep ? "Terminer" : "Continuer"}</Text>
+            <Text style={[styles.nextButtonText, isLastStep && styles.nextButtonTextCompact]}>{step === 0 ? "Commencer" : isLastStep ? "Accepter et terminer" : "Continuer"}</Text>
             <Ionicons name="arrow-forward" size={24} color="#142407" />
           </TouchableOpacity>
         </View>
@@ -783,6 +839,12 @@ const styles = StyleSheet.create({
     gap: spacing.xl,
     marginTop: spacing.xl,
   },
+  formError: {
+    color: "#FFB0AA",
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: "700",
+  },
   numericCard: {
     padding: spacing.lg,
     gap: spacing.md,
@@ -964,6 +1026,16 @@ const styles = StyleSheet.create({
     padding: spacing.xl,
     gap: spacing.lg,
   },
+  legalConsent: {
+    color: "rgba(255,255,255,0.72)",
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  legalLink: {
+    color: colors.primaryLight,
+    fontWeight: "800",
+    textDecorationLine: "underline",
+  },
   mascotRow: {
     gap: spacing.md,
     paddingRight: spacing.md,
@@ -1054,6 +1126,9 @@ const styles = StyleSheet.create({
     color: "#142407",
     fontSize: 21,
     fontWeight: "900",
+  },
+  nextButtonTextCompact: {
+    fontSize: 17,
   },
   buttonDisabled: {
     opacity: 0.64,

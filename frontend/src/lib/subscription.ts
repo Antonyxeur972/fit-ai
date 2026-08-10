@@ -1,7 +1,6 @@
 import { Platform } from "react-native";
 import { storage } from "@/src/utils/storage";
 import { api } from "@/src/api";
-import { markCommitmentSigned } from "@/src/lib/commitment";
 
 export type SubscriptionPlan = "monthly" | "annual";
 
@@ -30,7 +29,6 @@ export type PurchaseResult = {
 
 const SUBSCRIPTION_KEY = "fitai_subscription_state";
 const OFFER_KEY = "fitai_paywall_offer_started_at";
-const FREE_PROMO_CODE = "fit.ai.972";
 const DAY_MS = 24 * 60 * 60 * 1000;
 export const PAYWALL_OFFER_REVEAL_DELAY_MS = 3 * 60 * 1000;
 
@@ -61,62 +59,74 @@ export const PLAN_DETAILS: Record<SubscriptionPlan, {
     priceLabel: "12,99 €",
     period: "/ mois",
     trialLabel: "3 jours d'essai gratuit",
-    monthlyLabel: "sans engagement",
+    monthlyLabel: "facturation mensuelle",
   },
   annual: {
     label: "Annuel",
     priceLabel: "49,99 €",
     period: "/ an",
     trialLabel: "7 jours d'essai gratuit",
-    monthlyLabel: "offre annuelle centrale",
+    monthlyLabel: "soit 4,17 € / mois",
     badge: "Meilleur choix",
   },
 };
 
 export async function getSubscriptionState(): Promise<SubscriptionState> {
   const raw = await storage.secureGet(SUBSCRIPTION_KEY, "");
-  if (!raw) return { active: false };
+  let localState: SubscriptionState = { active: false };
   try {
-    const parsed = JSON.parse(raw) as SubscriptionState;
-    if (parsed.expiresAt && new Date(parsed.expiresAt).getTime() < Date.now()) {
-      return { active: false, plan: parsed.plan || null, source: parsed.source || null };
-    }
-    return { active: !!parsed.active, plan: parsed.plan || null, source: parsed.source || null, expiresAt: parsed.expiresAt || null };
-  } catch {
-    return { active: false };
+    if (raw) localState = JSON.parse(raw) as SubscriptionState;
+  } catch {}
+
+  if (localState.source === "promo") {
+    localState = { active: false, plan: localState.plan || null, source: null, expiresAt: null };
+    await saveSubscriptionState(localState);
   }
+
+  const store = platformStore();
+  if (store && revenueCatApiKey()) {
+    try {
+      const Purchases = await configuredPurchases();
+      const customerInfo = await Purchases?.getCustomerInfo?.();
+      const active = hasActiveEntitlement(customerInfo);
+      const synced: SubscriptionState = {
+        active,
+        plan: localState.plan || null,
+        source: store,
+        expiresAt: active ? customerInfo?.latestExpirationDate || localState.expiresAt || null : null,
+      };
+      await saveSubscriptionState(synced);
+      return synced;
+    } catch {
+      // Keep the last verified local state when the store is temporarily unavailable.
+    }
+  }
+
+  if (localState.expiresAt && new Date(localState.expiresAt).getTime() < Date.now()) {
+    return { active: false, plan: localState.plan || null, source: localState.source || null };
+  }
+  return {
+    active: !!localState.active,
+    plan: localState.plan || null,
+    source: localState.source || null,
+    expiresAt: localState.expiresAt || null,
+  };
 }
 
 async function saveSubscriptionState(state: SubscriptionState): Promise<void> {
   await storage.secureSet(SUBSCRIPTION_KEY, JSON.stringify(state));
 }
 
-export function normalizePromoCode(code: string): string {
-  return code.trim().toLowerCase();
-}
-
 export async function applyPromoCode(code: string): Promise<PurchaseResult> {
-  if (normalizePromoCode(code) !== FREE_PROMO_CODE) {
-    try {
-      await api("/affiliates/apply", {
-        method: "POST",
-        body: { code },
-      });
-      return { ok: false, message: "Code coach enregistré. La commission sera suivie au moment de l'abonnement." };
-    } catch {
-      return { ok: false, message: "Code promotionnel invalide." };
-    }
+  try {
+    await api("/affiliates/apply", {
+      method: "POST",
+      body: { code },
+    });
+    return { ok: false, message: "Code coach enregistré. La commission sera suivie au moment de l'abonnement." };
+  } catch {
+    return { ok: false, message: "Code coach invalide." };
   }
-
-  await saveSubscriptionState({
-    active: true,
-    plan: "annual",
-    source: "promo",
-    expiresAt: null,
-  });
-  await markCommitmentSigned();
-
-  return { ok: true, message: "Code validé. Accès FIT AI débloqué gratuitement." };
 }
 
 export async function getOrStartPaywallOffer(): Promise<PaywallOffer> {
@@ -159,6 +169,28 @@ async function loadPurchasesModule(): Promise<any | null> {
   }
 }
 
+let configuredApiKey: string | null = null;
+let configuredPurchasesModule: any | null = null;
+
+async function configuredPurchases(): Promise<any | null> {
+  try {
+    const apiKey = revenueCatApiKey();
+    if (!apiKey) return null;
+    if (configuredPurchasesModule && configuredApiKey === apiKey) return configuredPurchasesModule;
+    const PurchasesModule = await loadPurchasesModule();
+    const Purchases = PurchasesModule?.default || PurchasesModule;
+    if (!Purchases?.configure) return null;
+    const alreadyConfigured = typeof Purchases.isConfigured === "function" && Purchases.isConfigured();
+    if (!alreadyConfigured) Purchases.configure({ apiKey });
+    configuredApiKey = apiKey;
+    configuredPurchasesModule = Purchases;
+    return Purchases;
+  } catch (e) {
+    console.warn("RevenueCat configuration unavailable", e);
+    return null;
+  }
+}
+
 function revenueCatApiKey(): string | undefined {
   if (Platform.OS === "ios") return process.env.EXPO_PUBLIC_REVENUECAT_IOS_API_KEY;
   if (Platform.OS === "android") return process.env.EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY;
@@ -186,13 +218,12 @@ export async function purchaseSubscription(plan: SubscriptionPlan): Promise<Purc
   if (!apiKey) {
     return {
       ok: false,
-      message: `Pont store prêt. Ajoute la clé RevenueCat ${store.toUpperCase()} et le produit ${productId}.`,
+      message: "Le service d'abonnement est momentanément indisponible. Réessaie plus tard.",
       productId,
     };
   }
 
-  const PurchasesModule = await loadPurchasesModule();
-  const Purchases = PurchasesModule?.default || PurchasesModule;
+  const Purchases = await configuredPurchases();
   if (!Purchases?.configure) {
     return {
       ok: false,
@@ -202,7 +233,6 @@ export async function purchaseSubscription(plan: SubscriptionPlan): Promise<Purc
   }
 
   try {
-    Purchases.configure({ apiKey });
     const offerings = await Purchases.getOfferings();
     const packages = offerings?.current?.availablePackages || [];
     const selectedPackage = packages.find((p: any) => p?.product?.identifier === productId)
@@ -238,17 +268,15 @@ export async function restoreSubscription(): Promise<PurchaseResult> {
 
   const apiKey = revenueCatApiKey();
   if (!apiKey) {
-    return { ok: false, message: `Ajoute la clé RevenueCat ${store.toUpperCase()} pour restaurer les achats.` };
+    return { ok: false, message: "La restauration est momentanément indisponible. Réessaie plus tard." };
   }
 
-  const PurchasesModule = await loadPurchasesModule();
-  const Purchases = PurchasesModule?.default || PurchasesModule;
+  const Purchases = await configuredPurchases();
   if (!Purchases?.configure) {
     return { ok: false, message: "Le module d'achat natif n'est pas disponible dans ce build." };
   }
 
   try {
-    Purchases.configure({ apiKey });
     const customerInfo = await Purchases.restorePurchases();
     if (hasActiveEntitlement(customerInfo)) {
       await saveSubscriptionState({
