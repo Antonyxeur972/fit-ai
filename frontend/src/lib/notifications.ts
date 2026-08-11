@@ -330,8 +330,8 @@ export async function schedulePreSubscriptionNudges(offerExpiresAt?: string, off
       try {
         const id = await Notifications.scheduleNotificationAsync({
           content: {
-            title: "Offre FIT AI débloquée",
-            body: "Ton abonnement annuel passe à 39,99 € pendant 24h, soit 3,33 € / mois.",
+            title: "Ton plan FIT AI t'attend",
+            body: "Ouvre FIT AI pour consulter l'offre actuellement disponible dans ta boutique.",
             data: { kind: "pre_sub_promo" },
           },
           trigger: {
