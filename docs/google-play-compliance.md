@@ -31,13 +31,14 @@ FIT AI n'est pas un dispositif médical, ne pose pas de diagnostic et ne fournit
 
 ### Accès à l'application
 
-L'app est protégée par une connexion et un paywall. Fournir à l'équipe de vérification Google :
+L'app est protégée par une connexion et un paywall. Un accès réservé aux examinateurs est disponible depuis « Accès examen Google Play » sur l'écran de connexion :
 
-- un compte de test fonctionnel ou une procédure de connexion ;
-- un moyen d'accès Premium réservé aux examinateurs ;
-- les étapes exactes pour atteindre chaque écran principal.
+- identifiant stable : `fitai-google-review` ;
+- mot de passe réutilisable : enregistré uniquement dans la déclaration privée Play Console ;
+- accès Premium sans achat, sans essai et sans validation en deux étapes ;
+- profil de démonstration adulte préconfiguré.
 
-Ne jamais publier le code de test dans la fiche Store ou dans ce dépôt.
+Le dépôt contient seulement le condensat SHA-256 du mot de passe. Pour faire tourner les identifiants sans modifier le code, définir `FITAI_PLAY_REVIEW_USERNAME` et `FITAI_PLAY_REVIEW_PASSWORD_HASH` côté serveur, puis mettre à jour la déclaration Play Console.
 
 ### Abonnements
 
@@ -83,13 +84,15 @@ Les permissions générales de lecture de galerie, vidéo, audio, stockage exter
 
 ## Points à finaliser avant envoi en examen
 
-- [ ] Confirmer le nom juridique réel de l'éditeur et le configurer avec `FITAI_LEGAL_PUBLISHER` sur le backend.
+- [x] Éditeur déclaré : `Global AI Studio incorporation` (valeur par défaut de `FITAI_LEGAL_PUBLISHER`).
 - [ ] Organiser le traitement des demandes enregistrées dans `privacy_requests` sous 30 jours.
-- [ ] Enregistrer `com.globalaistudio.fitai` dans la validation développeur Android.
+- [x] Package `com.globalaistudio.fitai` enregistré dans la validation développeur Android.
 - [ ] Créer et activer les deux abonnements dans Play Console.
 - [ ] Faire correspondre exactement prix, périodes et essais entre Play Console, RevenueCat et le paywall.
 - [ ] Configurer `EXPO_PUBLIC_REVENUECAT_ANDROID_API_KEY` dans EAS et vérifier l'entitlement Premium.
-- [ ] Compléter Data safety, Applications de santé, Audience, Accès à l'application, Classification du contenu et Déclarations publicitaires.
+- [x] Compléter les déclarations Publicité, Gouvernement, Fonctionnalités financières et Applications de santé.
+- [ ] Finaliser Data safety après Cible et contenu.
+- [ ] Finaliser Audience 18+, Accès à l'application et Classification du contenu avec le nouveau build d'examen.
 - [ ] Importer l'AAB signé puis réaliser un test interne complet sur un appareil Android physique.
 - [ ] Si le compte Play personnel est concerné, terminer le test fermé requis avec au moins 12 testeurs inscrits pendant 14 jours consécutifs avant la demande d'accès à la production.
 - [ ] Vérifier que les captures, l'icône, la courte description et la description complète ne promettent aucun résultat médical ou garanti.
