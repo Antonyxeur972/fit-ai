@@ -8,7 +8,10 @@ import os
 from html import escape
 
 
-PUBLISHER = escape(os.environ.get("FITAI_LEGAL_PUBLISHER", "Global AI Studio").strip() or "Global AI Studio")
+PUBLISHER = escape(
+    os.environ.get("FITAI_LEGAL_PUBLISHER", "Global AI Studio incorporation").strip()
+    or "Global AI Studio incorporation"
+)
 COUNTRY = escape(os.environ.get("FITAI_LEGAL_COUNTRY", "France").strip() or "France")
 LAST_UPDATED = "10 août 2026"
 
@@ -153,7 +156,8 @@ def privacy_html() -> str:
           <p>Nous ne vendons pas tes données personnelles et nous ne les utilisons pas pour de la publicité comportementale.</p>
 
           <h2>6. Durées de conservation</h2>
-          <p>Les données du compte et de progression sont conservées tant que le compte reste actif, puis supprimées sur demande. Les jetons de session expirent après 7 jours. Les journaux d'usage IA sont limités à 12 mois. Les demandes relatives à la vie privée sont purgées au plus tard 6 mois après leur clôture. La disparition de copies de sauvegarde sécurisées peut prendre jusqu'à 90 jours.</p>
+          <p>Les données du compte et de progression sont conservées tant que le compte reste actif, puis supprimées sur demande. Les détails et photos de repas sont automatiquement supprimés après 14 jours ; seul un résumé nutritionnel quotidien sans photo peut rester associé au suivi. Les jetons de session expirent après 7 jours. Les journaux d'usage IA sont limités à 12 mois. Les demandes relatives à la vie privée sont purgées au plus tard 6 mois après leur clôture. La disparition de copies de sauvegarde sécurisées peut prendre jusqu'à 90 jours.</p>
+          <p>Après suppression du compte, Google Play, Apple et RevenueCat peuvent conserver les reçus et identifiants d'achat pseudonymes nécessaires à la gestion des abonnements, des remboursements, de la fraude et des obligations comptables selon leurs propres durées légales.</p>
 
           <h2>7. Sécurité et transferts</h2>
           <p>Les échanges utilisent HTTPS, les jetons sont stockés dans le stockage sécurisé du téléphone et l'accès aux données nécessite une session authentifiée. Certains prestataires peuvent traiter des données hors de l'Espace économique européen avec les garanties contractuelles applicables.</p>
