@@ -27,6 +27,12 @@ export type PurchaseResult = {
   productId?: string;
 };
 
+export type StorePlanPresentation = {
+  priceLabel: string;
+  monthlyLabel?: string;
+  trialLabel: string;
+};
+
 const SUBSCRIPTION_KEY = "fitai_subscription_state";
 const OFFER_KEY = "fitai_paywall_offer_started_at";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -71,7 +77,11 @@ export const PLAN_DETAILS: Record<SubscriptionPlan, {
   },
 };
 
-export async function getSubscriptionState(): Promise<SubscriptionState> {
+export async function getSubscriptionState(appUserId?: string): Promise<SubscriptionState> {
+  if (appUserId === "play_review_account") {
+    return { active: true, plan: "annual", source: "preview", expiresAt: null };
+  }
+
   const raw = await storage.secureGet(SUBSCRIPTION_KEY, "");
   let localState: SubscriptionState = { active: false };
   try {
@@ -86,7 +96,7 @@ export async function getSubscriptionState(): Promise<SubscriptionState> {
   const store = platformStore();
   if (store && revenueCatApiKey()) {
     try {
-      const Purchases = await configuredPurchases();
+      const Purchases = await configuredPurchases(appUserId);
       const customerInfo = await Purchases?.getCustomerInfo?.();
       const active = hasActiveEntitlement(customerInfo);
       const synced: SubscriptionState = {
@@ -171,17 +181,31 @@ async function loadPurchasesModule(): Promise<any | null> {
 
 let configuredApiKey: string | null = null;
 let configuredPurchasesModule: any | null = null;
+let configuredAppUserId: string | null = null;
 
-async function configuredPurchases(): Promise<any | null> {
+async function configuredPurchases(appUserId?: string): Promise<any | null> {
   try {
     const apiKey = revenueCatApiKey();
     if (!apiKey) return null;
-    if (configuredPurchasesModule && configuredApiKey === apiKey) return configuredPurchasesModule;
-    const PurchasesModule = await loadPurchasesModule();
-    const Purchases = PurchasesModule?.default || PurchasesModule;
+    let Purchases = configuredPurchasesModule;
+    if (!Purchases || configuredApiKey !== apiKey) {
+      const PurchasesModule = await loadPurchasesModule();
+      Purchases = PurchasesModule?.default || PurchasesModule;
+    }
     if (!Purchases?.configure) return null;
+
+    const normalizedUserId = appUserId?.trim() || null;
     const alreadyConfigured = typeof Purchases.isConfigured === "function" && Purchases.isConfigured();
-    if (!alreadyConfigured) Purchases.configure({ apiKey });
+    if (!alreadyConfigured) {
+      Purchases.configure({ apiKey, ...(normalizedUserId ? { appUserID: normalizedUserId } : {}) });
+      configuredAppUserId = normalizedUserId;
+    } else if (normalizedUserId && configuredAppUserId !== normalizedUserId) {
+      const currentUserId = typeof Purchases.getAppUserID === "function"
+        ? await Purchases.getAppUserID()
+        : null;
+      if (currentUserId !== normalizedUserId) await Purchases.logIn(normalizedUserId);
+      configuredAppUserId = normalizedUserId;
+    }
     configuredApiKey = apiKey;
     configuredPurchasesModule = Purchases;
     return Purchases;
@@ -202,7 +226,77 @@ function hasActiveEntitlement(customerInfo: any): boolean {
   return !!(entitlements.premium || entitlements.pro || Object.keys(entitlements).length > 0);
 }
 
-export async function purchaseSubscription(plan: SubscriptionPlan): Promise<PurchaseResult> {
+function packageForPlan(packages: any[], store: "ios" | "android", plan: SubscriptionPlan): any | null {
+  const productId = STORE_PRODUCT_IDS[store][plan];
+  return packages.find((p: any) => p?.product?.identifier === productId)
+    || packages.find((p: any) => String(p?.product?.identifier || "").startsWith(`${productId}:`))
+    || packages.find((p: any) => String(p?.packageType || "").toLowerCase().includes(plan === "annual" ? "annual" : "monthly"))
+    || null;
+}
+
+function localizedPeriod(period: any): string | null {
+  const value = Number(period?.value ?? period?.periodNumberOfUnits ?? 0);
+  const unit = String(period?.unit ?? period?.periodUnit ?? "").toUpperCase();
+  if (!value || !unit) return null;
+  const labels: Record<string, [string, string]> = {
+    DAY: ["jour", "jours"],
+    WEEK: ["semaine", "semaines"],
+    MONTH: ["mois", "mois"],
+    YEAR: ["an", "ans"],
+  };
+  const label = labels[unit];
+  if (!label) return null;
+  return `${value} ${value === 1 ? label[0] : label[1]}`;
+}
+
+export async function getStorePlanPresentations(appUserId?: string): Promise<Partial<Record<SubscriptionPlan, StorePlanPresentation>>> {
+  const store = platformStore();
+  if (!store || !revenueCatApiKey()) return {};
+
+  try {
+    const Purchases = await configuredPurchases(appUserId);
+    if (!Purchases) return {};
+    const offerings = await Purchases.getOfferings();
+    const packages = offerings?.current?.availablePackages || [];
+    const selected = (["monthly", "annual"] as SubscriptionPlan[])
+      .map((plan) => ({ plan, pkg: packageForPlan(packages, store, plan) }))
+      .filter(({ pkg }) => !!pkg);
+
+    let iosEligibility: Record<string, any> = {};
+    if (store === "ios" && selected.length && typeof Purchases.checkTrialOrIntroductoryPriceEligibility === "function") {
+      const ids = selected.map(({ pkg }) => pkg.product.identifier);
+      iosEligibility = await Purchases.checkTrialOrIntroductoryPriceEligibility(ids).catch(() => ({}));
+    }
+
+    const result: Partial<Record<SubscriptionPlan, StorePlanPresentation>> = {};
+    for (const { plan, pkg } of selected) {
+      const product = pkg.product;
+      const fullPrice = product?.defaultOption?.fullPricePhase?.price?.formatted || product?.priceString;
+      if (!fullPrice) continue;
+
+      let trialPeriod: string | null = null;
+      if (store === "android") {
+        trialPeriod = localizedPeriod(product?.defaultOption?.freePhase?.billingPeriod);
+      } else if (product?.introPrice?.price === 0 && iosEligibility[product.identifier]?.status === 2) {
+        trialPeriod = localizedPeriod(product.introPrice);
+      }
+
+      result[plan] = {
+        priceLabel: fullPrice,
+        monthlyLabel: plan === "annual" && product?.pricePerMonthString
+          ? `soit ${product.pricePerMonthString} / mois`
+          : PLAN_DETAILS[plan].monthlyLabel,
+        trialLabel: trialPeriod ? `${trialPeriod} d'essai gratuit` : "",
+      };
+    }
+    return result;
+  } catch (e) {
+    console.warn("Store catalog unavailable", e);
+    return {};
+  }
+}
+
+export async function purchaseSubscription(plan: SubscriptionPlan, appUserId?: string): Promise<PurchaseResult> {
   const store = platformStore();
   const productId = store ? STORE_PRODUCT_IDS[store][plan] : undefined;
 
@@ -223,7 +317,7 @@ export async function purchaseSubscription(plan: SubscriptionPlan): Promise<Purc
     };
   }
 
-  const Purchases = await configuredPurchases();
+  const Purchases = await configuredPurchases(appUserId);
   if (!Purchases?.configure) {
     return {
       ok: false,
@@ -235,8 +329,7 @@ export async function purchaseSubscription(plan: SubscriptionPlan): Promise<Purc
   try {
     const offerings = await Purchases.getOfferings();
     const packages = offerings?.current?.availablePackages || [];
-    const selectedPackage = packages.find((p: any) => p?.product?.identifier === productId)
-      || packages.find((p: any) => String(p?.packageType || "").toLowerCase().includes(plan === "annual" ? "annual" : "monthly"));
+    const selectedPackage = packageForPlan(packages, store, plan);
 
     if (!selectedPackage) {
       return { ok: false, message: `Produit ${productId} introuvable dans l'offre store active.`, productId };
@@ -260,7 +353,7 @@ export async function purchaseSubscription(plan: SubscriptionPlan): Promise<Purc
   }
 }
 
-export async function restoreSubscription(): Promise<PurchaseResult> {
+export async function restoreSubscription(appUserId?: string): Promise<PurchaseResult> {
   const store = platformStore();
   if (!store) {
     return { ok: false, message: "La restauration est disponible dans l'app iOS ou Android." };
@@ -271,7 +364,7 @@ export async function restoreSubscription(): Promise<PurchaseResult> {
     return { ok: false, message: "La restauration est momentanément indisponible. Réessaie plus tard." };
   }
 
-  const Purchases = await configuredPurchases();
+  const Purchases = await configuredPurchases(appUserId);
   if (!Purchases?.configure) {
     return { ok: false, message: "Le module d'achat natif n'est pas disponible dans ce build." };
   }
