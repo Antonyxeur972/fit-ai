@@ -1,5 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import { Animated, Easing, Image, Linking, TouchableOpacity, View, Text, StyleSheet } from "react-native";
+import {
+  Animated,
+  Easing,
+  Image,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,9 +26,12 @@ import { colors, spacing, typography, radius } from "@/src/theme";
 
 export default function Login() {
   const router = useRouter();
-  const { signInWithGoogle, user, loading: authLoading, authError } = useAuth();
+  const { signInWithGoogle, signInForReview, user, loading: authLoading, authError } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewUsername, setReviewUsername] = useState("");
+  const [reviewPassword, setReviewPassword] = useState("");
 
   const displayError = error || authError;
 
@@ -28,7 +44,7 @@ export default function Login() {
         router.replace("/onboarding");
         return;
       }
-      const subscription = await getSubscriptionState();
+      const subscription = await getSubscriptionState(user.user_id);
       if (!mounted) return;
       if (subscription.active) {
         router.replace("/(tabs)/dashboard");
@@ -56,6 +72,19 @@ export default function Login() {
     }
   };
 
+  const onReviewSignIn = async () => {
+    if (!reviewUsername.trim() || !reviewPassword) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await signInForReview(reviewUsername.trim(), reviewPassword);
+    } catch (e: any) {
+      setError(e?.message || "Identifiants d'examen invalides");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <View style={styles.background}>
       <Image source={require("../assets/images/fitai-hero-progress-hd.png")} style={styles.backgroundImage} resizeMode="cover" />
@@ -67,7 +96,13 @@ export default function Login() {
         end={{ x: 0.9, y: 1 }}
       />
       <SafeAreaView style={styles.safe} edges={["top", "bottom"]} testID="login-screen">
-      <View style={styles.container}>
+      <KeyboardAvoidingView style={styles.safe} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.brandRow}>
           <View style={styles.heroLeaf}>
             <RotatingLeaf size={36} />
@@ -105,6 +140,49 @@ export default function Login() {
           testID="login-google-button"
           icon={<Ionicons name="logo-google" size={18} color="#fff" />}
         />
+        <TouchableOpacity
+          onPress={() => setReviewOpen((value) => !value)}
+          style={styles.reviewToggle}
+          accessibilityRole="button"
+          testID="login-review-toggle"
+        >
+          <Ionicons name="shield-checkmark-outline" size={15} color="rgba(255,255,255,0.68)" />
+          <Text style={styles.reviewToggleText}>Accès examen Google Play</Text>
+          <Ionicons name={reviewOpen ? "chevron-up" : "chevron-down"} size={15} color="rgba(255,255,255,0.68)" />
+        </TouchableOpacity>
+        {reviewOpen && (
+          <View style={styles.reviewPanel} testID="login-review-panel">
+            <TextInput
+              value={reviewUsername}
+              onChangeText={setReviewUsername}
+              placeholder="Identifiant d'examen"
+              placeholderTextColor="rgba(255,255,255,0.46)"
+              autoCapitalize="none"
+              autoCorrect={false}
+              style={styles.reviewInput}
+              testID="login-review-username"
+            />
+            <TextInput
+              value={reviewPassword}
+              onChangeText={setReviewPassword}
+              placeholder="Mot de passe"
+              placeholderTextColor="rgba(255,255,255,0.46)"
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+              style={styles.reviewInput}
+              testID="login-review-password"
+            />
+            <Button
+              title="Ouvrir le compte d'examen"
+              onPress={onReviewSignIn}
+              loading={loading}
+              disabled={!reviewUsername.trim() || !reviewPassword}
+              testID="login-review-submit"
+              icon={<Ionicons name="key-outline" size={18} color="#fff" />}
+            />
+          </View>
+        )}
         <Text style={styles.terms}>En continuant, tu acceptes nos conditions et notre politique de confidentialité.</Text>
         <View style={styles.legalLinks}>
           <TouchableOpacity onPress={() => Linking.openURL(`${BACKEND_URL}/terms`)} accessibilityRole="link">
@@ -115,7 +193,8 @@ export default function Login() {
             <Text style={styles.legalLink}>Confidentialité</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </ScrollView>
+      </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
   );
@@ -150,7 +229,8 @@ const styles = StyleSheet.create({
   background: { flex: 1, backgroundColor: "#06100B" },
   backgroundImage: { ...StyleSheet.absoluteFillObject, width: "100%", height: "100%", transform: [{ scale: 1.02 }] },
   safe: { flex: 1 },
-  container: { flex: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.xl },
+  scroll: { flex: 1 },
+  container: { flexGrow: 1, paddingHorizontal: spacing.lg, paddingTop: spacing.xl, paddingBottom: spacing.lg },
   heroLeaf: {
     width: 48,
     height: 48,
@@ -187,4 +267,31 @@ const styles = StyleSheet.create({
   legalLinks: { flexDirection: "row", justifyContent: "center", alignItems: "center", flexWrap: "wrap", gap: 8, marginTop: 6 },
   legalLink: { color: colors.primaryLight, fontSize: 12, lineHeight: 18, fontWeight: "700", textDecorationLine: "underline" },
   legalDot: { color: "rgba(255,255,255,0.45)" },
+  reviewToggle: {
+    minHeight: 42,
+    marginTop: spacing.sm,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+  reviewToggleText: { color: "rgba(255,255,255,0.68)", fontSize: 12, fontWeight: "600" },
+  reviewPanel: {
+    gap: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(3,14,10,0.78)",
+  },
+  reviewInput: {
+    minHeight: 48,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.18)",
+    backgroundColor: "rgba(255,255,255,0.08)",
+    color: colors.textMain,
+    paddingHorizontal: spacing.md,
+    fontSize: 15,
+  },
 });
