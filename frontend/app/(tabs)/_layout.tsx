@@ -20,7 +20,7 @@ export default function TabsLayout() {
         router.replace("/login");
         return;
       }
-      const subscription = await getSubscriptionState();
+      const subscription = await getSubscriptionState(user.user_id);
       if (!mounted) return;
       if (subscription.active) return;
       if (!user.onboarded || !user.mascot) {
