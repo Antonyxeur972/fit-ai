@@ -32,6 +32,7 @@ export type AppUser = {
       label?: string | null;
     }>;
   } | null;
+  reviewer_access?: boolean;
 };
 
 type AuthCtx = {
@@ -39,6 +40,7 @@ type AuthCtx = {
   loading: boolean;
   authError: string | null;
   signInWithGoogle: () => Promise<void>;
+  signInForReview: (username: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
   setUser: (u: AppUser | null) => void;
@@ -149,6 +151,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [processSessionId]);
 
+  const signInForReview = useCallback(async (username: string, password: string) => {
+    setAuthError(null);
+    const resp = await api<{ session_token: string; user: AppUser }>("/auth/review", {
+      method: "POST",
+      body: { username, password },
+      auth: false,
+      retries: 0,
+    });
+    await setToken(resp.session_token);
+    setUser(resp.user);
+  }, []);
+
   const signOut = useCallback(async () => {
     try {
       await api("/auth/logout", { method: "POST" });
@@ -158,7 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, authError, signInWithGoogle, signOut, refreshUser, setUser }}>
+    <AuthContext.Provider value={{ user, loading, authError, signInWithGoogle, signInForReview, signOut, refreshUser, setUser }}>
       {children}
     </AuthContext.Provider>
   );
