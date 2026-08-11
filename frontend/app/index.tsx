@@ -22,7 +22,7 @@ export default function Index() {
         router.replace("/onboarding");
         return;
       }
-      const subscription = await getSubscriptionState();
+      const subscription = await getSubscriptionState(user.user_id);
       if (!mounted) return;
       if (subscription.active) {
         router.replace("/(tabs)/dashboard");
