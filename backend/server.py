@@ -7,7 +7,9 @@ import uuid
 import json
 import re
 import hashlib
+import hmac
 import logging
+import secrets
 import unicodedata
 from pathlib import Path
 from datetime import datetime, timezone, timedelta, date as dt_date
@@ -48,6 +50,13 @@ AI_DAILY_LIMIT = int(os.environ.get("FITAI_AI_DAILY_LIMIT", "20"))
 AI_MONTHLY_LIMIT = int(os.environ.get("FITAI_AI_MONTHLY_LIMIT", "300"))
 AI_ESTIMATED_CENTS_PER_CALL = float(os.environ.get("FITAI_AI_ESTIMATED_CENTS_PER_CALL", "3"))
 ALGORITHM_ONLY_AI = os.environ.get("FITAI_ALGORITHM_ONLY", "").lower() in {"1", "true", "yes", "on"}
+PLAY_REVIEW_USERNAME = os.environ.get(
+    "FITAI_PLAY_REVIEW_USERNAME", "fitai-google-review"
+).strip()
+PLAY_REVIEW_PASSWORD_HASH = os.environ.get(
+    "FITAI_PLAY_REVIEW_PASSWORD_HASH",
+    "fe3ca396751d39914454ba2d04bc87480755c0fefbb350f503c3781b96295ea1",
+).strip().lower()
 CORS_ORIGINS = [
     origin.strip()
     for origin in os.environ.get("FITAI_CORS_ORIGINS", "*").split(",")
@@ -222,6 +231,11 @@ async def get_current_user(authorization: Optional[str]) -> dict:
 # --- Models ---
 class SessionLoginRequest(BaseModel):
     session_id: str
+
+
+class ReviewLoginRequest(BaseModel):
+    username: str = Field(min_length=3, max_length=100)
+    password: str = Field(min_length=8, max_length=200)
 
 
 class AuthMeResponse(BaseModel):
@@ -1807,6 +1821,90 @@ async def auth_session(body: SessionLoginRequest):
     }
 
 
+@api.post("/auth/review")
+async def auth_review(body: ReviewLoginRequest):
+    """Issue a reusable, store-review-only session without exposing a password."""
+    if not PLAY_REVIEW_USERNAME or len(PLAY_REVIEW_PASSWORD_HASH) != 64:
+        raise HTTPException(status_code=404, detail="Review access is not configured")
+
+    submitted_username = body.username.strip().lower()
+    expected_username = PLAY_REVIEW_USERNAME.lower()
+    submitted_hash = hashlib.sha256(body.password.encode("utf-8")).hexdigest()
+    credentials_valid = hmac.compare_digest(submitted_username, expected_username)
+    credentials_valid = credentials_valid and hmac.compare_digest(
+        submitted_hash, PLAY_REVIEW_PASSWORD_HASH
+    )
+    if not credentials_valid:
+        raise HTTPException(status_code=401, detail="Invalid review credentials")
+
+    user_id = "play_review_account"
+    review_email = (
+        PLAY_REVIEW_USERNAME
+        if "@" in PLAY_REVIEW_USERNAME
+        else "play-review@fit-ai.app"
+    )
+    mascot = {"animal": "aigle", "chosen_at": now_utc()}
+    await db.users.update_one(
+        {"user_id": user_id},
+        {
+            "$set": {
+                "email": review_email,
+                "name": "Equipe Google Play",
+                "picture": None,
+                "onboarded": True,
+                "reviewer_access": True,
+                "mascot": mascot,
+            },
+            "$setOnInsert": {"created_at": now_utc()},
+        },
+        upsert=True,
+    )
+
+    review_profile = ProfileIn(
+        weight_kg=75,
+        height_cm=175,
+        age=30,
+        gender="male",
+        goal="maintain",
+        activity_level="moderate",
+        health_data_consent=True,
+        legal_version="2026-08-10",
+    )
+    profile_doc = {
+        "user_id": user_id,
+        **review_profile.model_dump(exclude_none=True),
+        **compute_targets(review_profile),
+        "health_data_consent_at": now_utc(),
+        "updated_at": now_utc(),
+    }
+    await db.profiles.update_one(
+        {"user_id": user_id}, {"$set": profile_doc}, upsert=True
+    )
+
+    session_token = "review_" + secrets.token_urlsafe(48)
+    await db.user_sessions.insert_one(
+        {
+            "session_token": session_token,
+            "user_id": user_id,
+            "expires_at": now_utc() + timedelta(days=90),
+            "created_at": now_utc(),
+            "purpose": "google_play_review",
+        }
+    )
+    return {
+        "session_token": session_token,
+        "user": {
+            "user_id": user_id,
+            "email": review_email,
+            "name": "Equipe Google Play",
+            "picture": None,
+            "onboarded": True,
+            "reviewer_access": True,
+            "mascot": mascot,
+        },
+    }
+
+
 @api.get("/auth/me")
 async def auth_me(authorization: Optional[str] = Header(default=None)):
     user = await get_current_user(authorization)
@@ -1821,6 +1919,7 @@ async def auth_me(authorization: Optional[str] = Header(default=None)):
         "mascot": user.get("mascot"),
         "notif_prefs": user.get("notif_prefs"),
         "referral": user.get("referral"),
+        "reviewer_access": bool(user.get("reviewer_access", False)),
     }
 
 
