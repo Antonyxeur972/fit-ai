@@ -8,6 +8,7 @@ on:
     paths:
       - .github/workflows/eas-build-android.yml
       - frontend/app.json
+      - frontend/eas.json
       - frontend/assets/images/fitai-app-icon.png
 
 permissions:
