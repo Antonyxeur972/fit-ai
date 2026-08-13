@@ -1,0 +1,30 @@
+name: Archive Current Android Bundle
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/archive-current-android.yml
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    name: Archive signed Android bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download signed Android bundle
+        run: |
+          curl --fail --location --retry 3 --output fit-ai-production-v6.aab 'https://expo.dev/artifacts/eas/Ne-9f6UYw6dEhrjtM-wtuRj5cL3ZTmr6R9dfwyYXc68.aab'
+          unzip -t fit-ai-production-v6.aab
+
+      - name: Archive Android bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: fit-ai-android-production-v6
+          path: fit-ai-production-v6.aab
+          if-no-files-found: error
+          retention-days: 7
