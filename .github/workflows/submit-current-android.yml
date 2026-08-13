@@ -1,0 +1,40 @@
+name: Submit Current Android Bundle
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/submit-current-android.yml
+
+permissions:
+  contents: read
+
+jobs:
+  submit:
+    name: Submit Android bundle to Google Play
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install EAS CLI
+        run: npm install -g eas-cli
+
+      - name: Download validated Android bundle
+        run: |
+          curl --fail --location --retry 3 --output fit-ai-production-v6.aab 'https://expo.dev/artifacts/eas/Ne-9f6UYw6dEhrjtM-wtuRj5cL3ZTmr6R9dfwyYXc68.aab'
+          unzip -t fit-ai-production-v6.aab
+
+      - name: Submit to Google Play internal testing
+        run: |
+          cd frontend
+          eas submit --platform android --profile production --path ../fit-ai-production-v6.aab --non-interactive --wait
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
