@@ -27,6 +27,9 @@ jobs:
       - name: Install EAS CLI
         run: npm install -g eas-cli
 
+      - name: Install app dependencies
+        run: cd frontend && npm install --legacy-peer-deps
+
       - name: Download validated Android bundle
         run: |
           curl --fail --location --retry 3 --output fit-ai-production-v6.aab 'https://expo.dev/artifacts/eas/Ne-9f6UYw6dEhrjtM-wtuRj5cL3ZTmr6R9dfwyYXc68.aab'
