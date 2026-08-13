@@ -29,7 +29,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Install EAS CLI
         run: npm install -g eas-cli
@@ -38,7 +38,24 @@ jobs:
         run: cd frontend && npm install --legacy-peer-deps
 
       - name: Build Android production bundle
-        run: cd frontend && eas build --platform android --profile production --non-interactive --wait
+        id: eas_build
+        run: |
+          cd frontend
+          eas build --platform android --profile production --non-interactive --wait --json > ../eas-build.json
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
           EXPO_PUBLIC_BACKEND_URL: ${{ secrets.EXPO_PUBLIC_BACKEND_URL }}
+
+      - name: Download signed Android bundle
+        run: |
+          ARTIFACT_URL=$(node -e "const fs=require('fs'); const data=JSON.parse(fs.readFileSync('eas-build.json','utf8')); const build=Array.isArray(data)?data[0]:data; process.stdout.write(build.artifacts.applicationArchiveUrl)")
+          curl --fail --location --retry 3 --output fit-ai-production.aab "$ARTIFACT_URL"
+          unzip -t fit-ai-production.aab
+
+      - name: Archive Android bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: fit-ai-android-production
+          path: fit-ai-production.aab
+          if-no-files-found: error
+          retention-days: 7
