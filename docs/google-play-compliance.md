@@ -33,7 +33,7 @@ FIT AI n'est pas un dispositif médical, ne pose pas de diagnostic et ne fournit
 
 L'app est protégée par une connexion et un paywall. Un accès réservé aux examinateurs est disponible depuis « Accès examen Google Play » sur l'écran de connexion :
 
-- identifiant stable : `fitai-google-review` ;
+- identifiant stable : `fitai` ;
 - mot de passe réutilisable : enregistré uniquement dans la déclaration privée Play Console ;
 - accès Premium sans achat, sans essai et sans validation en deux étapes ;
 - profil de démonstration adulte préconfiguré.
