@@ -51,11 +51,11 @@ AI_MONTHLY_LIMIT = int(os.environ.get("FITAI_AI_MONTHLY_LIMIT", "300"))
 AI_ESTIMATED_CENTS_PER_CALL = float(os.environ.get("FITAI_AI_ESTIMATED_CENTS_PER_CALL", "3"))
 ALGORITHM_ONLY_AI = os.environ.get("FITAI_ALGORITHM_ONLY", "").lower() in {"1", "true", "yes", "on"}
 PLAY_REVIEW_USERNAME = os.environ.get(
-    "FITAI_PLAY_REVIEW_USERNAME", "fitai-google-review"
+    "FITAI_PLAY_REVIEW_USERNAME", "fitai"
 ).strip()
 PLAY_REVIEW_PASSWORD_HASH = os.environ.get(
     "FITAI_PLAY_REVIEW_PASSWORD_HASH",
-    "fe3ca396751d39914454ba2d04bc87480755c0fefbb350f503c3781b96295ea1",
+    "2f3d1df9c7cfecf36f42b1ea4d35456f0ba55ccd8ab5b586c9b2cda33d1db191",
 ).strip().lower()
 CORS_ORIGINS = [
     origin.strip()
