@@ -18,7 +18,7 @@ import { LinearGradient } from "expo-linear-gradient";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/src/auth";
-import { BACKEND_URL } from "@/src/api";
+import { BACKEND_URL, readableError } from "@/src/api";
 import { Button } from "@/src/components/UI";
 import { hasSignedCommitment } from "@/src/lib/commitment";
 import { getSubscriptionState } from "@/src/lib/subscription";
@@ -66,7 +66,7 @@ export default function Login() {
     try {
       await signInWithGoogle();
     } catch (e: any) {
-      setError(e?.message || "Échec de la connexion");
+      setError(readableError(e, "Échec de la connexion"));
     } finally {
       setLoading(false);
     }
@@ -79,7 +79,7 @@ export default function Login() {
     try {
       await signInForReview(reviewUsername.trim(), reviewPassword);
     } catch (e: any) {
-      setError(e?.message || "Identifiants d'examen invalides");
+      setError(readableError(e, "Identifiants d'examen invalides"));
     } finally {
       setLoading(false);
     }

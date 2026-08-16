@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, useCallback, ReactNode 
 import { Platform } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import * as Linking from "expo-linking";
-import { BACKEND_URL, api, getToken, setToken, clearToken } from "./api";
+import { BACKEND_URL, api, getToken, setToken, clearToken, readableError } from "./api";
 
 export type MascotAnimal = "lion" | "tigre" | "loup" | "ours" | "aigle";
 
@@ -87,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(resp.user);
     } catch (e: any) {
       console.warn("processSessionId failed", e);
-      setAuthError(e?.message || "Connexion échouée. Réessaie dans quelques secondes.");
+      setAuthError(readableError(e, "Connexion échouée. Réessaie dans quelques secondes."));
     }
   }, []);
 

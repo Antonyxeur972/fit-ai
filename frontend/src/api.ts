@@ -24,6 +24,38 @@ type ApiOpts = {
   retries?: number;
 };
 
+function messageFromValue(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (!value || typeof value !== "object") return "";
+
+  const record = value as Record<string, unknown>;
+  for (const key of ["msg", "message", "error"]) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  }
+  return "";
+}
+
+function apiErrorMessage(payload: unknown, status: number): string {
+  if (typeof payload === "string" && payload.trim()) return payload.trim();
+  if (payload && typeof payload === "object") {
+    const record = payload as Record<string, unknown>;
+    const detail = record.detail ?? record.message ?? record.error;
+    if (Array.isArray(detail)) {
+      const messages = detail.map(messageFromValue).filter(Boolean);
+      if (messages.length) return messages.join(" ");
+    }
+    const message = messageFromValue(detail);
+    if (message) return message;
+  }
+  return `Une erreur est survenue (HTTP ${status}).`;
+}
+
+export function readableError(error: unknown, fallback: string): string {
+  const message = messageFromValue(error);
+  return message && message !== "[object Object]" ? message : fallback;
+}
+
 async function fetchWithRetry(url: string, init: RequestInit, retries: number): Promise<Response> {
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -72,14 +104,12 @@ export async function api<T = unknown>(
   }
 
   if (!res.ok) {
-    let detail = "";
+    const rawBody = await res.text();
+    let payload: unknown = rawBody;
     try {
-      const j = await res.json();
-      detail = j.detail || JSON.stringify(j);
-    } catch {
-      detail = await res.text();
-    }
-    const err = new Error(detail || `HTTP ${res.status}`) as Error & { status?: number };
+      payload = rawBody ? JSON.parse(rawBody) : null;
+    } catch {}
+    const err = new Error(apiErrorMessage(payload, res.status)) as Error & { status?: number };
     err.status = res.status;
     throw err;
   }

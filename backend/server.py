@@ -235,7 +235,9 @@ class SessionLoginRequest(BaseModel):
 
 class ReviewLoginRequest(BaseModel):
     username: str = Field(min_length=3, max_length=100)
-    password: str = Field(min_length=8, max_length=200)
+    # The published Google Play review password is intentionally short and
+    # still verified against its SHA-256 hash below.
+    password: str = Field(min_length=1, max_length=200)
 
 
 class AuthMeResponse(BaseModel):
@@ -1825,7 +1827,7 @@ async def auth_session(body: SessionLoginRequest):
 async def auth_review(body: ReviewLoginRequest):
     """Issue a reusable, store-review-only session without exposing a password."""
     if not PLAY_REVIEW_USERNAME or len(PLAY_REVIEW_PASSWORD_HASH) != 64:
-        raise HTTPException(status_code=404, detail="Review access is not configured")
+        raise HTTPException(status_code=404, detail="Accès d'examen indisponible")
 
     submitted_username = body.username.strip().lower()
     expected_username = PLAY_REVIEW_USERNAME.lower()
@@ -1835,7 +1837,7 @@ async def auth_review(body: ReviewLoginRequest):
         submitted_hash, PLAY_REVIEW_PASSWORD_HASH
     )
     if not credentials_valid:
-        raise HTTPException(status_code=401, detail="Invalid review credentials")
+        raise HTTPException(status_code=401, detail="Identifiants d'examen invalides")
 
     user_id = "play_review_account"
     review_email = (
